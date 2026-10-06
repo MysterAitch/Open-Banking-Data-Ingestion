@@ -33,6 +33,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping
+from contextvars import Token
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -41,6 +42,7 @@ from secrets import token_urlsafe
 from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
+from . import values_sitting
 from .account_names import AccountShown, AccountsShown, accounts_shown, code_html
 from .accounts import AccountRecord, ArchiveOutcome
 from .actual_audit import (
@@ -3650,13 +3652,64 @@ class ConnectionHandler(
         # The layout marks the current section from this, and a handler thread
         # can serve several requests, so it is reset rather than left behind.
         marked = current_route.set(route)
+        in_sitting = self._enter_sitting(self.path)
         try:
             self._dispatch_get(parsed, route)
         except Exception as exc:
             self._report_fault("GET", route, exc)
         finally:
+            self._leave_sitting(in_sitting)
             current_route.reset(marked)
             _report_slow_route("GET", route, time.perf_counter() - began)
+
+    def _enter_sitting(self, where: str) -> tuple[Token[datetime | None], Token[str]]:
+        """Read this request's cookie into the context the pages render from.
+
+        `where` is the address a control may return to; a POST passes "" because an answer page
+        has no address that a GET could come back to.
+        """
+        until = values_sitting.sitting_end(self.headers.get("Cookie"), datetime.now(UTC))
+        return (
+            values_sitting.sitting.set(until),
+            values_sitting.address.set(values_sitting.local_address(where) if where else ""),
+        )
+
+    @staticmethod
+    def _leave_sitting(tokens: tuple[Token[datetime | None], Token[str]]) -> None:
+        values_sitting.sitting.reset(tokens[0])
+        values_sitting.address.reset(tokens[1])
+
+    def _unmasked_for_sitting(self, route: str, params: dict[str, list[str]]) -> bool:
+        """Answer a GET with the page's unmasked rendering where the sitting shows values.
+
+        Each page is sent down the code its own POST uses, with the query read as the form it
+        stands in for, so there is one unmasked rendering of each page and not two. True where
+        the page was answered. The ledger is not here: `_ledger` itself renders unmasked inside a
+        sitting, so that the answers to its saves do as well.
+        """
+        if not values_sitting.shown():
+            return False
+        if route == "/position":
+            self._position_post(params)
+        elif route == "/balance-chart":
+            self._balance_chart_post(params)
+        elif route == "/review":
+            self._review_page()
+        elif route == "/review-report":
+            self._review_report(masked=False)
+        elif route == "/agreements":
+            self._agreements_page(masked=False)
+        elif route == "/balance-walk":
+            self._balance_walk(masked=False)
+        elif route == "/balance-reconciliation":
+            self._balance_reconciliation(masked=False)
+        elif route == "/period-reconciliation":
+            self._period_reconciliation(masked=False, ref=params.get("ref", [""])[0].strip())
+        elif route == "/review-flags":
+            self._flags_post()
+        else:
+            return False
+        return True
 
     def _report_fault(self, method: str, route: str, exc: Exception) -> None:
         """Answer a request whose handler raised, instead of hanging up.
@@ -3708,6 +3761,8 @@ class ConnectionHandler(
     def _dispatch_get(self, parsed: ParseResult, route: str) -> None:
         params = parse_qs(parsed.query)
 
+        if self._unmasked_for_sitting(route, params):
+            return
         if route == "/account":
             self._account(params)
             return
@@ -4032,12 +4087,14 @@ class ConnectionHandler(
             "names, account names, dates, and verdicts only.</p>"
             '<form method="post" action="/agreements">'
             '<button class="button" type="submit" style="width:100%">'
-            "Show values</button></form>"
+            "Show values</button></form>" + values_sitting.show_everywhere_press()
             if masked
-            else '<p class="warn">Showing the real values: net totals, '
-            "amounts, and payee descriptions are visible.</p>"
-            '<p><a class="button" href="/agreements">'
-            "Back to the masked rendering</a></p>"
+            else values_sitting.unless_sitting(
+                '<p class="warn">Showing the real values: net totals, '
+                "amounts, and payee descriptions are visible.</p>"
+                '<p><a class="button" href="/agreements">'
+                "Back to the masked rendering</a></p>"
+            )
         )
         parts: list[str] = [
             showing,
@@ -5609,7 +5666,8 @@ class ConnectionHandler(
                     '<form method="post" action="/review">'
                     '<button class="button" type="submit" style="width:100%">'
                     "Show values and answer them</button></form>"
-                    "<table><tr><th>Group</th><th>Rows</th></tr>"
+                    + values_sitting.show_everywhere_press()
+                    + "<table><tr><th>Group</th><th>Rows</th></tr>"
                     if masked
                     else "<table><tr><th>Group</th><th>Rows</th><th>Answer</th></tr>"
                 )
@@ -5704,12 +5762,14 @@ class ConnectionHandler(
             "names, source names, and age bands only.</p>"
             '<form method="post" action="/review-report">'
             '<button class="button" type="submit" style="width:100%">'
-            "Show values</button></form>"
+            "Show values</button></form>" + values_sitting.show_everywhere_press()
             if masked
-            else '<p class="warn">Showing the real values: the '
-            "descriptions of the largest flagged clusters are visible.</p>"
-            '<p><a class="button" href="/review-report">'
-            "Back to the masked rendering</a></p>"
+            else values_sitting.unless_sitting(
+                '<p class="warn">Showing the real values: the '
+                "descriptions of the largest flagged clusters are visible.</p>"
+                '<p><a class="button" href="/review-report">'
+                "Back to the masked rendering</a></p>"
+            )
         )
         body = (
             "<p>A flag marks a transaction stored as new that looks like a "
@@ -5865,12 +5925,14 @@ class ConnectionHandler(
             "dates, and counts only.</p>"
             '<form method="post" action="/balance-reconciliation">'
             '<button class="button" type="submit" style="width:100%">'
-            "Show values</button></form>"
+            "Show values</button></form>" + values_sitting.show_everywhere_press()
             if masked
-            else '<p class="warn">Showing the real values: balances and '
-            "differences are visible.</p>"
-            '<p><a class="button" href="/balance-reconciliation">'
-            "Back to the masked rendering</a></p>"
+            else values_sitting.unless_sitting(
+                '<p class="warn">Showing the real values: balances and '
+                "differences are visible.</p>"
+                '<p><a class="button" href="/balance-reconciliation">'
+                "Back to the masked rendering</a></p>"
+            )
         )
         body = (
             "<p>For each account and day, the bank's closing balance is "
@@ -5930,12 +5992,14 @@ class ConnectionHandler(
             '<form method="post" action="/period-reconciliation">'
             + scope
             + '<button class="button" type="submit" style="width:100%">'
-            "Show values</button></form>"
+            "Show values</button></form>" + values_sitting.show_everywhere_press()
             if masked
-            else '<p class="warn">Showing the real values: figures and the '
-            "unmatched rows are visible.</p>"
-            f'<p><a class="button" href="{html.escape(back, quote=True)}">'
-            "Back to the masked rendering</a></p>"
+            else values_sitting.unless_sitting(
+                '<p class="warn">Showing the real values: figures and the '
+                "unmatched rows are visible.</p>"
+                f'<p><a class="button" href="{html.escape(back, quote=True)}">'
+                "Back to the masked rendering</a></p>"
+            )
         )
         if report is not None:
             from .web_period_reconciliation import period_reconciliation_body
@@ -5984,10 +6048,12 @@ class ConnectionHandler(
             '<p class="muted">Showing the masked rendering: counts and artefact names only.</p>'
             '<form method="post" action="/balance-walk">'
             '<button class="button" type="submit" style="width:100%">'
-            "Show values</button></form>"
+            "Show values</button></form>" + values_sitting.show_everywhere_press()
             if masked
-            else '<p class="warn">Showing the real values: balances are visible.</p>'
-            '<p><a class="button" href="/balance-walk">Back to the masked rendering</a></p>'
+            else values_sitting.unless_sitting(
+                '<p class="warn">Showing the real values: balances are visible.</p>'
+                '<p><a class="button" href="/balance-walk">Back to the masked rendering</a></p>'
+            )
         )
         body = (
             showing
@@ -6104,11 +6170,13 @@ class ConnectionHandler(
         # An answer page is marked with the section its action belongs to, as a GET is.
         marked = current_route.set(route)
         replying = answering.set(True)
+        in_sitting = self._enter_sitting("")
         try:
             self._dispatch_post()
         except Exception as exc:
             self._report_fault("POST", route, exc)
         finally:
+            self._leave_sitting(in_sitting)
             answering.reset(replying)
             current_route.reset(marked)
             _report_slow_route("POST", route, time.perf_counter() - began)
@@ -6133,6 +6201,12 @@ class ConnectionHandler(
                     "obdi's own pages.</p>",
                 ),
             )
+            return
+        if route == "/values-shown":
+            self._values_sitting_post(begin=True)
+            return
+        if route == "/values-hidden":
+            self._values_sitting_post(begin=False)
             return
         if route == "/ledger":
             # A POST because showing values is a decision, not a link.
@@ -7614,6 +7688,29 @@ class ConnectionHandler(
     def _redirect(self, location: str) -> None:
         self.send_response(302)
         self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _values_sitting_post(self, *, begin: bool) -> None:
+        """Begin or end the sitting, then go back to the page the press was made on.
+
+        Answered with a 303 so the browser fetches the page again as a GET, now carrying (or no
+        longer carrying) the cookie. The return address is validated as a path on this site.
+        """
+        form = self._read_form()
+        where = values_sitting.local_address(form.get(values_sitting.RETURN_FIELD, [""])[0])
+        secure = values_sitting.is_secure(
+            self.headers.get("X-Forwarded-Proto"), self.headers.get("Host")
+        )
+        cookie = (
+            values_sitting.shown_cookie(datetime.now(UTC), secure=secure)
+            if begin
+            else values_sitting.hidden_cookie(secure=secure)
+        )
+        self.send_response(303)
+        self.send_header("Location", where)
+        self.send_header("Set-Cookie", cookie)
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", "0")
         self.end_headers()
 

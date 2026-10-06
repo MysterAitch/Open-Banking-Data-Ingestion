@@ -34,6 +34,7 @@ from .navigation import navigation_html, with_way_out
 from .page_structure import structure_tables
 from .page_times import marks_as_html
 from .stylesheet import SERVED_STYLESHEET
+from .values_sitting import banner_html
 
 
 class CodeHandler(Protocol):
@@ -115,6 +116,7 @@ def render_page(
     if prefix:
         title = f"[{prefix}] {title}"
         body = banner + body
+    body = banner_html() + body
     body = structure_tables(marks_as_html(body), fallback_name=html.escape(title))
     classes = " ".join(part for part in ("wide" if wide else "", body_class) if part)
     return f"""<!doctype html>

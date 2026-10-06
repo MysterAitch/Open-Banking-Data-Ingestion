@@ -3,7 +3,9 @@
 A GET renders MASKED. Showing values takes a POST, answered directly with the
 unmasked page and never redirected, so no address a person can bookmark, paste
 into a note, or fetch from a script holds a value. The unmasked response is
-sent `no-store` so a browser history does not either.
+sent `no-store` so a browser history does not either. The one exception is a sitting that shows
+values (`values_sitting`): `_ledger` then renders unmasked for every request that carries a valid
+sitting cookie, still `no-store`, and the cookie is itself only ever begun by a POST.
 
 The decision about what a reader may see is not made in this file. Every record
 is wrapped in `masking.Disclosed` at the top of `render_ledger`, and from there
@@ -22,6 +24,7 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from . import values_sitting
 from .account_names import AccountShown, code_html
 from .account_page import (
     LOCKING_ANCHOR,
@@ -2826,7 +2829,7 @@ def _mode(view: Any, unmasked: bool, everything: bool = False, *, pressing: bool
     )
     around = {BALANCES_PARAM: BALANCES_ALL} if everything else {}
     if unmasked:
-        return (
+        return values_sitting.unless_sitting(
             '<p class="bad shown">'
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
@@ -2842,6 +2845,7 @@ def _mode(view: Any, unmasked: bool, everything: bool = False, *, pressing: bool
         + kept
         + submit_button("Show values", secondary=pressing)
         + "</form>"
+        + values_sitting.show_everywhere_press()
     )
 
 
@@ -3781,6 +3785,7 @@ class LedgerPages(AnswerPages):
         if not ref:
             self._respond(400, _page("No account named", "Say which account with ?ref=."))
             return
+        unmasked = unmasked or values_sitting.shown()
         today = datetime.now(UTC).date()
         default = DEFAULT_KEY
         if self.bound_config.window_default is not None:

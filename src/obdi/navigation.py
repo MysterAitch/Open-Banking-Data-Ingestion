@@ -132,6 +132,8 @@ SECTION_OF_ROUTE: dict[str, str] = {
     # housekeeping, the checks of the data's health, and the pages that exist to explain a fault
     # and the repairs.
     "/more": "more",
+    "/values-shown": "more",
+    "/values-hidden": "more",
     "/coverage": "more",
     "/review": "more",
     "/checks": "more",

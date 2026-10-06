@@ -17,6 +17,7 @@ from __future__ import annotations
 import html
 from typing import TYPE_CHECKING, Any
 
+from . import values_sitting
 from .callback import render_page
 from .logs import say
 from .masking import Disclosed
@@ -189,7 +190,7 @@ def _answered(items: Any) -> str:
 
 def _mode(unmasked: bool) -> str:
     if unmasked:
-        return (
+        return values_sitting.unless_sitting(
             '<p class="bad shown">VALUES ARE SHOWN on this page. It was produced by your '
             "request to show them, has no address of its own, and is not kept by the "
             "browser.</p>"
@@ -199,6 +200,7 @@ def _mode(unmasked: bool) -> str:
         f'<form method="post" action="{QUEUE}">'
         + submit_button("Show values", secondary=True)
         + "</form>"
+        + values_sitting.show_everywhere_press()
         + _disclosure(
             "What masked means",
             '<p class="sub">Amounts and descriptions are left out. Dates, sources, statuses, '

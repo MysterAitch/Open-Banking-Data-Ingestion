@@ -34,6 +34,7 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from . import values_sitting
 from .account_names import AccountShown
 from .accounts import BALANCE_ONLY_KIND
 from .callback import render_page
@@ -299,7 +300,7 @@ def _headline(view: Any, trust_lines: str = "") -> str:
 
 def _mode(unmasked: bool) -> str:
     if unmasked:
-        return (
+        return values_sitting.unless_sitting(
             '<p class="bad" style="border:2px solid;padding:.6rem;border-radius:.4rem">'
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
@@ -310,7 +311,10 @@ def _mode(unmasked: bool) -> str:
         f"total, so each shows as {MASKED_TOTAL} whatever its size: the number of "
         "digits in a total would say how much there is. Counts, dates, sources, "
         "directions, and flags are real.</p>"
-        '<form method="post" action="/position">' + submit_button("Show values") + "</form>"
+        '<form method="post" action="/position">'
+        + submit_button("Show values")
+        + "</form>"
+        + values_sitting.show_everywhere_press()
     )
 
 
