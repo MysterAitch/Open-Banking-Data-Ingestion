@@ -26,6 +26,43 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.354] - 2026-10-06
+
+Store schema 22: a store written by this version is refused by any earlier one
+(`StoreIsNewer`), as every schema change is. The first rebuild after the deploy
+extracts every kept PDF once to fill the new table, so its parse phase is
+longer that once.
+
+### Changed
+- **A statement is extracted once.** The owner's rule: a PDF is read as part
+  of a one-off import, and what is extracted from it - its text lines, the
+  word grid with its pages, the names found, the sections of an "all
+  accounts" document, and its masked shape - "only need to be created once
+  from pdf reading and this result can be stored. It only changes if the
+  extractor changes." The reading itself already was; the rest lived in
+  process memos and was re-extracted on every restart, so the kept-statements
+  listing read forty PDFs on its first load. Now `statement_extractions`
+  holds one row per document, keyed by digest and an extractor version
+  stated once; it is filled when a document is kept or imported and by the
+  rebuild for any document lacking a row at the current version, re-extracted
+  only when the version moves, and dropped and refilled from raw alone like
+  every derived table. No page reads a PDF: the listing, the Statements
+  page, Bring in's preview, the shape page, and a divided document's sections
+  read the stored row, and a document from before this version says "not yet
+  extracted; the next rebuild extracts it" until it has one. Measured over
+  forty invented PDFs in a fresh process: the listing 1.00 s and 40 reads to
+  0.02 s and none; the Statements page 1.03 s to 0.29 s.
+- **The large invented store rebuilds faithfully** (tests only): every feed,
+  aggregator, and export row is landed through a raw artefact in the
+  provider's own shape, so a rebuild reproduces its rows, sightings, and
+  pairs, and the rebuild's phase times at that size are measurements rather
+  than lower bounds. A page-equivalence harness renders a page with its
+  volatile parts normalised, for comparing two renderings of one page. The
+  read-model design (`docs/design/2026-10-read-model/`) records the
+  inventory behind the per-page statement budgets, the objective in seconds
+  on the real store, and the owner's decision that the stored read model
+  waits for measured pain rather than a schedule.
+
 ## [0.4.353] - 2026-10-06
 
 ### Added
