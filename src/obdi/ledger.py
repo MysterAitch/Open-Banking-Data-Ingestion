@@ -43,7 +43,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
@@ -319,6 +319,13 @@ class LedgerRow:
     #: The balance the account held after this row, signed, or "" where no balance of the account
     #: counts the row (`row_balances.balances_after`). A balance: its size is hidden when masked.
     balance_after: Total[str] = ""
+    #: The day the bank posted the row, as opposed to `dated`, the day it counted.
+    booked: Structural[date | None] = None
+    #: Where a confirmed transfer's other leg is listed: its row key and month (`OtherLeg`), and
+    #: the other account's label ("" where it has none).
+    transfer_other_anchor: Structural[str] = ""
+    transfer_other_month: Structural[str] = ""
+    transfer_other_label: Structural[str] = ""
 
 
 def row_anchor(entity_id: str) -> str:
@@ -976,6 +983,7 @@ def build_ledger(
     with_protection: bool = False,
     opening_reader: OpeningReader | None = None,
     window: LedgerWindow | None = None,
+    labels: Mapping[str, str] | None = None,
 ) -> Ledger:
     """The account's ledger for one month, or the newest month when `month` is None, or for a
     window of days when `window` is given (which `month` is then ignored for).
@@ -1018,6 +1026,7 @@ def build_ledger(
         check=check,
         opening_reader=opening_reader or effective_opening,
         window=window,
+        labels=labels or {},
     )
     return replace(built, archive=archive, removed_balances=_removed_balances(store, ref, built))
 
@@ -1054,6 +1063,7 @@ def _ledger_for(
     check: Check | None,
     opening_reader: OpeningReader,
     window: LedgerWindow | None,
+    labels: Mapping[str, str],
 ) -> Ledger:
     held = store.transactions_for_account(ref)
     members = [ref, *(families.spaces_of(ref) if families is not None else ())]
@@ -1206,7 +1216,21 @@ def _ledger_for(
                         if t.is_internal_transfer
                         else ""
                     ),
-                    transfer_other_account=other_side.get(t.entity_id, ""),
+                    transfer_other_account=(
+                        other_side[t.entity_id].account if t.entity_id in other_side else ""
+                    ),
+                    transfer_other_anchor=(
+                        other_side[t.entity_id].anchor if t.entity_id in other_side else ""
+                    ),
+                    transfer_other_month=(
+                        other_side[t.entity_id].month if t.entity_id in other_side else ""
+                    ),
+                    transfer_other_label=(
+                        labels.get(other_side[t.entity_id].account, "")
+                        if t.entity_id in other_side
+                        else ""
+                    ),
+                    booked=t.booking_date,
                     review_open=t.entity_id in open_reviews,
                     withheld=withheld,
                     unsendable=unsendable,
@@ -1437,12 +1461,24 @@ def unitemised_lines(opening: EffectiveOpening) -> tuple[UnitemisedLine, ...]:
     return tuple(lines)
 
 
-def _confirmed_other_sides(store: Store, ref: str) -> dict[str, str]:
-    """entity id -> the OTHER account of its confirmed pair, for this account's legs."""
-    found: dict[str, str] = {}
+@dataclass(frozen=True)
+class OtherLeg:
+    """The far side of a confirmed transfer, as far as a link to it needs."""
+
+    account: str
+    #: The other leg's row key (`row_anchor`) and the month it is dated in, which is where it is
+    #: listed and may differ from the month of this leg.
+    anchor: str
+    month: str
+
+
+def _confirmed_other_sides(store: Store, ref: str) -> dict[str, OtherLeg]:
+    """entity id -> the OTHER leg of its confirmed pair, for this account's legs."""
+    found: dict[str, OtherLeg] = {}
     for row in store.connection.execute(
         "SELECT p.debit_entity_id AS debit, p.credit_entity_id AS credit, "
-        "       d.account_id AS debit_account, c.account_id AS credit_account "
+        "       d.account_id AS debit_account, c.account_id AS credit_account, "
+        "       d.value_date AS debit_day, c.value_date AS credit_day "
         "FROM transfer_pairs p "
         "JOIN transactions d ON d.entity_id = p.debit_entity_id "
         "JOIN transactions c ON c.entity_id = p.credit_entity_id "
@@ -1450,9 +1486,17 @@ def _confirmed_other_sides(store: Store, ref: str) -> dict[str, str]:
         (ref, ref),
     ):
         if row["debit_account"] == ref:
-            found[str(row["debit"])] = str(row["credit_account"])
+            found[str(row["debit"])] = OtherLeg(
+                str(row["credit_account"]),
+                row_anchor(str(row["credit"])),
+                str(row["credit_day"])[:7],
+            )
         if row["credit_account"] == ref:
-            found[str(row["credit"])] = str(row["debit_account"])
+            found[str(row["credit"])] = OtherLeg(
+                str(row["debit_account"]),
+                row_anchor(str(row["debit"])),
+                str(row["debit_day"])[:7],
+            )
     return found
 
 

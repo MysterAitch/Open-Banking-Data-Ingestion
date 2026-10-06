@@ -349,10 +349,64 @@ def _sighting_line(sighting: Any) -> str:
     tail = f": {stated}" if stated else ""
     if sighting.words:
         tail += f"{'; ' if stated else ': '}says {_esc(word_text(sighting.words))}"
-    return f'<p class="muted">{code_html(sighting.source)} - {_esc(how)}{tail}</p>'
+    return (
+        f'<p class="muted">{code_html(sighting.source)} - {_esc(how)}{tail}</p>'
+        f"{_artefact_html(sighting)}"
+    )
 
 
-def _line_html(row: Any, line: str, more: str, *, running: bool = False) -> str:
+def _artefact_html(sighting: Any) -> str:
+    """Where the sighting above it came from: the day its capture was made, and a link to the
+    artefact's page where the store holds one. A sighting with neither says nothing of it. A
+    line of its own, so the sighting's own line keeps what it has always said."""
+    parts = []
+    if sighting.captured:
+        parts.append(f"captured {_esc(sighting.captured)}")
+    if sighting.artefact:
+        parts.append(
+            f'<a class="tap" href="/artefact?id={int(sighting.artefact)}">its artefact</a>'
+        )
+    return f'<p class="muted t-from">{", ".join(parts)}</p>' if parts else ""
+
+
+def _facts_html(row: Any) -> str:
+    """What a row's fold states beyond its own line, as a definition list: the day the bank
+    booked it where that is not the day on the line, where the other leg of a confirmed transfer
+    is listed, and where an open review flag is decided.
+
+    The status, sources, and flags (which include whether Actual is withheld the row) and what
+    each source stated are the lines beside it; the day the row counted, its amount, and its
+    description are the row's own line and are not said again, and nor is a booked day that is the
+    same one. Nothing is said of a row Actual is sent as usual: a fact true of every row is noise
+    on all of them. A link to the other leg names the month it is dated in and its row's id, which
+    opens it (`_OPEN_TARGETED_ROW`).
+    """
+    facts: list[tuple[str, str]] = []
+    if row.booked is not None and row.booked != row.dated:
+        facts.append(("Booked", f'<span class="mono">{_esc(row.booked.isoformat())}</span>'))
+    if row.transfer == "confirmed" and row.transfer_other_anchor:
+        other = AccountShown.named(row.transfer_other_account, row.transfer_other_label)
+        address = _url("/ledger", ref=row.transfer_other_account, month=row.transfer_other_month)
+        facts.append(
+            (
+                "Other leg",
+                f'<a class="tap" href="{address}#t-{_esc(row.transfer_other_anchor)}">'
+                f"{other.as_name()}</a> "
+                f'<span class="mono">{_esc(row.transfer_other_month)}</span>',
+            )
+        )
+    if row.review_open:
+        facts.append(("Review", '<a class="tap" href="/review-flags">Decide this flag</a>'))
+    if not facts:
+        return ""
+    return (
+        '<dl class="t-facts">'
+        + "".join(f"<dt>{_esc(name)}</dt><dd>{value}</dd>" for name, value in facts)
+        + "</dl>"
+    )
+
+
+def _line_html(row: Any, line: str, more: str) -> str:
     """The row's line, and everything else about it one tap away.
 
     Times are London time, the clock the rest of the page uses (`_CLOCK_NOTE`); a date is as stated.
@@ -365,7 +419,7 @@ def _line_html(row: Any, line: str, more: str, *, running: bool = False) -> str:
     """
     lines = "".join(_sighting_line(sighting) for sighting in row.sightings)
     return (
-        f'<details class="t-more"><summary class="t-row{" t-running" if running else ""}">{line}'
+        f'<details class="t-more"><summary class="t-row">{line}'
         '<span class="visually-hidden">What each source reported</span>'
         f'</summary><div class="t-extra">{more}{lines}</div></details>'
     )
@@ -448,6 +502,19 @@ def _row_rail(row: Any) -> str:
     return " doubtful" if row.one_source or row.dates_differ else ""
 
 
+#: Opens the row an address's fragment names, and every fold around it, on load and when the
+#: fragment changes. A fragment never reaches the server, so the page cannot open the row itself;
+#: and a closed `details` hides its content whatever a `:target` rule says, with no style able to
+#: set `open`. A link to the other leg of a transfer (`_facts_html`) lands on it open.
+_OPEN_TARGETED_ROW = (
+    "<script>(function(){function show(){var t=document.getElementById("
+    "decodeURIComponent(location.hash.slice(1)));"
+    "if(!t){return}for(var n=t;n;n=n.parentElement){if(n.tagName==='DETAILS'){n.open=true}}"
+    "var own=t.querySelector('details');if(own){own.open=true}"
+    "t.scrollIntoView()}show();addEventListener('hashchange',show)})();</script>"
+)
+
+
 def _balance_after_html(row: Any, unmasked: bool) -> str:
     """The balance after the row, quieter than its amount; a masked one is the sealed figure.
 
@@ -500,7 +567,7 @@ def _row_html(row: Any, unmasked: bool = True, *, running: bool = False) -> str:
         f'<span class="pill pill-quiet">{code_html(source)}</span> ' for source in row.sources
     )
     at = f" {_esc(_clock(row.feed_at))}" if row.feed_at is not None else ""
-    ident = f' id="row-{_esc(row.anchor)}"' if row.anchor else ""
+    ident = f' id="t-{_esc(row.anchor)}"' if row.anchor else ""
     line = (
         f'<span class="t-when mono nowrap" title="{_esc(row.dated.isoformat())}{at}">'
         f"{_esc(row.dated.isoformat())}</span>"
@@ -517,10 +584,9 @@ def _row_html(row: Any, unmasked: bool = True, *, running: bool = False) -> str:
     )
     more = (
         f'{stated}<p class="t-chips pills">{_status_pill(row)} {sources}{_row_flags(row)}</p>'
-        f"{counterparty}{dates}{annotation}"
+        f"{counterparty}{dates}{annotation}{_facts_html(row)}"
     )
-    opened = _line_html(row, line, more, running=running)
-    return f'<li class="txn{kind}{_row_rail(row)}"{ident}>{opened}</li>'
+    return f'<li class="txn{kind}{_row_rail(row)}"{ident}>{_line_html(row, line, more)}</li>'
 
 
 #: The counts that mean something only when they are not zero: the table's label,
@@ -3204,6 +3270,7 @@ def render_ledger(
             + _copies_html(
                 [_row_html(row, unmasked, running=view.running_shown) for row in copies]
             )
+            + _OPEN_TARGETED_ROW
         )
     return _frame(
         view,

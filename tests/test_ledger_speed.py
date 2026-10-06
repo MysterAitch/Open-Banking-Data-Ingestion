@@ -86,6 +86,8 @@ def reference_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ..
                 moments=moments,
                 change=change,
                 words=words,
+                artefact=detail.artefact,
+                captured=detail.captured,
             )
         )
     return tuple(views)

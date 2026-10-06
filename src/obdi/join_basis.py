@@ -132,6 +132,10 @@ class SightingView:
     change: Structural[str] = ""
     #: The coded words the sighting stated, in field order (`stated_words`).
     words: Structural[tuple[StatedWord, ...]] = ()
+    #: The artefact the view's first sighting came from (its page's number, 0 where none is held)
+    #: and the day it was captured; later sightings folded into the view came from others.
+    artefact: Structural[int] = 0
+    captured: Structural[str] = ""
 
 
 def how_words(view: SightingView) -> str:
@@ -259,6 +263,8 @@ def sighting_views(details: Sequence[SightingDetail]) -> tuple[SightingView, ...
                 moments=moments,
                 change=change,
                 words=words,
+                artefact=detail.artefact,
+                captured=detail.captured,
             )
         )
     return tuple(views)
