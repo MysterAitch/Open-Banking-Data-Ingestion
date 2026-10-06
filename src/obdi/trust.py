@@ -150,12 +150,16 @@ def trust_of(
     standing: AccountStanding | None,
     wanted: Sequence[tuple[date, date]] = (),
     today: date,
+    closed: date | None = None,
 ) -> Trust:
     """The trust of one account.
 
     `first` and `newest` are its first and newest transaction days (None where nothing is held),
     `standing` what `standing_data` read of it (None where that could not be read, which says
-    nothing rather than something false), `wanted` the days a file is wanted for.
+    nothing rather than something false), `wanted` the days a file is wanted for, `closed` the
+    day an archived account closed, where known. A balance stated after the close (a document
+    issued later still printing the account's balance) is one the account adds up to, and the
+    sentence says so beside the close rather than naming a day after it as if the account ran on.
     """
     marks = [Mark(MarkKind.FILE_WANTED, start, end) for start, end in sorted(wanted)]
     if first is None or newest is None:
@@ -189,7 +193,13 @@ def trust_of(
             else f"Locked in to {_iso(locked_to)}."
         )
     if through is not None and (locked_to is None or through > locked_to):
-        parts.append(f"{ADDS_UP.capitalize()} to the known balances to {_iso(through)}.")
+        if closed is not None and through > closed:
+            parts.append(
+                f"{ADDS_UP.capitalize()} to every known balance through its close on "
+                f"{_iso(closed)}, and to one stated after it, on {_iso(through)}."
+            )
+        else:
+            parts.append(f"{ADDS_UP.capitalize()} to the known balances to {_iso(through)}.")
     short = list(parts)
     if verdict == DOES_NOT_ADD_UP:
         held = own.held.day if own is not None and own.held is not None else None

@@ -238,9 +238,22 @@ def statement_periods(store: Store) -> list[StatementPeriod]:
     found: list[StatementPeriod] = []
     balances, _ = statement_balances(store)
     received = received_days(store)
+    # A section's balance (source "") has no kept reading of the whole document; its period and
+    # rows are the section's own. Keyed by the document, the account, and the closing day, which
+    # together name one section even where a document prints the same label twice. Without this
+    # every loan section on the real store had no start and no rows, was drawn on its closing day
+    # alone, and the statements lane broke at every turn of the year between documents.
+    sections = {
+        (assignment.digest, assignment.account_ref, section.reading.statement_date): section.reading
+        for assignment, section in assigned_sections(store)
+        if section is not None and not section.refusal
+    }
     for balance in balances:
-        kept = _kept_reading(store, balance.digest) if balance.source else None
-        reading = None if kept is None else kept[1]
+        if balance.source:
+            kept = _kept_reading(store, balance.digest)
+            reading = None if kept is None else kept[1]
+        else:
+            reading = sections.get((balance.digest, balance.account_ref, balance.day))
         dates = [] if reading is None else [row.value_date for row in reading.transactions]
         found.append(
             StatementPeriod(

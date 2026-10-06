@@ -158,6 +158,52 @@ class TestAnAccountTestedOnlyByItsStatement:
         assert shape(trust.stretches) == [("adds-up", "2026-07-05", "2026-09-30")]
 
 
+class TestAnArchivedAccountWithABalanceStatedAfterItsClose:
+    """A closed loan's last document was issued sixteen months after the close and prints a
+    closing balance at its own period's end. "Adds up to the known balances to 2026-08-10" beside
+    bars that end at the close in 2025 read as a contradiction - the owner asked whether a
+    statement's export date had been muddled with its "to" date. It had not: the sentence must
+    say the close, and that a balance after it is one the account also adds up to."""
+
+    def trust(self, closed: date | None) -> Trust:
+        return trust_of(
+            first=d("2022-05-04"),
+            newest=d("2025-04-30"),
+            standing=standing(
+                known_from="2022-05-04", known_to="2026-08-10", through="2026-08-10"
+            ),
+            today=TODAY,
+            closed=closed,
+        )
+
+    def test_ArchivedAccount_BalanceKnownAfterItsClose_SentenceNamesTheCloseAndTheLaterBalance(
+        self,
+    ) -> None:
+        trust = self.trust(d("2025-04-30"))
+
+        assert trust.sentence == (
+            "Adds up to every known balance through its close on 2025-04-30, and to one stated "
+            "after it, on 2026-08-10."
+        )
+        assert trust.short == trust.sentence
+
+    def test_ArchivedAccount_LatestBalanceOnItsCloseDay_SentenceIsTheOrdinaryOne(self) -> None:
+        trust = trust_of(
+            first=d("2022-05-04"),
+            newest=d("2025-04-30"),
+            standing=standing(
+                known_from="2022-05-04", known_to="2025-04-30", through="2025-04-30"
+            ),
+            today=TODAY,
+            closed=d("2025-04-30"),
+        )
+
+        assert trust.sentence == "Adds up to the known balances to 2025-04-30."
+
+    def test_LiveAccount_NeverSaysAClose(self) -> None:
+        assert "close" not in self.trust(None).sentence
+
+
 class TestAnAccountYoungerThanTheWindow:
     def test_Account_FirstTransactionTenWeeksAgo_BarStartsPartWayAlongWithABareLineBefore(
         self,

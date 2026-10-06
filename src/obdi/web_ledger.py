@@ -30,6 +30,7 @@ from .account_page import (
     LOCKING_ANCHOR,
     AccountReading,
     cannot_lock_yet_html,
+    closed_on,
     head_html,
     hold_is_said,
     lock_offer_html,
@@ -2969,13 +2970,7 @@ def _archive_html(view: Any, *, archive_wired: bool) -> str:
 
 def _closed_on(view: Any) -> date | None:
     """The day an archived account closed, where the page knows it; None for any other."""
-    archive = view.archive
-    if archive is None or archive.state != "archived":
-        return None
-    try:
-        return date.fromisoformat(str(archive.closed))
-    except ValueError:
-        return None
+    return closed_on(view.archive)
 
 
 def _head(view: Any) -> str:

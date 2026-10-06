@@ -114,14 +114,20 @@ class TestTwoSectionedStatementsWithNoBalances:
 
         assert statement_periods(store) == []
 
-    def test_ASectionThatStatesABalance_IsOfferedOnceFromItsBalanceAsItAlwaysWas(
+    def test_ASectionThatStatesABalance_IsOfferedOnceFromItsBalance_WithItsOwnPeriodAndRows(
         self, store, monkeypatch
     ):
+        """Offered once, from its balance - and with the period and rows the section states.
+        Read from the whole document's kept reading, which a divided document has none of, a
+        section's period was None and its rows unknown, so each loan section on the real store
+        was drawn on its closing day alone and the statements lane broke at every turn of the
+        year between one document's last payment and the next's first."""
         planted(monkeypatch, reading(*S1, closing=5000))
 
         periods = statement_periods(store)
 
-        assert [(p.opens, p.closing, p.closing_minor) for p in periods] == [(None, S1[1], 5000)]
+        assert [(p.opens, p.closing, p.closing_minor) for p in periods] == [(S1[0], S1[1], 5000)]
+        assert [(p.first_row, p.last_row) for p in periods] == [(S1[0], S1[0])]
 
     def test_ARefusedSection_IsNotOffered(self, store, monkeypatch):
         refused = reading(*S1)

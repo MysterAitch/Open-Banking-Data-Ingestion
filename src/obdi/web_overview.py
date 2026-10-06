@@ -521,6 +521,7 @@ def _trust_of(
         standing=account.standing,
         wanted=wanted.get(account.ref, ()),
         today=today,
+        closed=account.closed,
     )
 
 

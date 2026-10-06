@@ -93,6 +93,17 @@ def _month_end(month: str) -> date | None:
     return following - timedelta(days=1)
 
 
+def closed_on(archive: object) -> date | None:
+    """The day an archived account closed, from the ledger's archive note, where the note says
+    the account is archived and dates it; None for any other account."""
+    if archive is None or getattr(archive, "state", "") != "archived":
+        return None
+    try:
+        return date.fromisoformat(str(getattr(archive, "closed", "")))
+    except ValueError:
+        return None
+
+
 def read_account(config: object, ledger: Ledger, today: date) -> AccountReading:
     """The reading for the account `ledger` is of, as of `today`.
 
@@ -125,7 +136,14 @@ def read_account(config: object, ledger: Ledger, today: date) -> AccountReading:
     first = own.first if own is not None else _month_start(ledger.oldest_month)
     newest = own.newest if own is not None else _newest_of(ledger, today)
     wanted = wanted_days(report).get(ref, [])
-    trust = trust_of(first=first, newest=newest, standing=standing, wanted=wanted, today=today)
+    trust = trust_of(
+        first=first,
+        newest=newest,
+        standing=standing,
+        wanted=wanted,
+        today=today,
+        closed=closed_on(ledger.archive),
+    )
     todos: tuple[Todo, ...] = ()
     if overview is not None:
         everyone = grouped(build_todos(overview, report, _name_in(overview)))
