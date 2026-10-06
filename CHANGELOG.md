@@ -26,6 +26,41 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.341] - 2026-10-06
+
+### Changed
+- **Connections says which banks feed which accounts, when each last
+  answered, and asks for a Reconnect only where a consent is ending.** The
+  owner's grouping: "external places we actively send/push data out to" and
+  the places data is fetched from, "both being 'connections' generically".
+  Where data goes out: the budgeting tool's own verdict, when it was last
+  pushed and audited with ages, and the press that page offers. Where data
+  comes from: each bank and the bank's own feed, the accounts it feeds by
+  name, when it last answered, and "expires 2026-10-31 (in 25 days)"; a
+  Reconnect row only in a consent's last fourteen days or after it has
+  ended. Adding a bank, fetching now, extending history, and the scheduler
+  are one fold, which opens itself when something is wrong. A page that
+  offered Reconnect on every bank and explained consent per bank is 1.7
+  phone screens when busy and one when quiet.
+- **Position says what its net figure rests on.** Beside the figure: how
+  many accounts it counts and leaves out, the oldest "adds up to the known
+  balances to D" among the counted with its age, and the counted accounts
+  that rest on nothing checked, named. The counted accounts are the same
+  rows as Today, worst first, with the trust bar; those that add up fold
+  behind a count, so the page no longer grows with accounts that are in
+  order. Subtotals, assets, entitlements, limits, and the later-check detail
+  are one line or one fold each; the month table folds while masked. The
+  chart and its controls are as they were. Over the invented corpus the
+  page went from 5.9 phone screens to 3.65.
+
+### Not covered
+- Reconnect is no longer offered early for a connection with time left; the
+  "Add a bank" form with the same bank's name is the way to do that.
+- Position was measured over invented households, not the real store; its
+  height now depends on how many accounts do not add up.
+- The old connection rows remain in `web.py`, unused, to be removed once
+  the build on Bring in has merged.
+
 ## [0.4.340] - 2026-10-06
 
 ### Changed
