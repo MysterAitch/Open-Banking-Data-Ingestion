@@ -31,6 +31,17 @@ IGNORED_TRAILING: frozenset[str] = frozenset(
 #: written out.
 DROPPED = frozenset({"and"})
 
+#: Words that say nothing about who a payee is however they are placed, so they never open a
+#: group, make a rule, or count as a word two names share: the articles and joining words a
+#: printed name carries ("THE RANGE", "THE WORKS", "HOUSE OF FRASER"), and the titles a person's
+#: name is printed with. A word is otherwise judged common by following many different opening
+#: words (`entities.common_tokens`), and "the" opens names rather than following them, which is
+#: the case that rule cannot see.
+FUNCTION_WORDS = frozenset(
+    {"the", "a", "an", "of", "to", "for", "at", "by", "in", "on", "with", "from", "mr", "mrs",
+     "ms", "miss", "dr"}
+)
+
 #: Words of this length or fewer are never cut for a trailing plural: "bus" and "gas" are
 #: words, not "bu" and "ga".
 _PLURAL_FLOOR = 3
@@ -136,7 +147,8 @@ def tokens_of(shape: str) -> tuple[Token, ...]:
 
 def distinctive_words(shape_tokens: Sequence[Token]) -> frozenset[str]:
     """The comparable words of a name that can tell one payee from another: not a method word, not
-    an ignored code, not a word of `MIN_DISTINCTIVE_LETTERS` letters or fewer than that."""
+    an ignored code, not a function word, not a word of `MIN_DISTINCTIVE_LETTERS` letters or fewer
+    than that."""
     return frozenset(
         token.norm
         for token in shape_tokens
@@ -144,4 +156,5 @@ def distinctive_words(shape_tokens: Sequence[Token]) -> frozenset[str]:
         and token.norm not in METHOD_WORDS
         and token.norm not in IGNORED_TRAILING
         and token.norm not in DROPPED
+        and token.norm not in FUNCTION_WORDS
     )

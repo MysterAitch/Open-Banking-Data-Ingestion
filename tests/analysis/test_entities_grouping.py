@@ -273,6 +273,20 @@ class TestAWordIsCommonByWhereItAppearsNotHowOften:
         assert len(group.shapes) == 20 > MAX_SHAPES_PROPOSED
         assert found.too_broad == ()
 
+    def test_Proposal_WhenAnArticleOpensManyNames_ItIsNoBrandAndTheyAreNotOneGroup(self):
+        """"THE RANGE", "THE WORKS", and "THE ENTERTAINER" open with the same word, which the
+        commonness rule cannot see because "the" only ever opens; it is a function word, so it
+        is never distinctive and the three are not proposed as one payee."""
+        descriptions = ["THE RANGE", "THE WORKS", "THE ENTERTAINER", "THE RANGE", "THE WORKS"]
+
+        found = propose_groups(count_shapes(descriptions))
+        common = common_tokens(named_shapes(*descriptions))
+
+        assert "the" not in common
+        assert not is_distinctive("the", common)
+        assert found.groups == ()
+        assert found.too_broad == ()
+
     def test_Common_WhenPaymentFollowsFifteenDifferentBrands_ItIsCommon(self):
         brands = [f"{a}{b}" for a in "abc" for b in ("ford", "ham", "ley", "ton", "wick")]
         assert len(brands) == 15
