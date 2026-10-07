@@ -182,6 +182,22 @@ Target / accrual (what a category must hold by when; what a prepaid period costs
   are Lidl, with the store code kept as a site on the variant, exactly as printed. Per-store
   analysis is then a grouping of one entity's variants by site, with no further entities. So
   the hierarchy costs nothing until it is used, and nothing is lost by not using it.
+- **Kind of a recurring thing: pulled, scheduled, or habit.** The owner, 2026-10-07: "frequent
+  and recurring/scheduled payments are distinct ... when I go climbing on most (but not all)
+  Sunday mornings and pay a clean air zone charge, this will be seen as a regular/recurring
+  payment. The distinction is that I am actively pushing those payments out. This is different
+  to utilities and software subscriptions ... where the payments are pulled. Ditto direct
+  debits to make payments on a credit card ... the card provider pulling from the bank account
+  on the merchant's timeline/schedule not mine ... the absence of a Sunday payment doesn't mean
+  this is a missed subscription payment." So every series and every commitment has a KIND by
+  who initiates: PULLED (the other side takes it - a Direct Debit, a card-on-file charge, a
+  card provider collecting), SCHEDULED (the owner set it to run - a standing order, a scheduled
+  transfer), HABIT (the owner pays each time by choice). Stopped and missed are judged only for
+  pulled and scheduled; a habit is a pattern ("most Sundays, 38 of the last 52 weeks") for the
+  budget's expected spend and never a thing to do. Decided from the transaction type the
+  sources keep against the row where they do (a Direct Debit is pulled; a standing order is
+  scheduled), else from the series' shape (a steady amount on about the same day is pulled;
+  varying amounts on varying days is a habit), with the signal stated as the basis.
 - **Product.** What is bought from an entity that provides: M365 Family, 1 TB extra storage,
   Xbox Live. One provider, several products, each its own commitment. This is the owner's
   "noting e.g. Microsoft offer m365 plus additional storage plus Xbox live".
