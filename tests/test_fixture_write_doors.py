@@ -325,7 +325,9 @@ UNCONVERTED = {
 def _bypasses() -> list[tuple[str, str, str]]:
     """(file, table, enclosing function) for every raw insert under tests/."""
     found = []
-    for path in sorted(TESTS.glob("*.py")):
+    paths = sorted(TESTS.rglob("*.py"))
+    assert len(paths) > 300, f"read {len(paths)} files under {TESTS}; the walk has lost a directory"
+    for path in paths:
         # This file searches for the shape it is written in, so it matches its own
         # source. Every guard here has had the same self-trigger; skipping by name
         # is what the others settled on.

@@ -115,7 +115,9 @@ class TestEveryArrivalOrderIsReplayedDifferently:
 
 def modules_that_permute_arrivals_and_rebuild() -> set[str]:
     found = set()
-    for path in TESTS.glob("*.py"):
+    paths = sorted(TESTS.rglob("*.py"))
+    assert len(paths) > 300, f"read {len(paths)} files under {TESTS}; the walk has lost a directory"
+    for path in paths:
         source = path.read_text(encoding="utf-8")
         if re.search(r"\bpermutations\(", source) and "rebuild_from_raw" in source:
             found.add(path.name)
