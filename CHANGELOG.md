@@ -26,6 +26,17 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.365] - 2026-10-07
+
+### Fixed
+- **0.4.364 has no image.** Its CI build failed at the setup of two tests
+  whose module-scoped server met a half-set provider configuration left by
+  the module before it in the same worker - an order the package split
+  produced for the first time - and refused to build its web config. The two
+  fixtures that lacked the defence thirty others already carry (clear the
+  provider's client id and secret file before building) now carry it. This
+  version is 0.4.364 plus that; nothing the owner sees changes between them.
+
 ## [0.4.364] - 2026-10-07
 
 ### Added
