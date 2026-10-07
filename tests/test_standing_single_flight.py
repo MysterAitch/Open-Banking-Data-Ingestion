@@ -319,7 +319,8 @@ class TestTheMovementReportsOwnTiming:
     def test_Describe_WhenWorkedOut_SaysHowLongItTookAndWhen(self, store):
         text = self.report(store).describe()
 
-        assert text.splitlines()[-1] == "Worked out in 3.0 s at 14:02 UTC."
+        # The instant is 14:02 UTC in summer, shown on the owner's London clock.
+        assert text.splitlines()[-1] == "Worked out in 3.0 s at 15:02."
 
     def test_Describe_WhenBuiltByHand_SaysNothingOfTiming(self):
         from obdi.movement_completeness import MovementCompleteness

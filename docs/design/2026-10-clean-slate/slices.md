@@ -129,6 +129,20 @@ Seen on the real store the first time the rebuilt Today was read there (0.4.337,
 
 ## Roadmap - not next, but queued
 
+- **Halifax is migrating to Lloyds** (the owner, 2026-10-07). The accounts stay the same -
+  sort codes, account numbers, and card numbers do not change - so the rule is that an account
+  is its numbers, not the brand on the paper, and a brand change is never a new account. Three
+  capabilities, each built from the first real document or feed that shows the change, not in
+  advance: (1) a Halifax-layout statement printing "Lloyds" - the reader carries the second
+  name (the `also_named` mechanism withdrawn in 0.4.355 was the right shape for this and the
+  wrong one for Virgin Money, whose name was merely run together); (2) a statement on Lloyds'
+  own template - a new reader filing to the same account, matched by the printed sort code
+  and account number rather than the issuer; (3) the aggregator connection - a new consent
+  under Lloyds with new provider account ids binds to the same canonical account by the same
+  numbers, and the identity-health check says when a connection's account ids change rather
+  than treating them as new accounts. Also: the names-found scan should recognise "Lloyds" as
+  the same issuer family for these accounts once it appears.
+
 - **Everything known about an account, on its page** (asked 2026-10-06; widened the same day
   from "interest rates" to all of it). A declared account already carries more than any page
   shows: its kind, parent, opened and closed dates with how they came to be known
