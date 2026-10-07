@@ -1,0 +1,369 @@
+"""One entity's page (`/entity?id=N`): its names, its rules, and where it sits among the entities.
+
+The Entities page gathers names into entities; this is where one entity is looked after. It shows
+the name (to rename), its parent and children, every name under it - those the owner attached and
+those a rule matches ("by rule") - each opening to its transactions as the Entities page does,
+and the rules it keeps. A rule is added by hand with a dry run beside it: "Try" answers with the
+names the rule would attach and writes nothing (the pattern of the Bring in dry run), "Keep" saves
+it. A name a rule attached is split apart from the entity by an exclusion
+(`Store.exclude_shape`).
+
+A GET renders MASKED as the Entities page does: counts, sealed names and rule words, and the days
+the names were used, with no form that carries a name. The unmasked page is a POST's answer
+(`no-store`) or the values sitting's.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from ..analysis.entities import (
+    BEGINS,
+    CONTAINS,
+    OWNER_ROLE,
+    EntityPage,
+    EntityRefused,
+    RuleLine,
+    RuleTrial,
+    clean_rule,
+    rule_phrase,
+)
+from ..core.logs import say
+from ..core.plural import agree, plural
+from .callback import render_page
+from .navigation import page_name
+from .web_entities import (
+    ENTITY_ROUTE,
+    FOLD_ROUTE,
+    NAME_LENGTH,
+    EntitiesPages,
+    _across,
+    _by_rule_tag,
+    _count_or_rows,
+    _esc,
+    _masked_days,
+    _name_field,
+    _sealed,
+)
+from .web_entities import ROUTE as ENTITIES_ROUTE
+from .web_recurring import values_mode
+
+ROUTE = ENTITY_ROUTE
+RULE_ROUTE = "/entity-rule"
+RULE_TRIAL_ROUTE = "/entity-rule-try"
+RULE_REMOVE_ROUTE = "/entity-rule-remove"
+RENAME_ROUTE = "/entity-rename"
+SPLIT_ROUTE = "/entity-split"
+
+_KIND_LABELS = {BEGINS: "Begins with", CONTAINS: "Contains the words"}
+_KIND_CHOICES = {BEGINS: "begins with", CONTAINS: "contains, in any order"}
+
+
+@dataclass(frozen=True)
+class TrialShown:
+    """A dry run as the page shows it: what was asked, and what keeping it would do."""
+
+    kind: str
+    words: str
+    outcome: RuleTrial
+
+
+def entity_address(entity_id: int) -> str:
+    """Where an entity's page is."""
+    return f"{ROUTE}?id={entity_id}"
+
+
+def _hidden(entity_id: int) -> str:
+    return f'<input type="hidden" name="entity" value="{entity_id}">'
+
+
+def _family(page: EntityPage, *, unmasked: bool) -> str:
+    """Where the entity sits: the entity it is under and the entities under it, each a link."""
+
+    def link(entity_id: int, name: str) -> str:
+        shown = _esc(name) if unmasked else _sealed(name)
+        return f'<a class="tap" href="{_esc(entity_address(entity_id))}">{shown}</a>'
+
+    lines = []
+    if page.parent is not None:
+        lines.append(f"<p>Under {link(page.parent.id, page.parent.name)}.</p>")
+    if page.children:
+        items = "".join(f"<li>{link(c.id, c.name)}</li>" for c in page.children)
+        lines.append(f'<p>Entities under it:</p><ul class="ent-family">{items}</ul>')
+    return "".join(lines)
+
+
+def _names(page: EntityPage, *, unmasked: bool) -> str:
+    entity = page.entity
+    across = _across(len(entity.shapes), page.transactions)
+    if not entity.shapes:
+        return (
+            "<h3>Names</h3><p class=\"ent-why\">No name is under it yet. A name joins it when "
+            "you gather one under it, or when a rule below matches one.</p>"
+        )
+    if not unmasked:
+        return (
+            f'<h3>Names</h3><p class="ent-why">{across}.</p>'
+            f"{_masked_days(entity.shapes, page.view)}"
+        )
+    lines = "".join(
+        f'<li><span class="txt">{_esc(shape)}</span>{_by_rule_tag(shape, entity)}'
+        f"{_count_or_rows(shape, page.view)}"
+        f'<form method="post" action="{SPLIT_ROUTE}">'
+        f'<input type="hidden" name="shape" value="{_esc(shape)}">{_hidden(entity.id)}'
+        '<button class="tap" type="submit">Split apart</button></form></li>'
+        for shape in entity.shapes
+    )
+    return f'<h3>Names</h3><p class="ent-why">{across}.</p><ul class="ent-names">{lines}</ul>'
+
+
+def _rule_line(line: RuleLine, *, unmasked: bool) -> str:
+    rule = line.rule
+    label = _KIND_LABELS.get(rule.kind, rule.kind)
+    words = f"“{_esc(rule.words)}”" if unmasked else _sealed(rule.words)
+    matched = (
+        f"matches {plural(line.matches, 'name')}" if line.matches else "matches nothing yet"
+    )
+    drop = ""
+    if unmasked:
+        drop = (
+            f'<form method="post" action="{RULE_REMOVE_ROUTE}">'
+            f'<input type="hidden" name="rule" value="{rule.id}">{_hidden(rule.entity_id)}'
+            '<button class="tap" type="submit">Remove</button></form>'
+        )
+    return (
+        f'<li><span class="txt">{label} {words}</span>'
+        f'<span class="ent-count">{matched}</span>{drop}</li>'
+    )
+
+
+def _trial(tried: TrialShown) -> str:
+    """The answer to Try: the names the rule would attach, and that nothing was kept."""
+    outcome = tried.outcome
+    summary = f"Would attach {plural(len(outcome.attach), 'name')}"
+    also = []
+    if outcome.already:
+        also.append(f"{outcome.already:,} {agree(outcome.already, 'is')} already under it")
+    if outcome.elsewhere:
+        also.append(f"{outcome.elsewhere:,} stay under another entity")
+    tail = f" ({'; '.join(also)})" if also else ""
+    names = "".join(f'<li class="txt">{_esc(shape)}</li>' for shape in outcome.attach)
+    listing = f'<ul class="ent-names ent-trial-names">{names}</ul>' if names else ""
+    phrase = rule_phrase(*clean_rule(tried.kind, tried.words))
+    return (
+        '<section class="ent-trial">'
+        f"<p><strong>{summary}</strong>{tail}. Nothing has been kept; press Keep to save "
+        f"{_esc(phrase)} as a rule.</p>{listing}</section>"
+    )
+
+
+def _add_rule(page: EntityPage, tried: TrialShown | None, typed: tuple[str, str]) -> str:
+    kind, words = typed
+    options = "".join(
+        f'<option value="{k}"{" selected" if k == kind else ""}>{label}</option>'
+        for k, label in _KIND_CHOICES.items()
+    )
+    return (
+        "<h3>Add a rule</h3>"
+        f"{_trial(tried) if tried else ''}"
+        f'<form class="ent-rule-form" method="post" action="{RULE_ROUTE}">{_hidden(page.entity.id)}'
+        f'<label>Kind<select name="kind">{options}</select></label>'
+        f'<label>Words<input name="words" value="{_esc(words)}" maxlength="{NAME_LENGTH}" '
+        "required></label>"
+        '<div class="ent-rule-presses">'
+        f'<button class="tap secondary" type="submit" formaction="{RULE_TRIAL_ROUTE}">Try'
+        '</button><button class="tap" type="submit">Keep</button></div></form>'
+    )
+
+
+def _rules(
+    page: EntityPage, tried: TrialShown | None, typed: tuple[str, str], *, unmasked: bool
+) -> str:
+    if page.rules:
+        items = "".join(_rule_line(line, unmasked=unmasked) for line in page.rules)
+        listing = f'<ul class="ent-names ent-rules">{items}</ul>'
+    else:
+        listing = (
+            '<p class="ent-why">It keeps no rule, so only the names above are under it; '
+            "a new spelling of the payee has to be gathered under it by hand.</p>"
+        )
+    form = _add_rule(page, tried, typed) if unmasked else ""
+    return f"<h3>Rules</h3>{listing}{form}"
+
+
+def _looking_after(page: EntityPage) -> str:
+    """Rename it, or fold it into another entity: for an entity looked at unmasked."""
+    entity = page.entity
+    return (
+        '<details class="ent-fold"><summary>Rename it, or fold it into another entity</summary>'
+        f'<form method="post" action="{RENAME_ROUTE}">{_hidden(entity.id)}'
+        f"{_name_field(entity.name, 'Rename', label='Name')}</form>"
+        f'<form method="post" action="{FOLD_ROUTE}">{_hidden(entity.id)}'
+        f"{_name_field('', 'Fold into', label='Entity')}</form></details>"
+    )
+
+
+def render_entity(
+    page: EntityPage,
+    *,
+    unmasked: bool,
+    said: str = "",
+    refused: str = "",
+    tried: TrialShown | None = None,
+    typed: tuple[str, str] = (BEGINS, ""),
+) -> bytes:
+    """The page: `said` leads it as a quiet outcome, or `refused` as what was not done."""
+    entity = page.entity
+    lead = ""
+    if said:
+        lead = f'<p class="ok"><strong>{_esc(said)}</strong></p>'
+    elif refused:
+        lead = f'<p class="bad">{_esc(refused)}</p>'
+    name = _esc(entity.name) if unmasked else _sealed(entity.name)
+    role = ""
+    if entity.role == OWNER_ROLE:
+        role = (
+            '<p class="ent-why">Stands for you: the other side of payments between your own '
+            "accounts.</p>"
+        )
+    body = (
+        lead
+        + values_mode(entity_address(entity.id), unmasked=unmasked)
+        + f"<h2>{name}</h2>"
+        + role
+        + _family(page, unmasked=unmasked)
+        + _names(page, unmasked=unmasked)
+        + _rules(page, tried, typed, unmasked=unmasked)
+        + (_looking_after(page) if unmasked else "")
+        + f'<p><a class="tap" href="{ENTITIES_ROUTE}">All entities</a></p>'
+    )
+    return render_page(page_name(ROUTE), body, body_class="ent-page")
+
+
+class EntityPages(EntitiesPages):
+    """The entity page's routes, composed into the request handler."""
+
+    path: str
+
+    def _entity_requested(self, params: dict[str, list[str]]) -> int | None:
+        wanted = (params.get("id") or [""])[0].strip()
+        return int(wanted) if wanted.isdigit() else None
+
+    def _entity_missing(self) -> None:
+        self._respond(
+            404,
+            render_page(
+                page_name(ROUTE),
+                "<p>There is no such entity; it may have been removed.</p>"
+                f'<p><a class="tap" href="{ENTITIES_ROUTE}">All entities</a></p>',
+            ),
+        )
+
+    def _entity_render(
+        self,
+        entity_id: int | None,
+        *,
+        unmasked: bool,
+        said: str = "",
+        refused: str = "",
+        status: int = 200,
+        tried: TrialShown | None = None,
+        typed: tuple[str, str] = (BEGINS, ""),
+    ) -> None:
+        hook = self.bound_config.entity_page
+        if hook is None:
+            self._respond(404, render_page("Not available", "<p>Entities are not wired.</p>"))
+            return
+        if entity_id is None:
+            self._entity_missing()
+            return
+        try:
+            page = hook(entity_id)
+        except Exception as fault:
+            say("entity.fault", kind=type(fault).__name__)
+            self._respond(
+                500, render_page("Entity failed", "<p>The transactions could not be read.</p>")
+            )
+            return
+        if page is None:
+            if said:
+                self._entities_page(unmasked=True, said=said)
+            else:
+                self._entity_missing()
+            return
+        body = render_entity(
+            page, unmasked=unmasked, said=said, refused=refused, tried=tried, typed=typed
+        )
+        self._respond(status, body, no_store=unmasked)
+
+    def _entity_get(self, params: dict[str, list[str]]) -> None:
+        self._entity_render(self._entity_requested(params), unmasked=False)
+
+    def _entity_show(self, params: dict[str, list[str]]) -> None:
+        self._entity_render(self._entity_requested(params), unmasked=True)
+
+    def _entity_show_post(self) -> None:
+        from urllib.parse import parse_qs, urlparse
+
+        self._discard_small_body()
+        self._entity_show(parse_qs(urlparse(self.path).query))
+
+    def _entity_press_post(self, action: str) -> None:
+        form = self._read_form()
+        entity_id = self._entity_requested({"id": form.get("entity", [])})
+        hook = self.bound_config.entities_act
+        if hook is None:
+            self._respond(404, render_page("Not available", "<p>Entities are not wired.</p>"))
+            return
+        try:
+            said = hook(action, form)
+        except EntityRefused as refusal:
+            self._entity_render(entity_id, unmasked=True, refused=str(refusal), status=400)
+            return
+        except Exception as fault:
+            say("entity.press.fault", kind=type(fault).__name__)
+            self._entity_render(
+                entity_id,
+                unmasked=True,
+                refused="Nothing was changed, because of an unexpected fault.",
+                status=500,
+            )
+            return
+        self._entity_render(entity_id, unmasked=True, said=said)
+
+    def _entity_trial_post(self) -> None:
+        form = self._read_form()
+        entity_id = self._entity_requested({"id": form.get("entity", [])})
+        kind = (form.get("kind") or [""])[0].strip()
+        words = (form.get("words") or [""])[0]
+        hook = self.bound_config.entity_trial
+        if hook is None or entity_id is None:
+            self._entity_render(entity_id, unmasked=True)
+            return
+        try:
+            outcome = hook(entity_id, kind, words)
+        except EntityRefused as refusal:
+            self._entity_render(
+                entity_id,
+                unmasked=True,
+                refused=str(refusal),
+                status=400,
+                typed=(kind or BEGINS, words),
+            )
+            return
+        except Exception as fault:
+            say("entity.trial.fault", kind=type(fault).__name__)
+            self._entity_render(
+                entity_id,
+                unmasked=True,
+                refused="Nothing was tried, because of an unexpected fault.",
+                status=500,
+                typed=(kind or BEGINS, words),
+            )
+            return
+        self._entity_render(
+            entity_id,
+            unmasked=True,
+            tried=TrialShown(kind, words, outcome),
+            typed=(kind, words),
+        )

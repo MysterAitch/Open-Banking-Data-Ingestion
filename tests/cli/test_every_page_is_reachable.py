@@ -67,6 +67,8 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     build_scale_world(db)
     with Store(db) as store:
         keep(store, build_pdf(STATEMENT_LINES), "march.pdf")
+        # An entity page is reached from its name on the Entities page, so one has to exist.
+        store.create_entity("Walked entity", ["walked shape"])
     mp = pytest.MonkeyPatch()
     environment(mp, root)
     ConnectionStore(root / "connections.json").put(

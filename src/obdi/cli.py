@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
-from .analysis.entities import EntitiesView
+from .analysis.entities import EntitiesView, EntityPage, RuleTrial
 from .analysis.recurring import RecurringFindings
 from .core.errors import DataError
 from .core.money import parse_amount
@@ -3874,7 +3874,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             transactions = store.all_transactions()
             pairs = store.confirmed_transfer_pairs()
             held, _unusable = statement_balances(store)
-            gathered = {shape: name for shape, (_id, name) in store.shape_entities().items()}
+            from .analysis.entities import count_shapes
+            from .analysis.recurring import counts_as_occurrence
+
+            held_names = count_shapes(
+                t.description for t in transactions if counts_as_occurrence(t)
+            )
+            gathered = {
+                shape: name for shape, (_id, name) in store.shape_entities(held_names).items()
+            }
         closings: dict[str, list[tuple[date, int]]] = {}
         for closing in held:
             owed = (closing.day, closing.balance_minor)
@@ -3926,20 +3934,84 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                             row_anchor(t.entity_id),
                         )
                     )
+            counts = count_shapes(t.description for t in rows)
             return view_of(
-                count_shapes(t.description for t in rows),
-                store.entities_with_shapes(),
+                counts,
+                store.entities_with_shapes(counts),
                 count_row_legs((t.description, t.entity_id in leg_ids) for t in rows),
                 {shape: tuple(found) for shape, found in listed.items() if shape},
                 shape_counterparties((t.description, t.counterparty) for t in rows),
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
-        from .analysis.entity_actions import MERGE, OWN, apply_action
+        from .analysis.entity_actions import MERGE, OWN, SPLIT, apply_action
 
         with Store(db_path) as store:
-            known = _shape_counts(store) if action in (MERGE, OWN) else {}
+            known = _shape_counts(store) if action in (MERGE, OWN, SPLIT) else {}
             return apply_action(store, known, action, form)
+
+    def entity_page(entity_id: int) -> EntityPage | None:
+        """One entity with every name under it and the newest transactions of each: one
+        whole-table read of the transactions, whatever the store's size."""
+        from .analysis.entities import (
+            COVERED_SHOWN,
+            Covered,
+            count_shapes,
+            entity_page_of,
+            shape_of,
+        )
+        from .analysis.recurring import counts_as_occurrence
+        from .read.ledger import row_anchor
+
+        with Store(db_path) as store:
+            rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+            counts = count_shapes(t.description for t in rows)
+            entities = store.entities_with_shapes(counts)
+            found = next((e for e in entities if e.id == entity_id), None)
+            if found is None:
+                return None
+            names = account_names(store)
+            wanted = set(found.shapes)
+            listed: dict[str, list[Covered]] = {}
+            for t in sorted(rows, key=lambda r: (r.value_date, r.entity_id), reverse=True):
+                shape = shape_of(t.description)
+                if shape not in wanted:
+                    continue
+                shown = listed.setdefault(shape, [])
+                if len(shown) < COVERED_SHOWN:
+                    shown.append(
+                        Covered(
+                            t.value_date,
+                            t.account_id,
+                            names.of(t.account_id).label,
+                            t.amount_minor,
+                            t.currency,
+                            t.description,
+                            row_anchor(t.entity_id),
+                        )
+                    )
+            return entity_page_of(
+                entity_id,
+                entities,
+                store.entity_rules(),
+                counts,
+                {shape: tuple(covered) for shape, covered in listed.items()},
+            )
+
+    def entity_trial(entity_id: int, kind: str, words: str) -> RuleTrial:
+        """What keeping a rule on the entity would attach, writing nothing."""
+        from .analysis.entities import trial_rule
+
+        with Store(db_path) as store:
+            return trial_rule(
+                store.entities_with_shapes(),
+                store.entity_rules(),
+                store.entity_exclusions(),
+                _shape_counts(store).keys(),
+                entity_id,
+                kind,
+                words,
+            )
 
     def preview_kept_statement(artefact_id: int, account_id: str) -> MatcherPreview | None:
         """How the matcher would resolve a kept statement's transactions against an account,
@@ -4704,6 +4776,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         recurring_data=recurring_data,
         entities_data=entities_data,
         entities_act=entities_act,
+        entity_page=entity_page,
+        entity_trial=entity_trial,
         attempts_index=attempts_index,
         extend_max=extend_max,
         account_shape=account_shape,

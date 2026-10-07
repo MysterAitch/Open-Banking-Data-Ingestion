@@ -31,4 +31,11 @@ ENTITIES_STYLES = """
  .ent-more > summary, .ent-fold > summary { padding: var(--s2) 0; cursor: pointer; }
  .ent-children { margin: var(--s2) 0 0 var(--s3); padding-left: var(--s3); border-left: 2px solid var(--rule); }
  .ent-fold select { max-width: 100%; }
+ .ent-family { list-style: none; margin: 0 0 var(--s2); padding: 0; }
+ .ent-trial { border-left: 2px solid var(--rule); padding-left: var(--s3); margin: var(--s2) 0; }
+ .ent-rule-form { display: grid; gap: var(--s2); margin: var(--s2) 0; }
+ .ent-rule-form label { display: flex; align-items: center; gap: var(--s2); }
+ .ent-rule-form select, .ent-rule-form input { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+ .ent-rule-presses { display: flex; gap: var(--s2); }
+ .ent-rule { font: var(--text-sm)/130% var(--sans); color: var(--ink-2); white-space: nowrap; }
 """

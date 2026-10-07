@@ -166,7 +166,11 @@ class TestShowingValues:
         ]
         name = next(i for i in elements(form, "input") if i.attrs.get("name") == "name")
         assert name.attrs["value"] == "Fernhollow Grocers"
-        boxes = [i for i in elements(form, "input") if i.attrs.get("type") == "checkbox"]
+        boxes = [
+            i
+            for i in elements(form, "input")
+            if i.attrs.get("type") == "checkbox" and i.attrs.get("name") == "shape"
+        ]
         assert sorted(b.attrs["value"] for b in boxes) == sorted([LONDON, READING, EXPRESS])
         assert all("checked" in b.attrs for b in boxes)
         assert "all begin with “fernhollow grocers”" in response.text
@@ -194,7 +198,9 @@ class TestShowingValues:
             [
                 i.attrs["value"]
                 for i in elements(f, "input")
-                if i.attrs.get("type") == "checkbox" and "checked" in i.attrs
+                if i.attrs.get("type") == "checkbox"
+                and i.attrs.get("name") == "shape"
+                and "checked" in i.attrs
             ]
             for f in elements(parse(page), "form")
             if f.attrs.get("action") == "/entities-merge"
@@ -761,20 +767,32 @@ class TestFoldingOneEntityIntoAnother:
         assert response.status_code == 400
         assert "no entity called" in refusal_of(response.text)
 
-    def test_Fold_WhenValuesAreShown_EachEntityOffersAFoldPressAndTheMaskedPageOffersNone(
+    def test_Fold_WhenValuesAreShown_EachEntitysOwnPageOffersAFoldPressAndNeitherListsOffersOne(
         self, world
     ):
-        base, _db = world
+        # The press moved from the Entities page to the entity page (R2b), where an entity is
+        # looked after; the Entities page links each entity there instead.
+        base, db = world
         self.two_merges(base)
+        ids = [self.entity_id(db, "Fernhollow"), self.entity_id(db, "Fernhollow Express")]
 
-        forms = [
+        on_list = [
             f for f in elements(parse(shown(base)), "form")
             if f.attrs.get("action") == "/entities-fold"
         ]
+        pages = [httpx.post(f"{base}/entity?id={entity}", timeout=60).text for entity in ids]
+        on_pages = [
+            f
+            for page in pages
+            for f in elements(parse(page), "form")
+            if f.attrs.get("action") == "/entities-fold"
+        ]
         masked = httpx.get(f"{base}/entities", timeout=60).text
+        masked_page = httpx.get(f"{base}/entity?id={ids[0]}", timeout=60).text
 
-        assert len(forms) == 2
-        assert "/entities-fold" not in masked
+        assert on_list == []
+        assert len(on_pages) == 2
+        assert "/entities-fold" not in masked and "/entities-fold" not in masked_page
 
     def test_Fold_ThenSplitApart_FreesTheNameAndKeepsTheEntity(self, world):
         base, db = world

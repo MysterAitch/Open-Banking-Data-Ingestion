@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 
 from ..core.errors import DataError
@@ -60,6 +60,29 @@ class Entity:
     shapes: tuple[str, ...]
     #: What the entity is to the household (`OWNER_ROLE`), or None for a payee like any other.
     role: str | None = None
+    #: The names in `shapes` that are there only because a live rule of the entity matches them
+    #: (`with_rules`); the rest were attached by hand. Empty where rules were not applied.
+    by_rule: tuple[str, ...] = ()
+
+
+#: The two kinds of rule an entity keeps, said once here and everywhere else by name. BEGINS: the
+#: name begins with these words. CONTAINS: the name holds these words, in any order. A third kind
+#: or a side effect of a rule (a label, a category) is added by the work that needs it.
+BEGINS = "begins"
+CONTAINS = "contains"
+RULE_KINDS = (BEGINS, CONTAINS)
+
+
+@dataclass(frozen=True)
+class EntityRule:
+    """One rule an entity keeps: a name that matches it is under the entity without being
+    attached by hand, so a new variant of a payee attaches on sight."""
+
+    id: int
+    entity_id: int
+    kind: str
+    #: The words as kept: the rule's text in the form a name is held in (`_shape`).
+    words: str
 
 
 #: The words a bank prints for the date a card payment was made ("ON 12 APR"), which change with
@@ -139,6 +162,146 @@ def count_row_legs(named: Iterable[tuple[str, bool]]) -> dict[str, int]:
     return dict(counted)
 
 
+def clean_rule(kind: str, words: str) -> tuple[str, str]:
+    """The kind and the words of a rule as they are kept; refused where no name could match.
+
+    The words are held the way a name is (`_shape`: case folded, numbers and dates left out), so
+    a rule and the names it is read against are spelt alike. A rule must hold at least one word
+    that tells a payee apart (`distinctive_words`): one made of payment methods ("faster
+    payment") or single letters would match every payee that was paid that way.
+    """
+    if kind not in RULE_KINDS:
+        raise EntityRefused("A rule either begins with some words or contains them.")
+    text = _shape(words)
+    if not distinctive_words(tokens_of(text)):
+        raise EntityRefused(
+            "A rule needs at least one word that tells a payee apart; a payment method, a "
+            "single letter, or a number does not."
+        )
+    return kind, text
+
+
+def rule_phrase(kind: str, words: str) -> str:
+    """What a rule matches, said as a noun phrase: the one place a rule is put into words, so the
+    tick that offers it and the sentence that confirms it read alike."""
+    if kind == BEGINS:
+        return f"any name that begins with “{words}”"
+    return f"any name with the words “{words}” in any order"
+
+
+def _rule_norms(words: str) -> tuple[str, ...]:
+    return tuple(token.norm for token in tokens_of(words))
+
+
+def _matches(kind: str, wanted: Sequence[str], norms: Sequence[str]) -> bool:
+    if kind == BEGINS:
+        return len(norms) >= len(wanted) and tuple(norms[: len(wanted)]) == tuple(wanted)
+    return set(wanted) <= set(norms)
+
+
+def rule_matches(kind: str, words: str, shape: str) -> bool:
+    """Whether a rule of this kind and words matches the name (compared word by word as names
+    are compared elsewhere: a plural, a payment method before it, and a company form after it
+    make no difference)."""
+    wanted = _rule_norms(words)
+    return bool(wanted) and _matches(kind, wanted, _rule_norms(shape))
+
+
+def with_rules(
+    entities: Iterable[Entity],
+    rules: Iterable[EntityRule],
+    exclusions: Collection[tuple[int, str]],
+    known: Iterable[str],
+) -> list[Entity]:
+    """The entities with every name a live rule matches added to the names attached by hand.
+
+    THE ONE PLACE an entity's names are decided: a name is under an entity when it was attached
+    to it by hand, or when one of its rules matches it and the owner has not split it apart
+    from that entity (`exclusions` holds the entity and name). A name attached by hand to one
+    entity stays there whatever another entity's rule says. Where rules of two entities match
+    one name the rule of more words wins, then the older rule, so the answer is the same on
+    every read. A name two rules of one entity match is listed once. `known` is every name the
+    transactions hold; a rule matches nothing that is not among them.
+    """
+    made = list(entities)
+    held = {shape for entity in made for shape in entity.shapes}
+    live = {entity.id for entity in made}
+    ranked = sorted(
+        (
+            (rule, _rule_norms(rule.words))
+            for rule in rules
+            if rule.entity_id in live and rule.kind in RULE_KINDS
+        ),
+        key=lambda pair: (-len(pair[1]), pair[0].id),
+    )
+    won: dict[int, list[str]] = {}
+    if ranked:
+        for shape in sorted(set(known) - held):
+            norms = _rule_norms(shape)
+            for rule, wanted in ranked:
+                if (
+                    wanted
+                    and (rule.entity_id, shape) not in exclusions
+                    and _matches(rule.kind, wanted, norms)
+                ):
+                    won.setdefault(rule.entity_id, []).append(shape)
+                    break
+    return [
+        replace(
+            entity,
+            shapes=tuple(sorted({*entity.shapes, *won.get(entity.id, ())})),
+            by_rule=tuple(won.get(entity.id, ())),
+        )
+        for entity in made
+    ]
+
+
+@dataclass(frozen=True)
+class RuleTrial:
+    """What a rule would do if it were kept, worked out over the names held and written nowhere."""
+
+    #: The names that would come under the entity that are not under it now.
+    attach: tuple[str, ...]
+    #: Names the rule matches that are already under the entity.
+    already: int
+    #: Names the rule matches that stay under another entity (attached to it by hand, or won by
+    #: its rule).
+    elsewhere: int
+
+
+def trial_rule(
+    entities: Sequence[Entity],
+    rules: Sequence[EntityRule],
+    exclusions: Collection[tuple[int, str]],
+    known: Collection[str],
+    entity_id: int,
+    kind: str,
+    words: str,
+) -> RuleTrial:
+    """What keeping the rule on the entity would attach, by resolving the names twice: as they
+    stand, and with the rule added. `entities` are the entities with only their hand-attached
+    names; nothing is written, and a rule that cannot be kept is refused as keeping it would be."""
+    kept_kind, kept_words = clean_rule(kind, words)
+    if not any(entity.id == entity_id for entity in entities):
+        raise EntityRefused("There is no such entity; it may have been removed.")
+    before = with_rules(entities, rules, exclusions, known)
+    after = with_rules(
+        entities, [*rules, EntityRule(0, entity_id, kept_kind, kept_words)], exclusions, known
+    )
+    now = {name for entity in before if entity.id == entity_id for name in entity.shapes}
+    then = {name for entity in after if entity.id == entity_id for name in entity.shapes}
+    matched = {
+        shape
+        for shape in known
+        if (entity_id, shape) not in exclusions and rule_matches(kept_kind, kept_words, shape)
+    }
+    return RuleTrial(
+        attach=tuple(sorted(then - now)),
+        already=len(matched & now),
+        elsewhere=len(matched - then),
+    )
+
+
 @dataclass(frozen=True)
 class Proposal:
     """Shapes the rules think are one counterparty, for the owner to accept, trim, or ignore."""
@@ -154,9 +317,30 @@ class Proposal:
     #: The words every shape in the group begins with; empty where the group was joined through
     #: words reordered, which share no opening.
     opening: str = ""
+    #: The distinctive words every shape in the group holds, in the order the commonest one prints
+    #: them; what a "contains" rule is made of where the group has no opening.
+    shared: str = ""
     #: The merchant the bank names for the group where `BANK_NAMES` joined it, title-cased from
     #: its commonest spelling; the group's name is this. Empty otherwise.
     bank_name: str = ""
+
+    def rule(self) -> tuple[str, str] | None:
+        """The rule that joined the group, in the form the store keeps it, or None where the
+        reason gives none: all begin with the same words (a rule that begins with them), or the
+        same words in another order (a rule that contains them). None as well where those words
+        could not be kept as a rule (`clean_rule`), so the page never offers a rule the store
+        would refuse."""
+        for kind, words in (
+            (BEGINS, self.opening),
+            (CONTAINS, self.shared if SAME_WORDS in self.rules else ""),
+        ):
+            if not words:
+                continue
+            try:
+                return clean_rule(kind, words)
+            except EntityRefused:
+                return None
+        return None
 
 
 def _bank_key(counterparty: str) -> str:
@@ -304,6 +488,64 @@ def owner_group(
         shapes=tuple(mine),
         transactions=sum(counts[s] for s in mine),
         legs=sum(legs[s] for s in mine),
+    )
+
+
+@dataclass(frozen=True)
+class RuleLine:
+    """A rule an entity keeps and how many of the entity's names it matches now."""
+
+    rule: EntityRule
+    matches: int
+
+
+@dataclass(frozen=True)
+class EntityPage:
+    """Everything one entity's page says: the entity with every name under it, where it sits in
+    the family of entities, and its rules."""
+
+    #: The entity with its names resolved (`with_rules`).
+    entity: Entity
+    parent: Entity | None
+    children: tuple[Entity, ...]
+    rules: tuple[RuleLine, ...]
+    #: The counts and newest transactions of the entity's own names, in the form the Entities page
+    #: lists them, so a name opens to its transactions the same way on both.
+    view: EntitiesView
+
+    @property
+    def transactions(self) -> int:
+        return sum(self.view.counts.get(shape, 0) for shape in self.entity.shapes)
+
+
+def entity_page_of(
+    entity_id: int,
+    entities: Sequence[Entity],
+    rules: Sequence[EntityRule],
+    counts: Mapping[str, int],
+    covers: Mapping[str, tuple[Covered, ...]],
+) -> EntityPage | None:
+    """The page of one entity, or None where no entity not removed has that id. `entities` are
+    resolved (`with_rules`) and `rules` are the live rules of all of them."""
+    found = next((e for e in entities if e.id == entity_id), None)
+    if found is None:
+        return None
+    lines = tuple(
+        RuleLine(rule, sum(rule_matches(rule.kind, rule.words, s) for s in found.shapes))
+        for rule in rules
+        if rule.entity_id == entity_id
+    )
+    return EntityPage(
+        entity=found,
+        parent=next((e for e in entities if e.id == found.parent_id), None),
+        children=tuple(e for e in entities if e.parent_id == entity_id),
+        rules=lines,
+        view=EntitiesView(
+            counts=counts,
+            entities=(found,),
+            proposals=Proposals(groups=(), too_broad=()),
+            covers=covers,
+        ),
     )
 
 
@@ -487,6 +729,7 @@ def propose_groups(
         shared = _common_opening([named[s] for s in members])
         printed = [token.printed for token in named[best]]
         words = " ".join(printed[:shared] if shared else printed).split()
+        held_by_all = frozenset.intersection(*(_words(named[s]) for s in members))
         bank_name = ""
         if BANK_NAMES in rules:
             agreed = {
@@ -502,6 +745,7 @@ def propose_groups(
                         spellings[spelt] += rows
             bank_name = min(spellings, key=lambda s: (-spellings[s], s))
         proposal = Proposal(
+            shared=" ".join(token.printed for token in named[best] if token.norm in held_by_all),
             name=bank_name or " ".join(word.capitalize() for word in words),
             shapes=ordered,
             rules=rules,

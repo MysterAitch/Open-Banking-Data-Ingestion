@@ -32,6 +32,7 @@ from ..analysis.entities import (
     EntityRefused,
     Proposal,
     Suggestion,
+    rule_phrase,
 )
 from ..core.logs import say
 from ..core.masking import mask_text
@@ -54,6 +55,9 @@ RENAME_ROUTE = "/entities-rename"
 FOLD_ROUTE = "/entities-fold"
 OWN_ROUTE = "/entities-own"
 CHILD_ROUTE = "/entities-child"
+NEW_ROUTE = "/entities-new"
+#: Where one entity's page is (`web_entity`); the name of each entity here links to it.
+ENTITY_ROUTE = "/entity"
 
 #: How many proposed groups lead the page; the rest are behind one fold, so thirty names stay
 #: within three phone screens (`test_entities_phone_layout`).
@@ -193,6 +197,11 @@ def _ticks(
     return f'<ul class="ent-names">{"".join(items)}</ul>'
 
 
+def _by_rule_tag(shape: str, entity: Entity) -> str:
+    """"by rule" beside a name that is under the entity only because a rule of it matches."""
+    return '<span class="ent-rule">by rule</span>' if shape in entity.by_rule else ""
+
+
 def _name_field(value: str, press: str, *, label: str = "Name") -> str:
     """A name to type and the press that keeps it, on one line."""
     return (
@@ -214,7 +223,23 @@ def _group(group: Proposal, view: EntitiesView, *, unmasked: bool) -> str:
         f'<section class="ent-group"><form method="post" action="{MERGE_ROUTE}">'
         f"{_name_field(group.name, 'Merge')}"
         f"{_ticks(group.shapes, view, checked=True)}"
+        f"{_keep_rule(group)}"
         f'<p class="ent-why">{across}; {_why(group)}.</p></form></section>'
+    )
+
+
+def _keep_rule(group: Proposal) -> str:
+    """The tick that keeps the group's reason as a rule of the entity it makes, ticked unless the
+    owner removes it; nothing where the group's reason gives no rule."""
+    rule = group.rule()
+    if rule is None:
+        return ""
+    kind, words = rule
+    return (
+        f'<input type="hidden" name="rule_kind" value="{_esc(kind)}">'
+        f'<input type="hidden" name="rule_words" value="{_esc(words)}">'
+        '<label class="tick"><input type="checkbox" name="keep_rule" value="1" checked>'
+        f'<span class="txt">and {_esc(rule_phrase(kind, words))}</span></label>'
     )
 
 
@@ -309,32 +334,30 @@ def _entity(
     if inside:
         inside = f'<div class="ent-children">{inside}</div>'
     kind = "ent-entity ent-child" if nested else "ent-entity"
+    heading = "h4" if nested else "h3"
+    page = _esc(f"{ENTITY_ROUTE}?id={entity.id}")
     if not unmasked:
-        heading = "h4" if nested else "h3"
         return (
-            f'<section class="{kind}"><{heading}>{_sealed(entity.name)}</{heading}>'
-            f'<p class="ent-why">{across}.</p>{_masked_days(entity.shapes, view)}'
+            f'<section class="{kind}"><{heading}><a href="{page}">{_sealed(entity.name)}</a>'
+            f'</{heading}><p class="ent-why">{across}.</p>{_masked_days(entity.shapes, view)}'
             f"{could}{inside}</section>"
         )
     lines = "".join(
-        f'<li><span class="txt">{_esc(shape)}</span>{_count_or_rows(shape, view)}'
+        f'<li><span class="txt">{_esc(shape)}</span>{_by_rule_tag(shape, entity)}'
+        f"{_count_or_rows(shape, view)}"
         f'<form method="post" action="{SPLIT_ROUTE}">'
         f'<input type="hidden" name="shape" value="{_esc(shape)}">'
         '<button class="tap" type="submit">Split apart</button></form></li>'
         for shape in entity.shapes
     )
-    heading = "h4" if nested else "h3"
     return (
-        f'<section class="{kind}"><{heading}>{_esc(entity.name)}</{heading}>'
-        f'<p class="ent-why">{across}.</p><ul class="ent-names">{lines}</ul>{could}'
-        '<details class="ent-fold"><summary>Rename, fold, or make a name its own entity'
+        f'<section class="{kind}"><{heading}><a href="{page}">{_esc(entity.name)}</a>'
+        f'</{heading}><p class="ent-why">{across}.</p><ul class="ent-names">{lines}</ul>{could}'
+        '<details class="ent-fold"><summary>Rename, or make a name its own entity'
         "</summary>"
         f'<form method="post" action="{RENAME_ROUTE}">'
         f'<input type="hidden" name="entity" value="{entity.id}">'
         f"{_name_field(entity.name, 'Rename', label='Name')}</form>"
-        f'<form method="post" action="{FOLD_ROUTE}">'
-        f'<input type="hidden" name="entity" value="{entity.id}">'
-        f"{_name_field('', 'Fold into', label='Entity')}</form>"
         f"{_child_form(entity, nested=nested)}</details>{inside}</section>"
     )
 
@@ -342,12 +365,12 @@ def _entity(
 def _child_form(entity: Entity, *, nested: bool) -> str:
     """Make one of the entity's names an entity of its own, under it: for a name that is a
     different thing (a retailer's subscription service billed under a similar name). Only one
-    level is offered, and not for an entity with one name, which would be left with none."""
-    if nested or len(entity.shapes) < 2:
+    level is offered, and not for an entity with one name, which would be left with none; a name
+    a rule attached is not offered, since it is not held by hand to be moved."""
+    by_hand = [shape for shape in entity.shapes if shape not in entity.by_rule]
+    if nested or len(by_hand) < 2:
         return ""
-    options = "".join(
-        f'<option value="{_esc(shape)}">{_esc(shape)}</option>' for shape in entity.shapes
-    )
+    options = "".join(f'<option value="{_esc(shape)}">{_esc(shape)}</option>' for shape in by_hand)
     return (
         f'<form method="post" action="{CHILD_ROUTE}">'
         f'<input type="hidden" name="entity" value="{entity.id}">'
@@ -380,15 +403,36 @@ def _entities(view: EntitiesView, *, unmasked: bool) -> str:
 
 def _by_hand(view: EntitiesView) -> str:
     """The names under no entity, to tick from and gather under a name of the owner's choosing:
-    for the payees the rules leave, which are most of them."""
+    for the payees the rules leave, which are most of them. The fold also holds the form that
+    makes an entity with nothing attached, so it adds nothing to the page's height closed."""
     free = view.free_shapes()
     if not free:
-        return ""
+        return (
+            '<details class="ent-more"><summary>New entity</summary>'
+            f"{_new_entity(view)}</details>"
+        )
     return (
         f'<details class="ent-more"><summary>Gather names yourself '
         f"({plural(len(free), 'name')} under no entity)</summary>"
         f'<form method="post" action="{MERGE_ROUTE}">{_name_field("", "Merge")}'
-        f"{_ticks(free, view, checked=False, rows=False)}</form></details>"
+        f"{_ticks(free, view, checked=False, rows=False)}</form>"
+        f"<h3>New entity</h3>{_new_entity(view)}</details>"
+    )
+
+
+def _new_entity(view: EntitiesView) -> str:
+    """The form that makes an entity with no name attached: for an organisation that is never
+    paid, or whose names will come by rule. The entity it may sit under is chosen from those not
+    under another, since the page shows one level."""
+    live = {e.id for e in view.entities}
+    tops = [e for e in view.entities if e.parent_id not in live]
+    options = '<option value="">None</option>' + "".join(
+        f'<option value="{e.id}">{_esc(e.name)}</option>' for e in tops
+    )
+    return (
+        f'<form method="post" action="{NEW_ROUTE}">'
+        f"{_name_field('', 'Make it', label='Name')}"
+        f'<label>Under<select name="parent">{options}</select></label></form>'
     )
 
 

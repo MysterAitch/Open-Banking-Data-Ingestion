@@ -23,7 +23,12 @@ from large_store_pages import serving
 #: opens its own store and reads the declared accounts and the providers' landed names. None grows
 #: with the number of transactions, names, or entities: the covered rows come from the one
 #: whole-table read the page already made. The bound stays two above what was measured.
-ENTITIES_STATEMENTS = 23
+#:
+#: RE-MEASURED with entity rules and each entity's name linked to its page (R2b), warm: 21
+#: statements over the large store with no entity, and 23 with one entity keeping one rule
+#: (`test_entity_page_speed` holds that case). Where the two extra come from was not
+#: investigated. The bound stays two above the larger.
+ENTITIES_STATEMENTS = 25
 SECONDS = 5.0
 
 

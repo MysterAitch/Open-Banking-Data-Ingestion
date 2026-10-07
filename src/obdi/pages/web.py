@@ -43,7 +43,7 @@ from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from ..analysis import entity_actions
-from ..analysis.entities import EntitiesView
+from ..analysis.entities import EntitiesView, EntityPage, RuleTrial
 from ..analysis.recurring import RecurringFindings
 from ..core.classification import redact_summary
 from ..core.errors import DataError
@@ -132,7 +132,7 @@ from .web_empty import (
     empty_result_row,
     plan_from_audit,
 )
-from .web_entities import EntitiesPages
+from .web_entity import EntityPages
 from .web_flags import FlagPages
 from .web_ledger import LedgerPages
 from .web_marker import marker_result_row
@@ -652,6 +652,12 @@ class WebConfig:
     #: One press on the Entities page: (merge, split, or rename; the form it sent) to the
     #: sentence that says what was done. A refusal is an `EntityRefused`.
     entities_act: Callable[[str, dict[str, list[str]]], str] | None = None
+    #: One entity's page (`entities.EntityPage`) by its id, or None where no entity has it: the
+    #: entity page's one read.
+    entity_page: Callable[[int], EntityPage | None] | None = None
+    #: What keeping a rule would attach, worked out and written nowhere: (entity id, kind, words)
+    #: to the names it would attach. A rule that could not be kept is an `EntityRefused`.
+    entity_trial: Callable[[int, str, str], RuleTrial] | None = None
     #: The fetch-attempt ledger: every ask made of a provider, refused or
     #: landed, plus per-account call counts over the last day. The probing
     #: workflow is press, read, decide - and deciding needs this without a
@@ -3627,7 +3633,7 @@ class ConnectionHandler(
     CoverageTimelinePages,
     PositionPages,
     RecurringPages,
-    EntitiesPages,
+    EntityPages,
     DestinationPages,
     BringInPages,
     SetAsidePages,
@@ -3745,6 +3751,8 @@ class ConnectionHandler(
             self._recurring_post()
         elif route == "/entities":
             self._entities_page(unmasked=True)
+        elif route == "/entity":
+            self._entity_show(params)
         else:
             return False
         return True
@@ -3905,6 +3913,9 @@ class ConnectionHandler(
             return
         if route == "/entities":
             self._entities_get()
+            return
+        if route == "/entity":
+            self._entity_get(params)
             return
         if route == "/date-lag":
             self._date_lag()
@@ -6428,6 +6439,27 @@ class ConnectionHandler(
             return
         if route == "/entities-child":
             self._entities_press_post(entity_actions.CHILD)
+            return
+        if route == "/entities-new":
+            self._entities_press_post(entity_actions.NEW)
+            return
+        if route == "/entity":
+            self._entity_show_post()
+            return
+        if route == "/entity-rule":
+            self._entity_press_post(entity_actions.KEEP_RULE)
+            return
+        if route == "/entity-rule-remove":
+            self._entity_press_post(entity_actions.DROP_RULE)
+            return
+        if route == "/entity-rename":
+            self._entity_press_post(entity_actions.RENAME)
+            return
+        if route == "/entity-split":
+            self._entity_press_post(entity_actions.SPLIT)
+            return
+        if route == "/entity-rule-try":
+            self._entity_trial_post()
             return
         if route == "/review-flags-two":
             self._flags_answer_post(self._read_form(), one=False)
