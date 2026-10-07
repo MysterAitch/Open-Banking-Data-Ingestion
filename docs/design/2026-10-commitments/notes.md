@@ -264,6 +264,13 @@ the one-rule groups meeting the "fifty commonest tokens" floor: on a real store 
 tokens are the brands with the most variants, so a retailer's twenty towns were refused as
 too broad - a word is common by appearing after many different opening words, not by count.
 The Entities page serves in 0.9 s masked at this size (0.65 s before the drill-down folds).
+The owner's read of 0.4.367 (2026-10-07, with screenshots of a dozen groups, each with a true
+reason and its rule tick): "Seems to be substantially better. The remaining oddities/mismatches
+seem like they would be unfair to expect to be automated further." The residue he showed was
+one retailer's possessive printed two ways and a wallet prefix (both rules, 0.4.368) and the
+rest hand work by nature. So the text rules stop here; the next lift is R2c (the counterparty
+as the identifier, with the learned alias) and the owner's merges, not more rules. The
+too-broad groups were counted and shown nowhere; 0.4.368 lists them.
 The owner's first read of the 0.4.365 proposals (2026-10-07): "There are some good matches
 there but it's not good enough to blindly follow it." So: proposals stay one press per group
 with the names shown and the transactions one fold away, there is no merge-everything press,
