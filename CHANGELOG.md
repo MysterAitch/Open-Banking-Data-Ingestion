@@ -26,6 +26,34 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.356] - 2026-10-07
+
+### Added
+- **Recurring payments, found and shown.** The first slice of the next
+  phase - categorising, subscriptions and recurring payments, budgets -
+  built measurement first: a detector over every account's held
+  transactions finds series by payee shape (weekly, fortnightly,
+  four-weekly, monthly, quarterly, yearly; at least three occurrences, at
+  most a third missed), marks each as a payment, transfer, or income, and
+  as stopped or changed, and reports the account it is usually paid from
+  with any occurrence paid from another - a subscription paid from a
+  different account one month is not a missed month and a new thing, as
+  the owner asked. The masked page under More lists them by account in one
+  line each (payee shape masked, cadence and day in words, count and span,
+  amount sealed, drift as a percentage) with a summary line, a "Show
+  values" press, and the sitting. The page issues a fixed number of
+  statements whatever the store's size. Nothing is declared or stored by
+  this slice; the design notes for the phase (`docs/design/2026-10-commitments/`)
+  record what the detector decides, what it cannot tell, and the shape of
+  what follows - commitments as dated windows, display text as a layer
+  over the sources' texts, the backward and forward facets kept apart,
+  obdi as the master record projected to Actual or any tool, local models
+  inside obdi, a bank's category as evidence, and splits.
+- **The repository records its requirements** under `docs/requirements/`:
+  personas, use cases, numbered functional and non-functional requirements
+  with status and evidence, an edge-case catalogue of everything met, and
+  a glossary of the page words and the ones retired. BUILDING.md names it.
+
 ## [0.4.355] - 2026-10-07
 
 ### Fixed
