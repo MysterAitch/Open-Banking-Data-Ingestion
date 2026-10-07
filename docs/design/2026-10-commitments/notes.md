@@ -277,7 +277,25 @@ with the names shown and the transactions one fold away, there is no merge-every
 and the nudge gate (fewer than one wrong in ten) is not yet met by the rules alone; the
 count of wrong groups among the first twenty, and of what kind, is still to be taken.
 
+R2c, measured on the invented stores before the real one (counts; 0.4.367 against the build that
+names a row by `name_of`, `learned_links` joining the rows a source states no counterparty for):
+
+| Store | Names | Proposals (names covered) | Too broad | Series (stopped) |
+|---|---|---|---|---|
+| Large (6,617 rows, 453 with a counterparty) | 79 -> 68 (9 from the merchant name) | 29 (71) -> 27 (60) | none -> none | 18 (7) -> 18 (7) |
+| Three synthetic worlds, seeds 1-3 (206 rows, 147 with a counterparty, each) | 25/24/25 -> 21 (9 from the merchant name) | 5 (16/15/16) -> 3 (10) | none -> none | 5 (2) -> 5 (2) |
+
+The series and stopped counts do not move, which is what 0.4.361 failed (stopped 31 -> 36 on the
+real store). No row on these stores is named through a link: the constructed cases in
+`tests/pages/test_entities_rules.py` and `tests/analysis/test_entities_links.py` are the proof of
+the join, and the real store is the first place it will show. Prediction for it: habit 1, stopped
+about 31, series about 63, names well under 1,297.
+
 ## Rejected so far
+
+- **The withdrawn "bank names" proposal rule** (0.4.364, withdrawn with R2c): offered two names
+  as a merge to tick because their rows state one merchant. Rows that state one merchant are one
+  name once the counterparty is the identifier, so the question it asked has no remaining content.
 
 - **Grouping by account and payee** (the first version): refused when the owner said a
   subscription paid from another account one month is not missed. It also found more on the
