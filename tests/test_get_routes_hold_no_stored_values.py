@@ -239,7 +239,8 @@ def served(invented):
 def artefact_ids(db: Path) -> list[int]:
     with Store(db) as store:
         return [
-            int(row[0]) for row in store.connection.execute("SELECT rowid FROM raw_artefacts")
+            int(row[0])
+            for row in store.connection.execute("SELECT rowid FROM raw_artefacts ORDER BY rowid")
         ]
 
 
