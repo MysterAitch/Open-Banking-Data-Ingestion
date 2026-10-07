@@ -197,7 +197,17 @@ Target / accrual (what a category must hold by when; what a prepaid period costs
   budget's expected spend and never a thing to do. Decided from the transaction type the
   sources keep against the row where they do (a Direct Debit is pulled; a standing order is
   scheduled), else from the series' shape (a steady amount on about the same day is pulled;
-  varying amounts on varying days is a habit), with the signal stated as the basis.
+  varying amounts on varying days is a habit), with the signal stated as the basis. And a
+  missed PULLED payment is a question, not a verdict (the owner: "even pulled payments can
+  skip - for example if the direct debit has built enough a credit with a utility provider the
+  DD amount can change. Similarly, if a credit card is fully paid off and there are no new
+  transactions then there is nil minimum payment and no direct debit to take. This is what
+  happened to the capital one account earlier this year and is the reason that a statement for
+  that month doesn't exist."): obdi answers it from what it holds first - a card provider's
+  collection was not due when the card's statement balance was nil, which obdi knows; a
+  utility's changed amount is a new window - and reports a missed payment only when nothing
+  held explains it, showing the explanation when something does. The same fact answers Bring
+  in: a card month with no statement because nothing was due is not a wanted statement.
 - **Product.** What is bought from an entity that provides: M365 Family, 1 TB extra storage,
   Xbox Live. One provider, several products, each its own commitment. This is the owner's
   "noting e.g. Microsoft offer m365 plus additional storage plus Xbox live".
