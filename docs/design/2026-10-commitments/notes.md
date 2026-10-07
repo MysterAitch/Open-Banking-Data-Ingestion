@@ -246,6 +246,7 @@ A split whose parts do not sum to the amount is refused where it is made.
 | 0.4.359 (Entities page) | 61 | 52 / 8 / 1 | 50 / 7 / 4 | 31 (20) | 4 | 1,335 / 181 / 529 / 6 groups of 80 |
 | 0.4.361 (counterparty-first shape; a fault) | 61 | 53 / 8 / 0 | 46 / 7 / 8 | 36 (17) | 4 | 872 / 98 / 263 / 1 of 10 |
 | 0.4.365 (shape from the description; account-first split; rules) | 63 | 54 / 8 / 1 | 51 / 7 / 5 | 31 (19) | 5 | 1,297 / 158 / 830 / 0 |
+| 0.4.366 (fused word keeps its letters IN THE KEY - a fault; one rule per proposal) | 70 | 61 / 8 / 1 | 58 / 7 / 5 | 36 (20) | 5 | 1,326 / 186 / 699 / 6 groups of 89 |
 
 What the rows say: the four-slot rule removed sixteen fragments, thirteen of them stopped
 (0.4.357); keying the shape on a source-dependent field split one payee by source and cost the
@@ -253,6 +254,14 @@ habit (0.4.361, undone in 0.4.362); the account-first split finds one more payme
 income, and one more changed window than before (0.4.365, the same effect as the 12 -> 18 on
 the large invented store); and the method-word, token, one-word-opening, and bank-name rules
 cover 830 of 1,297 names in proposals against 529 of 1,335 before, with no group too broad.
+0.4.366's row is the same lesson as 0.4.361's at a smaller scale: keeping the letters of a
+word fused to a number changed the KEY rows are grouped by, so a payee printed with a
+reference on some rows ("REF0042" -> "ref") and not on others took two names, and seven series
+appeared, five of them stopped halves. A change made for comparison must not move the
+identity; the fused-letters rule moves to the comparison tokens. The six too-broad groups are
+the one-rule groups meeting the "fifty commonest tokens" floor: on a real store the commonest
+tokens are the brands with the most variants, so a retailer's twenty towns were refused as
+too broad - a word is common by appearing after many different opening words, not by count.
 The Entities page serves in 0.9 s masked at this size (0.65 s before the drill-down folds).
 The owner's first read of the 0.4.365 proposals (2026-10-07): "There are some good matches
 there but it's not good enough to blindly follow it." So: proposals stay one press per group
