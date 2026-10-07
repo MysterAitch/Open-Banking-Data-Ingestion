@@ -440,13 +440,25 @@ class TestTheDetectorKeysTwoSourcesOfOnePayeeAsOneSeries:
         )
         assert series.stopped is False
 
-    def test_Detector_WhenStatementMonthsPrintATruncation_TheHabitIsHalvedAndNothingIsGuessed(self):
+    def test_Detector_WhenStatementMonthsPrintAColumnCutTruncation_IsOneWeeklyHabit(self):
         rows = self._weekly_habit("DEPOT CLIMB BIRMINGH")
+
+        (series,) = find_recurring(rows, [], self.TODAY)
+
+        assert (series.shape, series.count, series.cadence) == (
+            "depot climb birmingham", 39, "weekly"
+        )
+        assert series.stopped is False
+
+    def test_Detector_WhenStatementMonthsPrintATwoLetterCut_TheHabitIsHalvedAndNothingIsGuessed(
+        self,
+    ):
+        rows = self._weekly_habit("DEPOT CLIMB BI")
 
         found = find_recurring(rows, [], self.TODAY)
 
         assert {(s.shape, s.count) for s in found} == {
-            ("depot climb birmingham", 20), ("depot climb birmingh", 19)
+            ("depot climb birmingham", 20), ("depot climb bi", 19)
         }
 
     def test_Detector_WhenTwoHousematesPayOneReference_AreTwoSeries(self):

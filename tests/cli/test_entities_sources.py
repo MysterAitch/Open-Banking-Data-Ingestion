@@ -28,6 +28,7 @@ from obdi.analysis.entities import (
     DESCRIPTION,
     MATCHED_NAME,
     STATED_NAME,
+    TRUNCATED_NAME,
     Covered,
     Entity,
     derivation_of,
@@ -137,6 +138,60 @@ class TestAMatchedDescriptionSaysItMatchedTheMerchantNameExactly:
 
         assert "which matches the bank&#x27;s merchant name" in page
         assert "exactly" in page
+
+
+class TestATruncatedDescriptionSaysItIsTheStartOfTheMerchantName:
+    ROWS = (
+        [("DCB", "Depot Climb Birmingham")] * 4
+        + [("DEPOT CLIMB BIRMINGH", "")] * 3
+    )
+
+    def test_Derivation_ForATruncatedRow_NamesTheMerchantNameItOpens(self):
+        row = covered("DEPOT CLIMB BIRMINGH", "", TRUNCATED_NAME, via="depot climb birmingh")
+
+        record = derivation_of("depot climb birmingham", (row,))
+
+        assert record.source == (
+            "description, a truncation of the bank's merchant name “depot climb birmingham”"
+        )
+        assert record.kinds == (TRUNCATED_NAME,)
+
+    def test_Summary_CountsTruncatedTransactionsAndNoName(self):
+        origins = name_origins(names_of(self.ROWS))
+        counts = {name: origin.rows for name, origin in origins.items()}
+        view = view_of(counts, [], origins=origins)
+
+        line = summary_line(view)
+
+        assert counts == {"depot climb birmingham": 7}
+        assert origins["depot climb birmingham"].truncated == 3
+        assert "3 transactions named by a description that is the cut-off start of" in line
+        assert "Names: 1 from the bank's merchant name;" in line
+
+    def test_MaskedPage_StillCountsTheTruncatedRowsAndNamesNothing(self):
+        origins = name_origins(names_of(self.ROWS))
+        counts = {name: origin.rows for name, origin in origins.items()}
+
+        page = render_entities(view_of(counts, [], origins=origins), unmasked=False).decode()
+
+        assert "3 transactions named by a description that is the cut-off start" in page
+        assert "depot" not in page.lower()
+
+    def test_Page_ListsTheTruncatedNamesFoldWithTheSentence(self):
+        origins = name_origins(names_of(self.ROWS))
+        counts = {name: origin.rows for name, origin in origins.items()}
+        covers = {
+            "depot climb birmingham": (
+                covered("DEPOT CLIMB BIRMINGH", "", TRUNCATED_NAME),
+                covered("DCB", "Depot Climb Birmingham", STATED_NAME),
+            )
+        }
+        held = Entity(1, "Depot", None, ("depot climb birmingham",))
+        view = view_of(counts, [held], None, covers, origins)
+
+        page = render_entities(view, unmasked=True).decode("utf-8")
+
+        assert "a truncation of the bank&#x27;s merchant name" in page
 
 
 class TestTheSummaryCountsNamesByKind:

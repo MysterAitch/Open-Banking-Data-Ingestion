@@ -36,6 +36,7 @@ from obdi.analysis.entities import (
     SHAPE_STEPS,
     SOURCE_ID,
     STATED_NAME,
+    TRUNCATED_NAME,
     Alias,
     counterparty_name,
     name_of,
@@ -133,7 +134,15 @@ class TestAnAliasNamesOnlyARowThatStatesNone:
 
 class TestTheLadderNamesARowByTheStrongestRungItCarries:
     def test_Ladder_IsStrongestFirstAndEveryKindHasASentence(self):
-        assert LADDER == (ACCOUNT, SOURCE_ID, STATED_NAME, ALIAS, MATCHED_NAME, DESCRIPTION)
+        assert LADDER == (
+            ACCOUNT,
+            SOURCE_ID,
+            STATED_NAME,
+            ALIAS,
+            MATCHED_NAME,
+            TRUNCATED_NAME,
+            DESCRIPTION,
+        )
         assert set(LADDER) <= set(KIND_SENTENCES)
 
     def test_Name_WhenARowCarriesTheOtherPartysAccount_ThatNamesItWhateverIsStated(self):

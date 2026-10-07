@@ -31,6 +31,7 @@ from ..analysis.entities import (
     OPENING_WORDS,
     SAME_WORDS,
     SHAPE_STEPS,
+    TRUNCATED_NAME,
     Covered,
     Derivation,
     EntitiesView,
@@ -86,7 +87,7 @@ def _sources_sentence(view: EntitiesView) -> str:
     parts = [
         f"{by_kind[kind]:,} from the {KIND_SENTENCES[kind]}"
         for kind in LADDER
-        if by_kind[kind] and kind not in (ALIAS, MATCHED_NAME)
+        if by_kind[kind] and kind not in (ALIAS, MATCHED_NAME, TRUNCATED_NAME)
     ]
     linked = sum(origin.linked for origin in view.origins.values())
     if linked:
@@ -96,6 +97,12 @@ def _sources_sentence(view: EntitiesView) -> str:
         parts.append(
             f"{plural(matched, 'transaction')} named by a description that matches a "
             "merchant name exactly"
+        )
+    truncated = sum(origin.truncated for origin in view.origins.values())
+    if truncated:
+        parts.append(
+            f"{plural(truncated, 'transaction')} named by a description that is the cut-off "
+            "start of a merchant name"
         )
     return f" Names: {'; '.join(parts)}." if parts else ""
 

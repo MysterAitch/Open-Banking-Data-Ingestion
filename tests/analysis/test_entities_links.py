@@ -29,6 +29,7 @@ from obdi.analysis.entities import (
     DESCRIPTION,
     MATCHED_NAME,
     STATED_NAME,
+    TRUNCATED_NAME,
     Alias,
     learned_links,
     names_of,
@@ -131,8 +132,8 @@ class TestADescriptionThatMatchesAStatedNameExactlyIsThatParty:
         statement never prints, so no payment seen by both); six statement rows describe it
         "DEPOT CLIMB BIRMINGHAM GB" and state nothing. The statement rows compare equal to the
         stated name once the country code is set aside: one name, six rows of kind MATCHED_NAME.
-      - The statement printing "DEPOT CLIMB BIRMINGH" (a truncation) compares unequal: no link,
-        two names, the statement's by description.
+      - The statement printing "DEPOT CLIMB BIRMINGH" (a truncation) is not equal, so it is not
+        this rung's: `TestADescriptionCutOffAtAFixedWidthIsThePartyItOpens` takes it.
       - Two stated parties whose comparison forms coincide ("Depot Climb Birmingham" and
         "DEPOT CLIMBS BIRMINGHAM LTD") leave the statement rows linked to neither.
       - A payment seen by both is stronger evidence than a text match: where the feed's
@@ -152,13 +153,10 @@ class TestADescriptionThatMatchesAStatedNameExactlyIsThatParty:
         assert Counter(n.kind for n in named) == {STATED_NAME: 6, MATCHED_NAME: 6}
         assert {n.via for n in named if n.kind == MATCHED_NAME} == {"depot climb birmingham gb"}
 
-    def test_Names_WhenTheStatementPrintsATruncation_NothingIsMatchedAndThereAreTwoNames(self):
+    def test_Names_WhenTheStatementPrintsATruncation_ItIsNotAnExactMatch(self):
         rows = self.FEED + [("DEPOT CLIMB BIRMINGH", "")] * 6
 
-        named = names_of(rows)
-
-        assert {n.name for n in named} == {"depot climb birmingham", "depot climb birmingh"}
-        assert Counter(n.kind for n in named) == {STATED_NAME: 6, DESCRIPTION: 6}
+        assert MATCHED_NAME not in kinds(rows)
 
     def test_Names_WhenTheStatementPrintsOnlyTheOpeningWords_NothingIsMatched(self):
         rows = self.FEED + [("DEPOT CLIMB", "")] * 6
@@ -188,3 +186,129 @@ class TestADescriptionThatMatchesAStatedNameExactlyIsThatParty:
         rows = [("MS", "M&S")] * 2 + [("M S GB", "")] * 3
 
         assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 2, DESCRIPTION: 3}
+
+
+class TestADescriptionCutOffAtAFixedWidthIsThePartyItOpens:
+    """KNOWN ANSWERS, decided before the first run (public venue and chain names; no real figures).
+
+    A statement column that stops a merchant at a fixed width prints "DEPOT CLIMB BIRMINGH" for a
+    party a feed states as "Depot Climb Birmingham". The statement rows state nothing, and no
+    payment is seen by both (the feed's descriptions are a code, "DCB").
+
+      - "DEPOT CLIMB BIRMINGH": one name, kind TRUNCATED_NAME, the party's.
+      - "DEPOT CLIMB" (two whole words, the party has a third): a truncation too.
+      - "DEPOT" (one short word): a shared opening, not a truncation; stays its description.
+      - "TESCO STORES BIRM" with both "Tesco Stores Birmingham" and "Tesco Stores Birkenhead"
+        stated: two candidates, so neither.
+      - "TESCO STORES" with "Tesco Stores" stated: exact, so MATCHED_NAME and not this rung.
+      - "DEPOT CLIMB BI" (a two-letter cut): not enough letters; stays its description.
+      - One long word ("BRAMBLEWICKLE") that is a strict prefix of one stated single word is a
+        truncation; the same word against a stated name of several words is not.
+      - A shape that rows also state a counterparty for is the learned link's (ALIAS).
+    """
+
+    FEED = [("DCB", "Depot Climb Birmingham")] * 6
+
+    def test_Names_WhenTheStatementCutsTheLastWordShort_AreOneNameTruncated(self):
+        rows = self.FEED + [("DEPOT CLIMB BIRMINGH", "")] * 6
+
+        named = names_of(rows)
+
+        assert {n.name for n in named} == {"depot climb birmingham"}
+        assert Counter(n.kind for n in named) == {STATED_NAME: 6, TRUNCATED_NAME: 6}
+        assert {n.via for n in named if n.kind == TRUNCATED_NAME} == {"depot climb birmingh"}
+
+    def test_Names_WhenTheStatementKeepsOnlyWholeOpeningWords_AreTruncated(self):
+        rows = self.FEED + [("DEPOT CLIMB", "")] * 6
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 6, TRUNCATED_NAME: 6}
+
+    def test_Names_WhenTheStatementKeepsOnlyOneShortWord_ItIsNotATruncation(self):
+        rows = self.FEED + [("DEPOT", "")] * 6
+
+        named = names_of(rows)
+
+        assert Counter(n.kind for n in named) == {STATED_NAME: 6, DESCRIPTION: 6}
+        assert {n.name for n in named if n.kind == DESCRIPTION} == {"depot"}
+
+    def test_Names_WhenTwoStatedPartiesAreOpenedByTheCut_ItLinksToNeither(self):
+        rows = (
+            [("TSB", "Tesco Stores Birmingham")] * 3
+            + [("TSK", "Tesco Stores Birkenhead")] * 3
+            + [("TESCO STORES BIR", "")] * 4
+        )
+
+        named = names_of(rows)
+
+        assert Counter(n.kind for n in named) == {STATED_NAME: 6, DESCRIPTION: 4}
+        assert {n.name for n in named if n.kind == DESCRIPTION} == {"tesco stores bir"}
+
+    def test_Names_WhenTheCutSeparatesTwoStatedParties_ItLinksToTheOneItOpens(self):
+        rows = (
+            [("TSB", "Tesco Stores Birmingham")] * 3
+            + [("TSK", "Tesco Stores Birkenhead")] * 3
+            + [("TESCO STORES BIRM", "")] * 4
+        )
+
+        named = names_of(rows)
+
+        assert {n.name for n in named if n.kind == TRUNCATED_NAME} == {"tesco stores birmingham"}
+
+    def test_Names_WhenTheDescriptionIsTheStatedNameWithACode_ItIsTheExactRungsNotThisOnes(self):
+        rows = [("TS", "Tesco Stores")] * 3 + [("TESCO STORES GB", "")] * 4
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 3, MATCHED_NAME: 4}
+
+    def test_Names_WhenTheDescriptionIsTheStatedNameItself_ItIsNeverCalledATruncation(self):
+        rows = [("TS", "Tesco Stores")] * 3 + [("TESCO STORES", "")] * 4
+
+        named = names_of(rows)
+
+        assert {n.name for n in named} == {"tesco stores"}
+        assert TRUNCATED_NAME not in {n.kind for n in named}
+
+    def test_Names_WhenTheCutLeavesTwoLettersOfTheLastWord_ItIsNotATruncation(self):
+        rows = self.FEED + [("DEPOT CLIMB BI", "")] * 6
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 6, DESCRIPTION: 6}
+
+    def test_Names_WhenTheCutLeavesExactlyThreeLetters_ItIsATruncation(self):
+        rows = self.FEED + [("DEPOT CLIMB BIR", "")] * 6
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 6, TRUNCATED_NAME: 6}
+
+    def test_Names_WhenAnOpeningWordDiffersFromTheParty_ItIsNotATruncation(self):
+        rows = self.FEED + [("DEPOT CLAMB BIRMINGH", "")] * 6
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 6, DESCRIPTION: 6}
+
+    def test_Names_WhenALongSingleWordIsCutFromASingleWordParty_ItIsATruncation(self):
+        rows = [("BWK", "Bramblewickley")] * 3 + [("BRAMBLEWICKLE", "")] * 4
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 3, TRUNCATED_NAME: 4}
+
+    def test_Names_WhenALongSingleWordOpensAMultiWordParty_ItIsNotATruncation(self):
+        rows = [("BWK", "Bramblewickley Hardware Leeds")] * 3 + [("BRAMBLEWICKLE", "")] * 4
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 3, DESCRIPTION: 4}
+
+    def test_Names_WhenAShortSingleWordOpensASingleWordParty_ItIsNotATruncation(self):
+        rows = [("BWK", "Bramblewickley")] * 3 + [("BRAMBLE", "")] * 4
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 3, DESCRIPTION: 4}
+
+    def test_Names_WhenARowOfTheShapeStatesTheParty_TheLearnedLinkOutranksTheTruncation(self):
+        rows = [("DEPOT CLIMB BIRMINGH", "Depot Climb Birmingham")] + [
+            ("DEPOT CLIMB BIRMINGH", "")
+        ] * 5
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 1, ALIAS: 5}
+
+    def test_Names_WhenTheDescriptionIsAnAmbiguousExactForm_ItIsNotRescuedByTruncation(self):
+        rows = (
+            [("DCB", "Depot Climb Birmingham")] * 2
+            + [("DCL", "DEPOT CLIMBS BIRMINGHAM LTD")] * 2
+            + [("DEPOT CLIMB BIRMINGHAM", "")] * 3
+        )
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 4, DESCRIPTION: 3}

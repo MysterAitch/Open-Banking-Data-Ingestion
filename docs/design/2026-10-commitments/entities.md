@@ -132,8 +132,22 @@ names on the real store. One weaker rung sits between the alias and the bare des
 (`MATCHED_NAME`): a description-only row whose description, compared as names are compared
 (`entity_tokens`), equals ONE stated party's name compared the same way is that party, and says
 "which matches the bank's merchant name “X” exactly". Exact after that reduction and no more: a
-truncation, a shared prefix, or shared words do not match, and stay proposals for the owner. Where
-two different stated parties compare alike, the description links to neither. A payment seen by
+shared prefix or shared words do not match, and stay proposals for the owner. Where
+two different stated parties compare alike, the description links to neither.
+
+One rung below it (`TRUNCATED_NAME`) takes the single case that is not a proposal but a
+property of the source: a PDF column that stops a merchant at a fixed width ("DEPOT CLIMB
+BIRMINGH" for a party the feed states as "Depot Climb Birmingham"), which the real store showed
+as most of its description-only rows (89 of 866 names, with only 17 transactions matched
+exactly). A description-only row whose comparison form is a strict opening of EXACTLY ONE stated
+party's form is that party: every word equal but the last, which is a prefix of the party's word
+of at least three letters, or all words equal and the party has more. Guards, each against a
+merge the owner would have to refuse: a lone word is a shared opening and not a cut (so "DEPOT"
+joins nothing) unless it is eight letters or more and a strict prefix of a party's single word;
+two candidate parties mean none; a form that is itself a stated party's form is the exact rung's
+alone, even where it refused the form as ambiguous; and a shape that rows also state a party
+for is the learned link's. Rejected: opening-of-any-party with the longest or most common
+winning, which would pick a branch for a chain on a guess. A payment seen by
 both outranks it, being evidence from the rows and not from the text. Rejected: matching on a
 shared opening, which would join a chain's branches under one stated branch and make the merge
 the owner's to refuse instead of to make.

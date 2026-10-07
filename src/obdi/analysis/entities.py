@@ -237,9 +237,13 @@ ALIAS = "alias"
 #: equals one stated party's name compared the same way (`learned_links`). Weaker than ALIAS,
 #: which rests on payments seen by both sources, and stronger than the bare description.
 MATCHED_NAME = "matched name"
+#: A description-only row whose description, compared the same way, is a strict opening of
+#: exactly one stated party's name (`_truncation_parties` states the rule): a statement column
+#: that cuts a merchant at a fixed width. Weaker than MATCHED_NAME, which is exact.
+TRUNCATED_NAME = "truncated name"
 DESCRIPTION = "description"
 RULE = "rule"
-LADDER = (ACCOUNT, SOURCE_ID, STATED_NAME, ALIAS, MATCHED_NAME, DESCRIPTION)
+LADDER = (ACCOUNT, SOURCE_ID, STATED_NAME, ALIAS, MATCHED_NAME, TRUNCATED_NAME, DESCRIPTION)
 
 #: What each kind is said to be on a page, as the noun phrase after "from the" ("from the bank's
 #: merchant name"): the one table every page reads, so no page words a kind itself.
@@ -251,6 +255,7 @@ KIND_SENTENCES: dict[str, str] = {
     MATCHED_NAME: (
         "description, which matches the bank's merchant name “{name}” exactly"
     ),
+    TRUNCATED_NAME: "description, a truncation of the bank's merchant name “{name}”",
     DESCRIPTION: "description",
     RULE: "rule",
 }
@@ -291,16 +296,17 @@ class Alias:
     rows: int
     kind: str = STATED_NAME
     #: How the shape came to stand for the name: `ALIAS` (rows seen by two sources say so) or
-    #: `MATCHED_NAME` (the text matches, and `rows` is 0 since no row says so).
+    #: `MATCHED_NAME` (the text matches) or `TRUNCATED_NAME` (the text is an opening of the name);
+    #: `rows` is 0 for the two, since no row says so.
     by: str = ALIAS
 
 
 @dataclass(frozen=True)
 class Named:
     """The name of one row and the kind of identifier it came from (`LADDER`). `name` is "" where
-    nothing is left to name the row. For an `ALIAS` or `MATCHED_NAME` name, `via` is the
-    description-shape it was learned for, `support` the rows an `ALIAS` was learned from, and
-    `linked_by` the kind of identifier the shape was linked to."""
+    nothing is left to name the row. For an `ALIAS`, `MATCHED_NAME`, or `TRUNCATED_NAME` name,
+    `via` is the description-shape it was learned for, `support` the rows an `ALIAS` was learned
+    from, and `linked_by` the kind of identifier the shape was linked to."""
 
     name: str
     kind: str
@@ -328,7 +334,8 @@ def name_of(
     """What a row is called: the strongest rung of `LADDER` it carries - the other party's
     account, a source's identifier for it, the counterparty name it states - else the identifier
     learned for its description's shape (`ALIAS`), else the stated name its description matches
-    exactly (`MATCHED_NAME`), else that shape (`DESCRIPTION`).
+    exactly (`MATCHED_NAME`), else the one it is the cut-off opening of (`TRUNCATED_NAME`), else
+    that shape (`DESCRIPTION`).
 
     The stated identifier is the primary one and the description only elaborates: two rows
     printing one reference to different counterparties are two payees, and a payee printing a
@@ -372,6 +379,12 @@ def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
     A statement and a feed print one party's name in different shapes (a country code, a town),
     so a party's months from the feed and from the statement alone were two names, and a weekly
     habit of 38 weeks in 52 was whole in neither (measured on the real store after R2c).
+
+    A last link (`TRUNCATED_NAME`, `_truncation_parties`) is for a description that is not any
+    stated party's form but a cut-off opening of exactly one: a statement column that stops a
+    merchant at a fixed width. It is built from the same stated forms, indexed, with no further
+    query. A form that IS a stated party's form belongs to the exact rung alone, even where that
+    rung refused it for being ambiguous.
     """
     seen: dict[str, Counter[str]] = {}
     stated_forms: dict[tuple[str, ...], set[str]] = {}
@@ -401,15 +414,78 @@ def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
         if len(counted) == 1
         for name in counted
     }
+    index: _OpeningIndex | None = None
     for shape, forms in bare.items():
         if shape in seen:
             continue
         form = min(forms, key=lambda f: (-forms[f], f))
         parties = stated_forms.get(form, ())
+        by = MATCHED_NAME
+        if not parties:
+            index = index or _opening_index(stated_forms)
+            parties = _truncation_parties(form, index, stated_forms)
+            by = TRUNCATED_NAME
         if len(parties) == 1:
             (party,) = parties
-            links[shape] = Alias(party, 0, STATED_NAME, MATCHED_NAME)
+            links[shape] = Alias(party, 0, STATED_NAME, by)
     return links
+
+
+#: A cut that leaves fewer letters than this on the last word is not a truncation: two letters
+#: open too many names. A lone word is only a truncation from `LONE_OPENING_LETTERS`, since one
+#: word, however long, is otherwise a shared opening - a proposal for the owner, not a link.
+TRUNCATION_MIN_LETTERS = 3
+LONE_OPENING_LETTERS = 8
+
+#: Stated forms indexed two ways: by first word (a description of two words or more must open
+#: with the party's own first word) and, for single-word forms only, by the first
+#: `LONE_OPENING_LETTERS` letters (a lone word is itself the cut).
+_OpeningIndex = tuple[
+    dict[str, list[tuple[str, ...]]], dict[str, list[tuple[str, ...]]]
+]
+
+
+def _opening_index(stated_forms: Mapping[tuple[str, ...], set[str]]) -> _OpeningIndex:
+    by_first: dict[str, list[tuple[str, ...]]] = {}
+    by_lone: dict[str, list[tuple[str, ...]]] = {}
+    for form in stated_forms:
+        by_first.setdefault(form[0], []).append(form)
+        if len(form) == 1 and len(form[0]) >= LONE_OPENING_LETTERS:
+            by_lone.setdefault(form[0][:LONE_OPENING_LETTERS], []).append(form)
+    return by_first, by_lone
+
+
+def _truncation_parties(
+    form: tuple[str, ...], index: _OpeningIndex, stated_forms: Mapping[tuple[str, ...], set[str]]
+) -> set[str]:
+    """The stated parties whose name `form` is a strict opening of: every word equal to the
+    party's word at that position except the last, which is either also equal with the party
+    having further words, or a prefix of the party's word there of at least
+    `TRUNCATION_MIN_LETTERS` letters; or, for a lone word of `LONE_OPENING_LETTERS` letters or
+    more, a strict prefix of a party's single word. Two parties in the answer mean the caller
+    links to neither."""
+    by_first, by_lone = index
+    found: set[str] = set()
+    if len(form) == 1:
+        word = form[0]
+        if len(word) < LONE_OPENING_LETTERS:
+            return found
+        for party_form in by_lone.get(word[:LONE_OPENING_LETTERS], ()):
+            if len(party_form) == 1 and party_form[0] != word and party_form[0].startswith(word):
+                found |= stated_forms[party_form]
+        return found
+    last = len(form) - 1
+    for party_form in by_first.get(form[0], ()):
+        if len(party_form) < len(form) or party_form[:last] != form[:last]:
+            continue
+        cut, whole = form[last], party_form[last]
+        if cut == whole:
+            opens = len(party_form) > len(form)
+        else:
+            opens = len(cut) >= TRUNCATION_MIN_LETTERS and whole.startswith(cut)
+        if opens:
+            found |= stated_forms[party_form]
+    return found
 
 
 def _comparison_form(
@@ -463,10 +539,12 @@ class NameOrigin:
     through: int = 0
     #: Rows named by the description matching this name exactly (`MATCHED_NAME`).
     matched: int = 0
+    #: Rows named by the description being a cut-off opening of this name (`TRUNCATED_NAME`).
+    truncated: int = 0
 
     @property
     def rows(self) -> int:
-        return self.stated + self.linked + self.described + self.matched
+        return self.stated + self.linked + self.described + self.matched + self.truncated
 
     @property
     def kind(self) -> str:
@@ -475,7 +553,9 @@ class NameOrigin:
             return STATED_NAME
         if self.linked:
             return ALIAS
-        return MATCHED_NAME if self.matched else DESCRIPTION
+        if self.matched:
+            return MATCHED_NAME
+        return TRUNCATED_NAME if self.truncated else DESCRIPTION
 
 
 def name_origins(named: Iterable[Named]) -> dict[str, NameOrigin]:
@@ -484,12 +564,15 @@ def name_origins(named: Iterable[Named]) -> dict[str, NameOrigin]:
     linked: Counter[str] = Counter()
     described: Counter[str] = Counter()
     matched: Counter[str] = Counter()
+    truncated: Counter[str] = Counter()
     supports: dict[str, dict[str, int]] = {}
     for item in named:
         if not item.name:
             continue
         if item.kind == MATCHED_NAME:
             matched[item.name] += 1
+        elif item.kind == TRUNCATED_NAME:
+            truncated[item.name] += 1
         elif item.kind == ALIAS:
             linked[item.name] += 1
             supports.setdefault(item.name, {})[item.via] = item.support
@@ -504,8 +587,9 @@ def name_origins(named: Iterable[Named]) -> dict[str, NameOrigin]:
             described[name],
             sum(supports.get(name, {}).values()),
             matched[name],
+            truncated[name],
         )
-        for name in {*stated, *linked, *described, *matched}
+        for name in {*stated, *linked, *described, *matched, *truncated}
     }
 
 
@@ -518,7 +602,7 @@ def name_readings(
     nothing: the name's own rows say how it is read."""
     seen: dict[str, Counter[str]] = {}
     for (description, counterparty), item in zip(rows, named, strict=True):
-        if not item.name or item.kind in (ALIAS, MATCHED_NAME):
+        if not item.name or item.kind in (ALIAS, MATCHED_NAME, TRUNCATED_NAME):
             continue
         if item.kind == DESCRIPTION:
             read = reading_of(description)
