@@ -29,6 +29,7 @@ from .entities import (
     Entity,
     EntityRefused,
     Proposal,
+    Suggestion,
 )
 from .logs import say
 from .masking import mask_text
@@ -196,13 +197,42 @@ def _owner(view: EntitiesView, *, unmasked: bool) -> str:
     )
 
 
-def _entity(entity: Entity, counts: Mapping[str, int], *, unmasked: bool) -> str:
+def _could_belong(
+    entity: Entity, suggestion: Suggestion | None, counts: Mapping[str, int], *, unmasked: bool
+) -> str:
+    """Free names that share a distinctive word with the entity, ticked, with one press that adds
+    them to it (a merge under the entity's own name, which attaches)."""
+    if suggestion is None:
+        return ""
+    across = _across(len(suggestion.shapes), sum(counts.get(s, 0) for s in suggestion.shapes))
+    if not unmasked:
+        more = plural(len(suggestion.shapes), "more name")
+        return f'<p class="ent-why">{more} could belong to it.</p>'
+    shared = ", ".join(f"“{word}”" for word in suggestion.tokens)
+    return (
+        f'<form class="ent-could" method="post" action="{MERGE_ROUTE}">'
+        f'<input type="hidden" name="name" value="{_esc(entity.name)}">'
+        f"<h4>Could belong to {_esc(entity.name)}</h4>"
+        f"{_ticks(suggestion.shapes, counts, checked=True)}"
+        f'<p class="ent-why">{across}; they share {shared}.</p>'
+        f'<button class="tap" type="submit">Add to {_esc(entity.name)}</button></form>'
+    )
+
+
+def _entity(
+    entity: Entity,
+    counts: Mapping[str, int],
+    *,
+    unmasked: bool,
+    suggestion: Suggestion | None = None,
+) -> str:
     total = sum(counts.get(shape, 0) for shape in entity.shapes)
     across = _across(len(entity.shapes), total)
+    could = _could_belong(entity, suggestion, counts, unmasked=unmasked)
     if not unmasked:
         return (
             f'<section class="ent-entity"><h3>{_sealed(entity.name)}</h3>'
-            f'<p class="ent-why">{across}.</p></section>'
+            f'<p class="ent-why">{across}.</p>{could}</section>'
         )
     lines = "".join(
         f'<li><span class="txt">{_esc(shape)}</span><span class="ent-count">'
@@ -214,7 +244,7 @@ def _entity(entity: Entity, counts: Mapping[str, int], *, unmasked: bool) -> str
     )
     return (
         f'<section class="ent-entity"><h3>{_esc(entity.name)}</h3>'
-        f'<p class="ent-why">{across}.</p><ul class="ent-names">{lines}</ul>'
+        f'<p class="ent-why">{across}.</p><ul class="ent-names">{lines}</ul>{could}'
         '<details class="ent-fold"><summary>Rename, or fold into another entity</summary>'
         f'<form method="post" action="{RENAME_ROUTE}">'
         f'<input type="hidden" name="entity" value="{entity.id}">'
@@ -228,8 +258,10 @@ def _entity(entity: Entity, counts: Mapping[str, int], *, unmasked: bool) -> str
 def _entities(view: EntitiesView, *, unmasked: bool) -> str:
     if not view.entities:
         return ""
+    offered = {s.entity.id: s for s in view.suggestions}
     return "<h2>Entities</h2>" + "".join(
-        _entity(e, view.counts, unmasked=unmasked) for e in view.entities
+        _entity(e, view.counts, unmasked=unmasked, suggestion=offered.get(e.id))
+        for e in view.entities
     )
 
 

@@ -480,6 +480,57 @@ class TestThePaymentsBetweenYourOwnAccounts:
         assert "Payments between your own accounts" not in shown(served)
 
 
+class TestWhatAFirstMergeTeaches:
+    @pytest.fixture
+    def taught(self, world, monkeypatch):
+        from obdi import entities
+
+        monkeypatch.setattr(entities, "COMMON_TOKENS", 0)
+        base, db = world
+        merge_group(base, shapes=(LONDON, READING), name="Fernhollow")
+        return base, db
+
+    def could_forms(self, page: str):
+        return [f for f in elements(parse(page), "form") if "ent-could" in f.classes]
+
+    def test_EntitiesPage_AfterAMerge_OffersTheNameSharingAWordUnderTheEntity(self, taught):
+        base, _db = taught
+
+        page = shown(base)
+
+        (form,) = self.could_forms(page)
+        ticked = [i.attrs["value"] for i in elements(form, "input")
+                  if i.attrs.get("type") == "checkbox" and "checked" in i.attrs]
+        assert ticked == [EXPRESS]
+        assert "Could belong to Fernhollow" in page
+
+    def test_EntitiesPage_WhenFetchedMasked_CountsTheNamesAndNamesNobody(self, taught):
+        base, _db = taught
+
+        page = httpx.get(f"{base}/entities", timeout=60).text
+
+        assert "1 more name could belong to it." in page
+        assert "express" not in page.casefold()
+        assert self.could_forms(page) == []
+
+    def test_Add_WhenPressed_AttachesTheNameToTheEntityAndSaysSo(self, taught):
+        base, db = taught
+
+        response = press(base, "/entities-merge", name="Fernhollow", shape=[EXPRESS])
+
+        assert outcome_of(response.text) == "1 name added to Fernhollow."
+        assert self.could_forms(response.text) == []
+        with Store(db) as store:
+            (entity,) = store.entities_with_shapes()
+        assert set(entity.shapes) == {LONDON, READING, EXPRESS}
+
+    def test_EntitiesPage_WhenTheSharedWordIsAmongTheCommonest_OffersNothing(self, world):
+        base, _db = world
+        merge_group(base, shapes=(LONDON, READING), name="Fernhollow")
+
+        assert self.could_forms(shown(base)) == []
+
+
 class TestFoldingOneEntityIntoAnother:
     def two_merges(self, base: str) -> None:
         merge_group(base, shapes=(LONDON, READING), name="Fernhollow")

@@ -95,7 +95,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "analysis",
         (
             "recurring", "recurring_series", "recurring_speed", "entities_grouping",
-            "entities_owner", "entities_rules", "entity_recurring",
+            "entities_owner", "entities_rules", "entities_teaching", "entity_recurring",
         ),
     ),
     (

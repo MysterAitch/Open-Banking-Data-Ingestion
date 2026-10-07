@@ -221,6 +221,8 @@ class EntitiesView:
     proposals: Proposals
     #: The shapes that are mostly the legs of the owner's own transfers, offered before any payee.
     owner: OwnerGroup | None = None
+    #: Free names that share a distinctive word with an entity, offered under it.
+    suggestions: tuple[Suggestion, ...] = ()
 
     def free_shapes(self) -> list[str]:
         """The shapes under no entity, most-used first."""
@@ -276,7 +278,82 @@ def view_of(
     taken = {shape for entity in made for shape in entity.shapes}
     owner = owner_group(counts, legs or {}, taken)
     set_apart = taken | set(owner.shapes if owner else ())
-    return EntitiesView(counts, made, propose_groups(counts, taken=set_apart), owner)
+    proposals = propose_groups(counts, taken=set_apart)
+    offered = {s for g in (*proposals.groups, *proposals.too_broad) for s in g.shapes}
+    return EntitiesView(
+        counts, made, proposals, owner, suggest_for_entities(counts, made, set_apart | offered)
+    )
+
+
+@dataclass(frozen=True)
+class Suggestion:
+    """Free names that share a distinctive word with an entity the owner already made."""
+
+    entity: Entity
+    #: Most-used first, then alphabetical.
+    shapes: tuple[str, ...]
+    #: The compared words shared with the entity's name or shapes, across the names.
+    tokens: tuple[str, ...]
+
+
+def _entity_words(entity: Entity, common: Collection[str]) -> frozenset[str]:
+    """The distinctive compared words of an entity's name and of each shape under it."""
+    texts = [normalise_description(entity.name), *entity.shapes]
+    return frozenset(
+        word
+        for text in texts
+        for word in distinctive_words(tokens_of(text))
+        if is_distinctive(word, common)
+    )
+
+
+def suggest_for_entities(
+    counts: Mapping[str, int], entities: Sequence[Entity], set_apart: Collection[str]
+) -> tuple[Suggestion, ...]:
+    """A free name goes under the entity whose name or shapes it shares the most distinctive
+    words with (the first by name where two share as many); names the owner has already placed,
+    the owner's own, and names in a proposed group (`set_apart`) are not offered.
+
+    A word is distinctive as `is_distinctive` says, so the commonest words of the store
+    (`COMMON_TOKENS`) never join a name to an entity. The owner entity is never a target: its
+    shapes are transfers, and a name that shares a word with one is not shown to be the owner's.
+    """
+    targets = [e for e in entities if e.role != OWNER_ROLE and e.shapes]
+    if not targets:
+        return ()
+    common = common_tokens(
+        align_initials({shape: tokens_of(shape) for shape in counts})
+    )
+    words = {e.id: _entity_words(e, common) for e in targets}
+    held = {shape for e in entities for shape in e.shapes}
+    found: dict[int, list[tuple[str, frozenset[str]]]] = {}
+    for shape in sorted(counts, key=lambda s: (-counts[s], s)):
+        if shape in held or shape in set_apart or is_method_only(shape):
+            continue
+        mine = frozenset(
+            w for w in distinctive_words(tokens_of(shape)) if is_distinctive(w, common)
+        )
+        best: tuple[int, str, int] | None = None
+        for target in targets:
+            shared = mine & words[target.id]
+            if shared:
+                key = (-len(shared), target.name.casefold(), target.id)
+                if best is None or key < best:
+                    best = key
+        if best is not None:
+            target_id = best[2]
+            found.setdefault(target_id, []).append((shape, mine & words[target_id]))
+    by_id = {e.id: e for e in targets}
+    return tuple(
+        Suggestion(
+            entity=by_id[target_id],
+            shapes=tuple(shape for shape, _ in members),
+            tokens=tuple(sorted({t for _, shared in members for t in shared})),
+        )
+        for target_id, members in sorted(
+            found.items(), key=lambda item: (by_id[item[0]].name.casefold(), item[0])
+        )
+    )
 
 
 def propose_groups(
