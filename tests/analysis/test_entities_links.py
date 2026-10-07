@@ -26,6 +26,7 @@ from collections import Counter
 from obdi.analysis.entities import (
     ALIAS,
     DESCRIPTION,
+    MATCHED_NAME,
     STATED_NAME,
     Alias,
     learned_links,
@@ -107,3 +108,69 @@ class TestALinkNeedsOneAnswer:
 
     def test_Links_WhenAStatedCounterpartyIsOnlyDigits_ItIsNoEvidence(self):
         assert learned_links([("OAKMERE COFFEE", "0012 4455")]) == {}
+
+
+class TestADescriptionThatMatchesAStatedNameExactlyIsThatParty:
+    """KNOWN ANSWERS, decided before the first run (the venue is a public name; no real figures).
+
+      - Feed rows state "Depot Climb Birmingham" and describe it "DEPOT CLIMB" (a shape the
+        statement never prints, so no payment seen by both); six statement rows describe it
+        "DEPOT CLIMB BIRMINGHAM GB" and state nothing. The statement rows compare equal to the
+        stated name once the country code is set aside: one name, six rows of kind MATCHED_NAME.
+      - The statement printing "DEPOT CLIMB BIRMINGH" (a truncation) compares unequal: no link,
+        two names, the statement's by description.
+      - Two stated parties whose comparison forms coincide ("Depot Climb Birmingham" and
+        "DEPOT CLIMBS BIRMINGHAM LTD") leave the statement rows linked to neither.
+      - A payment seen by both is stronger evidence than a text match: where the feed's
+        description IS the statement's shape, the statement rows are ALIAS, not MATCHED_NAME.
+      - A description with no word that tells a payee apart (a method, a code) matches no party,
+        though it would compare equal to a stated party made of the same.
+    """
+
+    FEED = [("DEPOT CLIMB", "Depot Climb Birmingham")] * 6
+
+    def test_Names_WhenTheStatementPrintsTheStatedNameWithACountryCode_AreOneNameMatched(self):
+        rows = self.FEED + [("DEPOT CLIMB BIRMINGHAM GB", "")] * 6
+
+        named = names_of(rows)
+
+        assert {n.name for n in named} == {"depot climb birmingham"}
+        assert Counter(n.kind for n in named) == {STATED_NAME: 6, MATCHED_NAME: 6}
+        assert {n.via for n in named if n.kind == MATCHED_NAME} == {"depot climb birmingham gb"}
+
+    def test_Names_WhenTheStatementPrintsATruncation_NothingIsMatchedAndThereAreTwoNames(self):
+        rows = self.FEED + [("DEPOT CLIMB BIRMINGH", "")] * 6
+
+        named = names_of(rows)
+
+        assert {n.name for n in named} == {"depot climb birmingham", "depot climb birmingh"}
+        assert Counter(n.kind for n in named) == {STATED_NAME: 6, DESCRIPTION: 6}
+
+    def test_Names_WhenTheStatementPrintsOnlyTheOpeningWords_NothingIsMatched(self):
+        rows = self.FEED + [("DEPOT CLIMB", "")] * 6
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 6, ALIAS: 6}
+
+    def test_Names_WhenTwoStatedPartiesCompareAlike_TheDescriptionLinksToNeither(self):
+        rows = (
+            self.FEED
+            + [("DEPOT CLIMBS", "DEPOT CLIMBS BIRMINGHAM LTD")] * 3
+            + [("DEPOT CLIMB BIRMINGHAM GB", "")] * 6
+        )
+
+        named = names_of(rows)
+
+        assert Counter(n.kind for n in named) == {STATED_NAME: 9, DESCRIPTION: 6}
+        assert {n.name for n in named if n.kind == DESCRIPTION} == {"depot climb birmingham gb"}
+
+    def test_Names_WhenAPaymentSeenByBothSharesTheShape_TheLinkOutranksTheTextMatch(self):
+        rows = [("DEPOT CLIMB BIRMINGHAM GB", "Depot Climb Birmingham")] + [
+            ("DEPOT CLIMB BIRMINGHAM GB", "")
+        ] * 5
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 1, ALIAS: 5}
+
+    def test_Names_WhenTheDescriptionHoldsNoWordThatTellsAPayeeApart_ItMatchesNoParty(self):
+        rows = [("MS", "M&S")] * 2 + [("M S GB", "")] * 3
+
+        assert Counter(n.kind for n in names_of(rows)) == {STATED_NAME: 2, DESCRIPTION: 3}

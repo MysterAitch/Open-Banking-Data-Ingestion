@@ -194,7 +194,8 @@ def derivation_of(
     if source is None:
         support = sum({row.via: row.support for row in covered if row.kind == ALIAS}.values())
         source = ", and from the ".join(
-            KIND_SENTENCES[kind].format(payments=plural(support, "payment")) for kind in kinds
+            KIND_SENTENCES[kind].format(payments=plural(support, "payment"), name=shape)
+            for kind in kinds
         )
     return Derivation(
         source=source or DESCRIPTION_SOURCE,
@@ -232,9 +233,13 @@ ACCOUNT = "account"
 SOURCE_ID = "source id"
 STATED_NAME = "stated name"
 ALIAS = "alias"
+#: A description-only row whose description, compared as names are compared (`entity_tokens`),
+#: equals one stated party's name compared the same way (`learned_links`). Weaker than ALIAS,
+#: which rests on payments seen by both sources, and stronger than the bare description.
+MATCHED_NAME = "matched name"
 DESCRIPTION = "description"
 RULE = "rule"
-LADDER = (ACCOUNT, SOURCE_ID, STATED_NAME, ALIAS, DESCRIPTION)
+LADDER = (ACCOUNT, SOURCE_ID, STATED_NAME, ALIAS, MATCHED_NAME, DESCRIPTION)
 
 #: What each kind is said to be on a page, as the noun phrase after "from the" ("from the bank's
 #: merchant name"): the one table every page reads, so no page words a kind itself.
@@ -243,6 +248,9 @@ KIND_SENTENCES: dict[str, str] = {
     SOURCE_ID: "source's own identifier for the other party",
     STATED_NAME: "bank's merchant name",
     ALIAS: "description, named by the bank's merchant name through {payments} seen by both",
+    MATCHED_NAME: (
+        "description, which matches the bank's merchant name “{name}” exactly"
+    ),
     DESCRIPTION: "description",
     RULE: "rule",
 }
@@ -282,14 +290,17 @@ class Alias:
     name: str
     rows: int
     kind: str = STATED_NAME
+    #: How the shape came to stand for the name: `ALIAS` (rows seen by two sources say so) or
+    #: `MATCHED_NAME` (the text matches, and `rows` is 0 since no row says so).
+    by: str = ALIAS
 
 
 @dataclass(frozen=True)
 class Named:
     """The name of one row and the kind of identifier it came from (`LADDER`). `name` is "" where
-    nothing is left to name the row. For an `ALIAS` name, `via` is the description-shape it was
-    learned for, `support` the rows it was learned from, and `linked_by` the kind of identifier
-    the shape was linked to."""
+    nothing is left to name the row. For an `ALIAS` or `MATCHED_NAME` name, `via` is the
+    description-shape it was learned for, `support` the rows an `ALIAS` was learned from, and
+    `linked_by` the kind of identifier the shape was linked to."""
 
     name: str
     kind: str
@@ -316,7 +327,8 @@ def name_of(
 ) -> Named:
     """What a row is called: the strongest rung of `LADDER` it carries - the other party's
     account, a source's identifier for it, the counterparty name it states - else the identifier
-    learned for its description's shape (`ALIAS`), else that shape (`DESCRIPTION`).
+    learned for its description's shape (`ALIAS`), else the stated name its description matches
+    exactly (`MATCHED_NAME`), else that shape (`DESCRIPTION`).
 
     The stated identifier is the primary one and the description only elaborates: two rows
     printing one reference to different counterparties are two payees, and a payee printing a
@@ -334,7 +346,7 @@ def name_of(
     learned = (aliases or {}).get(shape)
     if shape and learned is not None:
         return Named(
-            learned.name, ALIAS, via=shape, support=learned.rows, linked_by=learned.kind
+            learned.name, learned.by, via=shape, support=learned.rows, linked_by=learned.kind
         )
     return Named(shape, DESCRIPTION)
 
@@ -350,20 +362,64 @@ def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
     is ambiguous and links to none (a rent reference paid to two housemates), and a shape whose
     only counterparty is its own name has nothing to link. The links are for the rows that lack
     the stronger identifier: `name_of` uses one only where the row states none itself.
+
+    A weaker link is added for a description-shape that no row states a counterparty with
+    (`MATCHED_NAME`): where its description, compared as names are compared (`entity_tokens`),
+    equals the comparison of exactly one stated party's name. It is a text comparison and exact
+    after that reduction - no shared prefix, no shared words, which are proposals for the owner
+    to accept - and where two different stated parties compare alike the shape links to neither.
+    A statement and a feed print one party's name in different shapes (a country code, a town),
+    so a party's months from the feed and from the statement alone were two names, and a weekly
+    habit of 38 weeks in 52 was whole in neither (measured on the real store after R2c).
     """
     seen: dict[str, Counter[str]] = {}
+    stated_forms: dict[tuple[str, ...], set[str]] = {}
+    form_cache: dict[str, tuple[str, ...]] = {}
+    bare: dict[str, Counter[tuple[str, ...]]] = {}
     for description, counterparty in rows:
         stated = counterparty_name(counterparty)
         shape = _shape(description)
         if stated and shape:
             seen.setdefault(shape, Counter())[stated] += 1
-    return {
+        if stated:
+            form = _comparison_form(_read_by(counterparty, COUNTERPARTY_STEPS), form_cache)
+            if form:
+                stated_forms.setdefault(form, set()).add(stated)
+        elif shape:
+            form = _comparison_form(reading_of(description), form_cache)
+            if form:
+                bare.setdefault(shape, Counter())[form] += 1
+    links = {
         shape: Alias(name, counted[name], STATED_NAME)
         for shape, counted in seen.items()
         if len(counted) == 1
         for name in counted
         if name != shape
     }
+    for shape, forms in bare.items():
+        if shape in seen:
+            continue
+        form = min(forms, key=lambda f: (-forms[f], f))
+        parties = stated_forms.get(form, ())
+        if len(parties) == 1:
+            (party,) = parties
+            if party != shape:
+                links[shape] = Alias(party, 0, STATED_NAME, MATCHED_NAME)
+    return links
+
+
+def _comparison_form(
+    reading: str, cache: dict[str, tuple[str, ...]]
+) -> tuple[str, ...]:
+    """What a reading is compared on as a name: its tokens' comparable words (`tokens_of`), or
+    () where none of them can tell one payee from another (`distinctive_words`), so a reading
+    of only initials, methods, or codes matches no party."""
+    found = cache.get(reading)
+    if found is None:
+        tokens = tokens_of(reading)
+        found = tuple(t.norm for t in tokens) if distinctive_words(tokens) else ()
+        cache[reading] = found
+    return found
 
 
 def names_of(rows: Sequence[tuple[str, str]]) -> list[Named]:
@@ -401,17 +457,21 @@ class NameOrigin:
     linked: int = 0
     described: int = 0
     through: int = 0
+    #: Rows named by the description matching this name exactly (`MATCHED_NAME`).
+    matched: int = 0
 
     @property
     def rows(self) -> int:
-        return self.stated + self.linked + self.described
+        return self.stated + self.linked + self.described + self.matched
 
     @property
     def kind(self) -> str:
         """The strongest kind any row of the name has (`LADDER`)."""
         if self.stated:
             return STATED_NAME
-        return ALIAS if self.linked else DESCRIPTION
+        if self.linked:
+            return ALIAS
+        return MATCHED_NAME if self.matched else DESCRIPTION
 
 
 def name_origins(named: Iterable[Named]) -> dict[str, NameOrigin]:
@@ -419,11 +479,14 @@ def name_origins(named: Iterable[Named]) -> dict[str, NameOrigin]:
     stated: Counter[str] = Counter()
     linked: Counter[str] = Counter()
     described: Counter[str] = Counter()
+    matched: Counter[str] = Counter()
     supports: dict[str, dict[str, int]] = {}
     for item in named:
         if not item.name:
             continue
-        if item.kind == ALIAS:
+        if item.kind == MATCHED_NAME:
+            matched[item.name] += 1
+        elif item.kind == ALIAS:
             linked[item.name] += 1
             supports.setdefault(item.name, {})[item.via] = item.support
         elif item.kind == DESCRIPTION:
@@ -436,8 +499,9 @@ def name_origins(named: Iterable[Named]) -> dict[str, NameOrigin]:
             linked[name],
             described[name],
             sum(supports.get(name, {}).values()),
+            matched[name],
         )
-        for name in {*stated, *linked, *described}
+        for name in {*stated, *linked, *described, *matched}
     }
 
 
@@ -450,7 +514,7 @@ def name_readings(
     nothing: the name's own rows say how it is read."""
     seen: dict[str, Counter[str]] = {}
     for (description, counterparty), item in zip(rows, named, strict=True):
-        if not item.name or item.kind == ALIAS:
+        if not item.name or item.kind in (ALIAS, MATCHED_NAME):
             continue
         if item.kind == DESCRIPTION:
             read = reading_of(description)

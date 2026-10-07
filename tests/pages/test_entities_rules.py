@@ -414,6 +414,41 @@ class TestTheDetectorKeysTwoSourcesOfOnePayeeAsOneSeries:
 
         assert shapes == {"zqx holdings leeds", "bramblewick"}
 
+    def _weekly_habit(self, statement_text: str):
+        """Thirty-nine of the fifty-two weeks to a climbing venue: the first half of the year
+        from a feed (the counterparty stated, a short description), the second half from
+        statements (the description alone, as a statement prints it), no payment seen by both."""
+        start = date(2025, 10, 6)
+        weeks = [w for w in range(52) if w % 4 != 3]
+        return [
+            row(
+                start + timedelta(weeks=w), -650 - (w % 3),
+                "DEPOT CLIMB" if w < 26 else statement_text,
+                "Depot Climb Birmingham" if w < 26 else "",
+                w,
+            )
+            for w in weeks
+        ]
+
+    def test_Detector_WhenStatementMonthsPrintTheStatedNameWithACountryCode_IsOneWeeklyHabit(self):
+        rows = self._weekly_habit("DEPOT CLIMB BIRMINGHAM GB")
+
+        (series,) = find_recurring(rows, [], self.TODAY)
+
+        assert (series.shape, series.count, series.cadence) == (
+            "depot climb birmingham", 39, "weekly"
+        )
+        assert series.stopped is False
+
+    def test_Detector_WhenStatementMonthsPrintATruncation_TheHabitIsHalvedAndNothingIsGuessed(self):
+        rows = self._weekly_habit("DEPOT CLIMB BIRMINGH")
+
+        found = find_recurring(rows, [], self.TODAY)
+
+        assert {(s.shape, s.count) for s in found} == {
+            ("depot climb birmingham", 20), ("depot climb birmingh", 19)
+        }
+
     def test_Detector_WhenTwoHousematesPayOneReference_AreTwoSeries(self):
         rows = [
             row(date(y, m, 1), -50000, "RENT", who, i * 2 + k)

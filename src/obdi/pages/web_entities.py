@@ -27,6 +27,7 @@ from ..analysis.entities import (
     COVERED_SHOWN,
     KIND_SENTENCES,
     LADDER,
+    MATCHED_NAME,
     OPENING_WORDS,
     SAME_WORDS,
     SHAPE_STEPS,
@@ -85,11 +86,17 @@ def _sources_sentence(view: EntitiesView) -> str:
     parts = [
         f"{by_kind[kind]:,} from the {KIND_SENTENCES[kind]}"
         for kind in LADDER
-        if by_kind[kind] and kind != ALIAS
+        if by_kind[kind] and kind not in (ALIAS, MATCHED_NAME)
     ]
     linked = sum(origin.linked for origin in view.origins.values())
     if linked:
         parts.append(f"{plural(linked, 'transaction')} named through payments seen by both")
+    matched = sum(origin.matched for origin in view.origins.values())
+    if matched:
+        parts.append(
+            f"{plural(matched, 'transaction')} named by a description that matches a "
+            "merchant name exactly"
+        )
     return f" Names: {'; '.join(parts)}." if parts else ""
 
 

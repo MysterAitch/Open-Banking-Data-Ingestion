@@ -100,6 +100,19 @@ statement-only row whose description-shape maps to exactly one stronger identifi
 party, and says "through N payments seen by both"; an ambiguous shape maps to none and stays a
 description-name, visibly. This is the alias of R2c, generalised to every kind.
 
+The alias needs a shape EXACTLY equal to the shape of a row that also carries the counterparty,
+and a statement's narrative and a feed's description rarely reduce to one shape (a country code,
+a town), so after 0.4.369 a party's feed months and its statement-only months were still two
+names on the real store. One weaker rung sits between the alias and the bare description
+(`MATCHED_NAME`): a description-only row whose description, compared as names are compared
+(`entity_tokens`), equals ONE stated party's name compared the same way is that party, and says
+"which matches the bank's merchant name “X” exactly". Exact after that reduction and no more: a
+truncation, a shared prefix, or shared words do not match, and stay proposals for the owner. Where
+two different stated parties compare alike, the description links to neither. A payment seen by
+both outranks it, being evidence from the rows and not from the text. Rejected: matching on a
+shared opening, which would join a chain's branches under one stated branch and make the merge
+the owner's to refuse instead of to make.
+
 It is also what makes the strong kinds safe: the fault of 0.4.361 was keying on a field that is
 absent from some sources with nothing to join the rows that lack it. The join is the evidence
 above; it must exist before any strong field becomes a key, and the constructed test for every

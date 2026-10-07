@@ -10,6 +10,9 @@ KNOWN ANSWERS, decided before the first run. The people are invented.
   - Twelve rows to one counterparty (six also stated, six description-only through the link) and
     a lone description-only row elsewhere: the summary says 1 name from the bank's merchant name
     and 1 from the description, and that 6 transactions were named through payments seen by both.
+  - A description-only row whose description matches a stated name exactly (after the country
+    code is set aside) is "from the description, which matches the bank's merchant name “X”
+    exactly"; the summary counts those transactions and prints no name.
   - A hand-attached name that no row has now ("rent", once the rows state a housemate) is listed
     on the entity's page as attached to a name no row has now, with its count on the masked page
     and its text on the unmasked one; a hand-attached name some row still has is not listed.
@@ -23,6 +26,7 @@ from typing import ClassVar
 from obdi.analysis.entities import (
     ALIAS,
     DESCRIPTION,
+    MATCHED_NAME,
     STATED_NAME,
     Covered,
     Entity,
@@ -75,6 +79,64 @@ class TestTheDerivationSaysWhichKindNamedIt:
 
         assert record.source == "bank's merchant name, and from the description"
         assert record.kinds == (STATED_NAME, DESCRIPTION)
+
+
+class TestAMatchedDescriptionSaysItMatchedTheMerchantNameExactly:
+    ROWS = (
+        [("DEPOT CLIMB", "Depot Climb Birmingham")] * 4
+        + [("DEPOT CLIMB BIRMINGHAM GB", "")] * 3
+    )
+
+    def test_Derivation_ForAMatchedRow_NamesTheMerchantNameItMatched(self):
+        row = covered(
+            "DEPOT CLIMB BIRMINGHAM GB", "", MATCHED_NAME, via="depot climb birmingham gb"
+        )
+
+        record = derivation_of("depot climb birmingham", (row,))
+
+        assert record.source == (
+            "description, which matches the bank's merchant name “depot climb birmingham” exactly"
+        )
+        assert record.kinds == (MATCHED_NAME,)
+
+    def test_Derivation_ForStatedAndMatchedRows_SaysEachKindOnce(self):
+        rows = (
+            covered("X", "Depot Climb Birmingham", STATED_NAME),
+            covered("DEPOT CLIMB BIRMINGHAM GB", "", MATCHED_NAME),
+        )
+
+        record = derivation_of("depot climb birmingham", rows)
+
+        assert record.source.startswith("bank's merchant name, and from the description, which")
+        assert "matches the bank's merchant name" in record.source
+
+    def test_Summary_CountsMatchedTransactionsAndNoName(self):
+        origins = name_origins(names_of(self.ROWS))
+        counts = {name: origin.rows for name, origin in origins.items()}
+        view = view_of(counts, [], origins=origins)
+
+        line = summary_line(view)
+
+        assert counts == {"depot climb birmingham": 7}
+        assert "3 transactions named by a description that matches a merchant name exactly" in line
+        assert "Names: 1 from the bank's merchant name;" in line
+
+    def test_Page_ListsTheMatchedNamesFoldWithTheSentence(self):
+        origins = name_origins(names_of(self.ROWS))
+        counts = {name: origin.rows for name, origin in origins.items()}
+        covers = {
+            "depot climb birmingham": (
+                covered("DEPOT CLIMB BIRMINGHAM GB", "", MATCHED_NAME),
+                covered("DEPOT CLIMB", "Depot Climb Birmingham", STATED_NAME),
+            )
+        }
+        held = Entity(1, "Depot", None, ("depot climb birmingham",))
+        view = view_of(counts, [held], None, covers, origins)
+
+        page = render_entities(view, unmasked=True).decode("utf-8")
+
+        assert "which matches the bank&#x27;s merchant name" in page
+        assert "exactly" in page
 
 
 class TestTheSummaryCountsNamesByKind:
