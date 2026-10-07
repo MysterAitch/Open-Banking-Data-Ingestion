@@ -901,6 +901,40 @@ class TestEachPageIsAttributedByItsOwnHeading:
         assert any("EXAMPLE CAFE" in note for note in reading.notes)
 
 
+class TestTheReaderReportSaysACardIsInCredit:
+    """The shape page's "What the reader found" says the sign was understood, so the owner can
+    tell a card read as in credit from one whose minus was dropped."""
+
+    @staticmethod
+    def _closing_line(pages: list[list[str]]) -> str:
+        from obdi.reader_findings import findings_html, findings_of
+
+        findings = findings_of(pdf(pages))
+        assert findings.found, findings.said
+        text = findings_html(findings, lambda token: token)
+        return next(
+            part.split("</li>")[0]
+            for part in text.split("<li>")
+            if part.startswith("Closing balance")
+        )
+
+    def test_ShapePage_WhenTheCardEndsInCredit_SaysTheClosingBalanceIsInCredit(self):
+        assert "in credit" in self._closing_line(pages_in_credit())
+
+    def test_ShapePage_WhenTheCardEndsOwing_DoesNotSayInCredit(self):
+        assert "in credit" not in self._closing_line(pages_of())
+
+    def test_ShapePage_WhenTheMonthBeganInCreditButEndsOwing_DoesNotSayInCredit(self):
+        assert "in credit" not in self._closing_line(pages_month_after())
+
+    def test_ShapePage_WhenTheCardEndsInCredit_SaysNoFigure(self):
+        from obdi.reader_findings import findings_html, findings_of
+
+        findings = findings_of(pdf(pages_in_credit()))
+
+        assert "150" not in findings_html(findings, lambda token: token)
+
+
 class TestRecognition:
     def test_CapitalOneStatement_WhenOffered_IsClaimedByItsOwnParserAlone(self):
         payload = pdf(pages_of())

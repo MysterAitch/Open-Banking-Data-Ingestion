@@ -46,6 +46,8 @@ class Finding:
     opening_found: bool
     closing_found: bool
     closing_label: str
+    #: The statement states the closing balance as money the account owes its owner.
+    closing_in_credit: bool
     transactions: int
     #: "saver", "loan", or "" where this reader does not tell the two apart.
     kind: str
@@ -79,6 +81,7 @@ def _finding(
         opening_found=reading.opening_balance_minor is not None,
         closing_found=reading.closing_balance_minor is not None,
         closing_label=reading.closing_label,
+        closing_in_credit=reading.closing_in_credit,
         transactions=len(reading.transactions),
         kind=reading.account_kind,
         kind_basis=reading.account_kind_basis,
@@ -103,6 +106,8 @@ def _lines(item: Finding, account_html: Callable[[str], str]) -> list[str]:
         if item.closing_found
         else "no"
     )
+    if item.closing_found and item.closing_in_credit:
+        closing += ", in credit"
     taken = (
         f"a {html.escape(item.kind)} ({html.escape(item.kind_basis)})"
         if item.kind
