@@ -94,7 +94,14 @@ def test_Row_TheNoteIsQuieterThanAThingToDo(base):
 
     notes = [s for s in spans if s.text().startswith("Rate ends")]
     assert notes and all("quiet" in s.classes for s in notes)
-    things_to_do = [s for s in spans if not s.text().startswith(("Rate ends", "Statement rate"))]
+    # The party note ("N transactions named by the description only") is a note too, quiet by
+    # the same rule (`test_party_stated_pages`); only the rest must shout.
+    things_to_do = [
+        s
+        for s in spans
+        if not s.text().startswith(("Rate ends", "Statement rate"))
+        and "named by the description only" not in s.text()
+    ]
     assert all("quiet" not in s.classes for s in things_to_do)
 
 

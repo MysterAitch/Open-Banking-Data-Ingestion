@@ -14,7 +14,8 @@ one payee two names by source.
     both) and the six statement rows join the feed's: one name, with a support of one.
   - A description printed with two different counterparties (a rent reference to two housemates)
     links to none: the rows that state one keep it, the rows that state none stay "rent".
-  - A shape whose only counterparty is its own name links to nothing.
+  - A shape whose only counterparty is its own name links to it all the same, so the rows that
+    print the party exactly are named by the party, not "by the description".
   - The count is the number of rows that carry both, and a row stating its own counterparty is
     never renamed by a link.
 """
@@ -73,7 +74,10 @@ class TestOnePayeeFromTwoSourcesIsOneName:
         # A look-alike spelling is not evidence: only a row that carries both is.
         rows = [("BRAMBLEWICK LEEDS", "")] * 3 + [("BRAMBLEWICK", "Bramblewick")] * 3
 
-        assert learned_links(rows) == {}
+        # The feed's own rows link to their own name (same string, the party's kind); the
+        # look-alike "bramblewick leeds" is left alone.
+        assert learned_links(rows) == {"bramblewick": Alias("bramblewick", 3, STATED_NAME)}
+        assert "bramblewick leeds" not in learned_links(rows)
 
 
 class TestALinkNeedsOneAnswer:
@@ -86,8 +90,18 @@ class TestALinkNeedsOneAnswer:
         assert Counter(n.name for n in named) == {"alex rowan": 3, "sam okafor": 2, "rent": 1}
         assert named[-1].kind == DESCRIPTION
 
-    def test_Links_WhenTheOnlyCounterpartyIsTheShapeItself_HasNothingToLink(self):
-        assert learned_links([("OAKMERE COFFEE", "Oakmere Coffee")] * 4) == {}
+    def test_Links_WhenTheOnlyCounterpartyIsTheShapeItself_StillLinksSoTheKindIsTheParty(self):
+        """The name is the same string either way; the link exists so a statement row that
+        prints the merchant exactly as the feed states it is named by the party and not counted
+        as "named by the description only" (which asked for an export that would say nothing)."""
+        rows = [("OAKMERE COFFEE", "Oakmere Coffee")] * 4 + [("OAKMERE COFFEE", "")] * 2
+
+        links = learned_links(rows)
+        named = names_of(rows)
+
+        assert links == {"oakmere coffee": Alias("oakmere coffee", 4, STATED_NAME)}
+        assert {n.name for n in named} == {"oakmere coffee"}
+        assert [n.kind for n in named[-2:]] == [ALIAS, ALIAS]
 
     def test_Links_CarryTheNumberOfRowsThatCarryBoth(self):
         rows = [("OAKMERE COFFEE", "Oakmere")] * 4 + [("OAKMERE COFFEE", "")] * 9

@@ -359,9 +359,10 @@ def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
     (`ingest.matching`), so each row with a stated counterparty AND a description is evidence
     that the two identifiers are one party. It is derived from the rows, never declared, and
     rebuilt wherever the rows are read. A shape whose rows state two different counterparties
-    is ambiguous and links to none (a rent reference paid to two housemates), and a shape whose
-    only counterparty is its own name has nothing to link. The links are for the rows that lack
-    the stronger identifier: `name_of` uses one only where the row states none itself.
+    is ambiguous and links to none (a rent reference paid to two housemates); a shape whose
+    only counterparty is its own name links to it all the same, so a row printing the party
+    exactly is named by the party and not "by the description". The links are for the rows that
+    lack the stronger identifier: `name_of` uses one only where the row states none itself.
 
     A weaker link is added for a description-shape that no row states a counterparty with
     (`MATCHED_NAME`): where its description, compared as names are compared (`entity_tokens`),
@@ -389,12 +390,16 @@ def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
             form = _comparison_form(reading_of(description), form_cache)
             if form:
                 bare.setdefault(shape, Counter())[form] += 1
+    # A shape equal to the party's own name still links: the NAME is the same string either
+    # way, but the KIND is not, and a statement row printing a merchant exactly as the feed
+    # states it was being counted as "named by the description only" on the Entities page and
+    # on the account's "Party stated" bar, and asked for an export file that would say nothing
+    # new. The link is the one case where the answer is certain.
     links = {
         shape: Alias(name, counted[name], STATED_NAME)
         for shape, counted in seen.items()
         if len(counted) == 1
         for name in counted
-        if name != shape
     }
     for shape, forms in bare.items():
         if shape in seen:
@@ -403,8 +408,7 @@ def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
         parties = stated_forms.get(form, ())
         if len(parties) == 1:
             (party,) = parties
-            if party != shape:
-                links[shape] = Alias(party, 0, STATED_NAME, MATCHED_NAME)
+            links[shape] = Alias(party, 0, STATED_NAME, MATCHED_NAME)
     return links
 
 
