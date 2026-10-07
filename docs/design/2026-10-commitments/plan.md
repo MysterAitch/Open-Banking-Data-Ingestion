@@ -410,7 +410,16 @@ The same projection as a YNAB import file, or a CSV, is the same code with a dif
 7. **How is an external partner represented?** (a) a named party, with legs to and from; (b) an
    account of kind "external" in the registry. Recommended: (a), a party is not an account and
    must never appear on Today or in Position; but its incoming legs need a payee entity, which
-   (a) gives.
+   (a) gives. A party is also what a JOINT ACCOUNT needs (the owner, 2026-10-07: "On the
+   horizon is a shared/joint account ... the framing and metadata may be important/relevant to
+   build in/take into account early"): an account's ownership becomes a declared fact - sole,
+   or joint with its parties and their shares - like its kind and parent, and a transaction on
+   a joint account is attributed to a party or to the household, by rule (the card used, the
+   payee, the flow it belongs to) or by hand, defaulting to the household. Position and the
+   forward calendar then count the owner's share of the account's balance and of what leaves
+   it; a shared bill's flow may name the joint account as the payer with both parties'
+   contributions as incoming legs into it. Nothing else in the model changes. The party and
+   the ownership fact are built in R3 so the joint account fits when it arrives.
 8. **What does "fully funded without going overboard" mean in numbers for a space?** Needed:
    the sum of the shares due from the space in the month, by the earliest draw-down day. Surplus:
    the balance beyond that sum after the last draw-down. Recommended thresholds: say "needed" at
@@ -522,12 +531,17 @@ names its siblings; a source's text is never altered; the masked page shows neit
 variant; a merge of two shapes into one entity joins two series into one history.
 
 **R3. Flows and shares, with the bills space's sum on Today.**
-Build: a commitment's share and its flow as legs; the leg matcher (entity, amount window, day
+Build: a PARTY as a declared thing (named, never an account, never on Today or in Position) and
+an account's OWNERSHIP as a declared fact (sole, or joint with its parties and shares) - both
+small, built here so a joint account fits when it arrives (question 7); a commitment's share
+and its flow as legs, incoming legs as receivables; the leg matcher (entity, amount window, day
 tolerance); the space's monthly sum by draw-down day; Today's line when the space is short from
-the 25th of the month before; the account page's "Expected" fold for a space. Measure: on the
-real store, the bills space's computed need against what the owner actually transfers. Tests:
-the three-leg rent example end to end, each leg matched or reported missing; the external leg
-never checked; the sum over three commitments by day; silence once funded.
+the 25th of the month before, and "owed to you" when a receivable is past its day; the account
+page's "Expected" fold for a space. Measure: on the real store, the bills space's computed need
+against what the owner actually transfers. Tests: the three-leg rent example end to end, each
+leg matched or reported missing; the receivable reported and then closed by a transfer; the
+external leg never checked; the sum over three commitments by day; silence once funded; a
+joint account declared with two parties shows the owner's share in Position.
 
 Then, each its own slice:
 
