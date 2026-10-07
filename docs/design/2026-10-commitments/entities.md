@@ -134,6 +134,20 @@ series).
    counterparty (the Nationwide two-line layout first), tested by a constructed statement
    whose first line is `<method> <party>` and second line a reference: the row's name is the
    party and the reference stays the description.
+2b. **Where the party is not stated is a coverage fact with an action.** The owner, 2026-10-07:
+   "Coverage notes (and the bars) can possibly indicate if structured payment/payee data is
+   available? ... any transactions with payee/merchant data missing can flag up and highlight
+   a CSV/JSON/manual/whatever detail is required ... This doesn't mean we can't use the
+   description however! ... I knee jerk push back against deliberately and misleadingly
+   misusing and misrepresenting the description fields." So: a "Party stated" row on an
+   account's coverage bars, beside Feed, Aggregator, Export file, and Statements, drawn solid
+   where the days' transactions carry a stated party of any kind and hollow where they are
+   named by description only; the coverage note says "N transactions from A to B are named by
+   the description only - an export file for those months would state the party"; Bring in
+   lists it as a want beside the statements and exports it already asks for, since a CSV for
+   a PDF-only stretch is the fix. The description stays in use for those rows - every one
+   says "from the description" - and the bar says what is missing rather than the name
+   pretending. Measured by the names-by-kind counts the summary line now carries.
 3. **An entity holds identifiers with kinds**: `entity_shapes` becomes `entity_identifiers`
    (kind, value, source, declared-or-learned, support); a merge attaches the identifiers the
    ticked rows carry, strongest first; the page says by which kind each row is linked; a
