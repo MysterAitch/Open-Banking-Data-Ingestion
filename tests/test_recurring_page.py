@@ -85,7 +85,9 @@ class TestTheMaskedPage:
         )
         text = response.text
         assert "monthly, about the 3rd" in text
-        assert "5 times over 4 months" in text
+        # A stopped series says when it was last seen, which its absence is measured from,
+        # rather than how long it ran.
+        assert "5 times last" in text and "2026-07-03" in text
         assert "up 15.8%" in text
         for hidden in ("quokka", USUAL, RISEN, "zephyrine"):
             assert hidden not in text.casefold()

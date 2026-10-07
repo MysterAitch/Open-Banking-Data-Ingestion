@@ -5,7 +5,8 @@ table, plus the declared accounts for names, and detects in memory. It never ask
 question per series or per account, so the statements it issues do not grow with the store.
 
 MEASURED 2026-10-07 on the large store (6,969 transactions, 412 proved transfer pairs) on a
-machine busy with another build: reading 0.13 s, detecting 0.06 s, whole page 0.37 s. The bounds are loose on time (a slow machine must not flake) and tight on statements.
+machine busy with another build: reading 0.13 s, detecting 0.06 s, whole page 0.37 s. The
+bounds are loose on time (a slow machine must not flake) and tight on statements.
 """
 
 from __future__ import annotations

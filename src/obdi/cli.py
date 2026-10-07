@@ -104,6 +104,7 @@ from .rebuild_hold import (
     hold_for,
     require_idle,
 )
+from .recurring import RecurringFindings
 from .replay import (
     ActualAccountBinding,
     build_opening_entries,
@@ -3861,6 +3862,18 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return None
         return checked[3].report
 
+    def recurring_data() -> RecurringFindings:
+        """What recurs across every account's held transactions, judged against today on the
+        owner's clock - two whole-table reads, whatever the store's size."""
+        from .page_times import local_day
+        from .recurring import find_recurring
+
+        with Store(db_path) as store:
+            transactions = store.all_transactions()
+            pairs = store.confirmed_transfer_pairs()
+        today = local_day(datetime.now(UTC))
+        return RecurringFindings(find_recurring(transactions, pairs, today), today)
+
     def preview_kept_statement(artefact_id: int, account_id: str) -> MatcherPreview | None:
         """How the matcher would resolve a kept statement's transactions against an account,
         counted with the dry run `check_assignment` uses and writing nothing.
@@ -4621,6 +4634,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 db_path, artefact_id, section, account
             )
         ),
+        recurring_data=recurring_data,
         attempts_index=attempts_index,
         extend_max=extend_max,
         account_shape=account_shape,

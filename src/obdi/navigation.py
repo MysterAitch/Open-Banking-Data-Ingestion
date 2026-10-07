@@ -140,6 +140,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/checks": "more",
     "/reports": "more",
     "/review-flags": "more",
+    "/recurring": "more",
     "/review-flags-two": "more",
     "/review-flags-one": "more",
     "/review-flags-undo": "more",
@@ -181,6 +182,7 @@ PAGE_NAMES: dict[str, PageName] = {
     # "match", not "agree": rows are in agreement with known balances, and two sources match
     # each other (`page_words`).
     "/agreements": PageName("Do my sources match?", "Cross-source agreement"),
+    "/recurring": PageName("Recurring payments"),
     "/identity-health": PageName("Is any payment counted twice?", "Identity health"),
     "/balance-reconciliation": PageName("Do the days add up?", "Balance reconciliation"),
     "/period-reconciliation": PageName("Do the statements add up?", "Statement periods"),

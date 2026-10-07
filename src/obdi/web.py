@@ -98,6 +98,7 @@ from .plural import plural, word
 from .position import Position
 from .providers.truelayer import build_auth_link, exchange_code
 from .reader_findings import Findings, findings_html, findings_of
+from .recurring import RecurringFindings
 from .review_flags import FlagQueue, Outcome
 from .secrets import SecretError, read_secret
 from .space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesPress
@@ -143,6 +144,7 @@ from .web_prune import (
     counts_from_audit,
     removal_split,
 )
+from .web_recurring import RecurringPages
 from .web_scheduler import scheduler_row
 from .web_sections import (
     HOME_LINK,
@@ -638,6 +640,9 @@ class WebConfig:
     #: another account: (artefact id, section key or token, account) to the account it was under.
     #: A refusal is a `DataError`.
     move_statement_section: Callable[[int, str, str], str] | None = None
+    #: What recurs in the transactions held (`recurring.find_recurring` over every account),
+    #: judged against today: the Recurring page's one read.
+    recurring_data: Callable[[], RecurringFindings] | None = None
     #: The fetch-attempt ledger: every ask made of a provider, refused or
     #: landed, plus per-account call counts over the last day. The probing
     #: workflow is press, read, decide - and deciding needs this without a
@@ -3612,6 +3617,7 @@ class ConnectionHandler(
     BalanceChartPages,
     CoverageTimelinePages,
     PositionPages,
+    RecurringPages,
     DestinationPages,
     BringInPages,
     SetAsidePages,
@@ -3725,6 +3731,8 @@ class ConnectionHandler(
             self._period_reconciliation(masked=False, ref=params.get("ref", [""])[0].strip())
         elif route == "/review-flags":
             self._flags_post()
+        elif route == "/recurring":
+            self._recurring_post()
         else:
             return False
         return True
@@ -3879,6 +3887,9 @@ class ConnectionHandler(
             return
         if route == "/review-flags":
             self._flags_get()
+            return
+        if route == "/recurring":
+            self._recurring_get()
             return
         if route == "/date-lag":
             self._date_lag()
@@ -6378,6 +6389,9 @@ class ConnectionHandler(
         if route == "/review-flags":
             # A POST because showing values is a decision, not a link.
             self._flags_post()
+            return
+        if route == "/recurring":
+            self._recurring_post()
             return
         if route == "/review-flags-two":
             self._flags_answer_post(self._read_form(), one=False)
