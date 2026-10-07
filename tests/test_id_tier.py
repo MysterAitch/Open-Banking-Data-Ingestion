@@ -50,9 +50,9 @@ from late_settlement_corpus import (
     household,
     late_settlement_payments,
 )
+from obdi.core.models import RawArtefact
 from obdi.family_anchors import families_of
 from obdi.ingest import import_file, reconcile_batch
-from obdi.models import RawArtefact
 from obdi.providers import starling, truelayer
 from obdi.rebuild import parse_artefact_transactions
 from obdi.space_attribution import fold_space_copies, plan_folds, space_parents

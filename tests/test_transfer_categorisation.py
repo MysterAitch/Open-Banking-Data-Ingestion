@@ -20,8 +20,8 @@ from obdi.categorise import (
     propagation_proposals,
     uncategorised_summary,
 )
+from obdi.core.models import SourceTier, Transaction
 from obdi.ingest import pair_transfers_across_store, reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.store import Store
 
 CURRENT = "starling-personal"

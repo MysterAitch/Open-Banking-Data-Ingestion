@@ -28,7 +28,7 @@ import json
 from dataclasses import replace
 
 from obdi.actual_push import build_audit_envelope
-from obdi.models import TransactionStatus
+from obdi.core.models import TransactionStatus
 from obdi.replay import history_imported_ids, to_actual_transaction
 from obdi.store import Store
 from obdi.web_prune import OrphanCount, counts_from_audit, high_reasons, total_reason

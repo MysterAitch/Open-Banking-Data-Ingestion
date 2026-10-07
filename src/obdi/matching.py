@@ -36,7 +36,7 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import TypeVar
 
-from .models import (
+from .core.models import (
     BASIS_ID,
     BASIS_MANUAL,
     BASIS_OWN_ID,

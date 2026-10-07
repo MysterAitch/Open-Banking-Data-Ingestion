@@ -25,9 +25,9 @@ import httpx
 import pytest
 
 from obdi.cli import build_web_config
+from obdi.core.models import SourceTier, Transaction
 from obdi.entities import shape_of
 from obdi.ingest import import_file
-from obdi.models import SourceTier, Transaction
 from obdi.recurring import find_recurring
 from obdi.store import Store
 from page_dom import elements, parse

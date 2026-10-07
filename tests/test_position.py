@@ -82,8 +82,8 @@ import pytest
 
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import STATED, Anchor, derive_opening, record_stated_anchor
+from obdi.core.models import TransactionStatus
 from obdi.ledger import build_ledger
-from obdi.models import TransactionStatus
 from obdi.position import (
     AccountInput,
     AssetInput,

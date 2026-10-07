@@ -23,7 +23,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .plural import plural
+from .core.plural import plural
 
 if TYPE_CHECKING:
     from .coverage import SilentFeed

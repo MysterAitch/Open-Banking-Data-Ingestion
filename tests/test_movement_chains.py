@@ -42,7 +42,7 @@ from datetime import date
 
 import pytest
 
-from obdi.models import SourceTier, Transaction, TransactionStatus
+from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.movement_completeness import check_chains, movement_completeness
 from obdi.store import Store
 from round_up_corpus import main_feed, space_arrival, space_feed

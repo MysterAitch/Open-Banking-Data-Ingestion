@@ -55,6 +55,7 @@ from obdi.accounts import (
 from obdi.actual_push import opening_balances
 from obdi.balance_anchors import FAMILY, effective_opening, record_stated_anchor
 from obdi.balance_anchors import STATEMENT as STATEMENT_BASIS
+from obdi.core.models import TransactionStatus
 from obdi.family_anchors import OPENED, Families, families_of, family_anchors
 from obdi.ingest import import_file, reconcile_batch
 from obdi.ledger import (
@@ -67,7 +68,6 @@ from obdi.ledger import (
     STATEMENT_CHECK_QUERIES,
     build_ledger,
 )
-from obdi.models import TransactionStatus
 from obdi.providers import starling, truelayer
 from obdi.rebuild import parse_artefact_transactions, rebuild_from_raw
 from obdi.replay import ActualAccountBinding

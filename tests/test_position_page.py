@@ -24,7 +24,7 @@ import pytest
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
 from obdi.cli import build_web_config
-from obdi.masking import MASKED_TOTAL
+from obdi.core.masking import MASKED_TOTAL
 from obdi.position import AccountInput, AssetInput, Observation, build_position
 from obdi.store import Store
 from obdi.valuations import Asset, AssetKind, record_observation

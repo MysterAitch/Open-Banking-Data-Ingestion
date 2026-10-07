@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.secrets import truelayer_readiness
+from obdi.core.secrets import truelayer_readiness
 
 
 def _configure(monkeypatch, **values: str | None) -> None:

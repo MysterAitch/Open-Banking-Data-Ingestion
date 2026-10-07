@@ -26,8 +26,8 @@ from dataclasses import replace
 
 import pytest
 
+from obdi.core.models import Transaction
 from obdi.fault_explanation import AGREES, DIFFERS, UNKNOWN, _recipient_agreement
-from obdi.models import Transaction
 from test_export_cuts import HEALTHY, Row, build, lookalike_of, only_change
 from test_export_dating import render
 from test_space_attribution import FEED, MAIN, pay

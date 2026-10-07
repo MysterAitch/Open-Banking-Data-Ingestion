@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 
-from .plural import plural
+from .core.plural import plural
 
 #: How many entries a masked list shows before saying how many more there are,
 #: so a long run of dates stays readable on a phone.

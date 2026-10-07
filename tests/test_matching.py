@@ -1,8 +1,8 @@
 from datetime import date
 
+from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.identity import content_key
 from obdi.matching import MatchTier, pair_internal_transfers, resolve, supersede
-from obdi.models import SourceTier, Transaction, TransactionStatus
 
 
 def txn(
@@ -212,8 +212,8 @@ class TestABatchReadsEachAccountOnceNotOncePerRecord:
     def _batch(self, store, account, count, prefix):
         from datetime import date
 
+        from obdi.core.models import SourceTier, Transaction, TransactionStatus
         from obdi.ingest import reconcile_batch
-        from obdi.models import SourceTier, Transaction, TransactionStatus
 
         transactions = [
             Transaction(
@@ -256,8 +256,8 @@ class TestABatchReadsEachAccountOnceNotOncePerRecord:
             reads.clear()
             from datetime import date
 
+            from obdi.core.models import SourceTier, Transaction, TransactionStatus
             from obdi.ingest import reconcile_batch
-            from obdi.models import SourceTier, Transaction, TransactionStatus
 
             mixed = [
                 Transaction(

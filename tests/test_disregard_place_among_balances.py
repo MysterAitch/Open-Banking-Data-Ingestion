@@ -41,7 +41,7 @@ from obdi.balance_anchors import (
     effective_opening,
     use_balance_again,
 )
-from obdi.errors import DataError
+from obdi.core.errors import DataError
 from obdi.ingest import import_file
 from obdi.ledger import opening_view
 from obdi.statement_terms import keep_statement_readings

@@ -65,9 +65,9 @@ from typing import Protocol
 from .agreement import Agreement
 from .asked_coverage import asked_days, coverage_of
 from .balance_anchors import EffectiveOpening
-from .london_clock import london
-from .namespaces import CASH_LEG_SOURCE, UNITEMISED_SOURCE
-from .plural import plural
+from .core.london_clock import london
+from .core.namespaces import CASH_LEG_SOURCE, UNITEMISED_SOURCE
+from .core.plural import plural
 from .statement_span import AccountSpans, Span, add_months, statement_spans
 from .statement_span import Known as SpanKnown
 from .store import FOLDED_SIGHTING_PREFIX, Store

@@ -48,8 +48,8 @@ import httpx
 import pytest
 
 import obdi.web_ledger as web_ledger
+from obdi.core.models import Transaction
 from obdi.identity import content_key
-from obdi.models import Transaction
 from obdi.store import Store
 from page_dom import Node, elements, parse
 from served_store import environment_for, served_store

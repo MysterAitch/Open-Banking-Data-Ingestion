@@ -58,7 +58,7 @@ from dataclasses import dataclass
 from datetime import date
 from itertools import accumulate, pairwise
 
-from .models import TransactionStatus
+from .core.models import TransactionStatus
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 #: The share of discriminating steps a reading must explain to be adopted.

@@ -20,6 +20,7 @@ from datetime import date, timedelta
 from urllib.parse import urlencode
 
 from .account_names import AccountsShown
+from .core.plural import agree, plural
 from .fetch_marks import (
     AGGREGATOR,
     KINDS,
@@ -36,7 +37,6 @@ from .fetch_marks import (
     SetAside,
     Standing,
 )
-from .plural import agree, plural
 from .stylesheet_gaps import MARKS_STYLES
 
 _esc = html.escape

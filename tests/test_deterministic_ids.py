@@ -106,8 +106,8 @@ class TestReplaysReproduceIdentity:
         genuinely repeated id-less payments, and their ids differ."""
         from datetime import date
 
+        from obdi.core.models import SourceTier, Transaction, TransactionStatus
         from obdi.ingest import reconcile_batch
-        from obdi.models import SourceTier, Transaction, TransactionStatus
 
         twins = [
             Transaction(

@@ -19,8 +19,8 @@ import re
 
 import httpx
 
-from obdi.page_words import RETIRED_ON_PAGES
-from obdi.plural import agree
+from obdi.core.page_words import RETIRED_ON_PAGES
+from obdi.core.plural import agree
 from page_dom import elements, parse
 from page_walk import household, household_served, invented, served, walked_pages  # noqa: F401
 from test_home_page import clear, page_of, troubled  # noqa: F401

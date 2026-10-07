@@ -20,9 +20,9 @@ from pathlib import Path
 import pytest
 
 from obdi.accounts import AccountBinding, AccountMap
+from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.identity import content_key
 from obdi.ingest import import_file, reconcile_batch
-from obdi.models import SourceTier, Transaction, TransactionStatus
 from obdi.providers import truelayer
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store

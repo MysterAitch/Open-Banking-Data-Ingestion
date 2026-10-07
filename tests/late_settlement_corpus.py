@@ -42,9 +42,9 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from obdi.core.models import RawArtefact
 from obdi.family_anchors import families_of
 from obdi.ingest import import_file, reconcile_batch
-from obdi.models import RawArtefact
 from obdi.providers import starling, truelayer
 from obdi.rebuild import parse_artefact_transactions, rebuild_from_raw
 from obdi.space_attribution import fold_space_copies

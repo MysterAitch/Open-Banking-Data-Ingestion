@@ -35,7 +35,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 
-from .models import Transaction
+from .core.models import Transaction
 from .store import Store
 
 

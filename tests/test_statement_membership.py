@@ -27,8 +27,8 @@ from pathlib import Path
 import pytest
 
 from obdi.balance_anchors import STATED, STATEMENT, Anchor, derive_opening, effective_opening
+from obdi.core.models import SourceTier, Transaction
 from obdi.ingest import import_file
-from obdi.models import SourceTier, Transaction
 from obdi.period_reconciliation import PeriodKind, period_reconciliation
 from obdi.statement_membership import statement_membership
 from obdi.statement_terms import statement_balances

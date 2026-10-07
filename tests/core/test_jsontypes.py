@@ -8,7 +8,7 @@ field's type fails here, named, rather than misbehaving somewhere further in.
 
 import pytest
 
-from obdi.jsontypes import (
+from obdi.core.jsontypes import (
     JsonShapeError,
     as_list_of_objects,
     as_object,

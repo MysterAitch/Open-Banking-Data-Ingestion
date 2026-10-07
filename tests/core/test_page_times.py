@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 
 import pytest
 
-from obdi.page_times import (
+from obdi.core.page_times import (
     PAGE_ZONE,
     age_text,
     clock_text,

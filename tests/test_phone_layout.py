@@ -40,8 +40,8 @@ from credit_union_documents import Move, document, pdf, section
 from obdi import web
 from obdi.callback import render_page
 from obdi.cli import build_web_config
+from obdi.core.models import RawArtefact
 from obdi.identity import artefact_digest
-from obdi.models import RawArtefact
 from obdi.navigation import DESTINATIONS
 from obdi.statement_extraction import keep_extraction
 from obdi.store import Store

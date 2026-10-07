@@ -21,7 +21,7 @@ from datetime import date
 import pytest
 
 from obdi.actual_push import build_envelope
-from obdi.models import TransactionStatus
+from obdi.core.models import TransactionStatus
 from obdi.replay import ActualAccountBinding, is_cleared, to_actual_transaction
 from obdi.store import Store
 from round_up_corpus import rows_the_provider_makes

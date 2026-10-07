@@ -49,6 +49,13 @@ from .attended_fetch import (
 from .backup import BackupRefused, take_backup, verify_copy
 from .balance_chart import BalanceChart
 from .connections import ConnectionStore
+from .core.errors import DataError
+from .core.money import parse_amount
+from .core.namespaces import UNASSIGNED_ACCOUNT
+from .core.outbound import install_if_requested as install_outbound_refusal_if_requested
+from .core.page_times import instant_of
+from .core.plural import agree, plural
+from .core.secrets import SecretError, read_secret, truelayer_readiness
 from .coverage import (
     DoubtReport,
     SourceCoverage,
@@ -65,7 +72,6 @@ from .coverage_timeline import AccountTimeline
 from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .entities import EntitiesView
-from .errors import DataError
 from .family_anchors import Families, families_of
 from .fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
 from .fetch_marks import MarkSet, MarkWorld, gather_world, read_marks
@@ -87,12 +93,7 @@ from .known_accounts import (
     set_space_parents,
 )
 from .ledger import Ledger, LedgerWindow
-from .money import parse_amount
-from .namespaces import UNASSIGNED_ACCOUNT
-from .outbound import install_if_requested as install_outbound_refusal_if_requested
 from .overview import Overview, OverviewCache, build_overview
-from .page_times import instant_of
-from .plural import agree, plural
 from .position import Position
 from .probing import StepRefused, sca_note, walk_history
 from .protection import recheck as recheck_protections
@@ -117,7 +118,6 @@ from .review_flags import FlagQueue, Outcome
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
 from .scheduler_status import StepHandle, run_step
-from .secrets import SecretError, read_secret, truelayer_readiness
 from .space_attribution import fold_space_copies
 from .space_binding import UNBOUND, SpacesPress, space_states
 from .spaces import ArchiveNote
@@ -282,7 +282,7 @@ def _bind_refusal(db_path: Path, canonical: str) -> str:
     PROVIDER, so an account could be bound to "starling" and be
     indistinguishable from the pipe it arrived through.
     """
-    from .namespaces import validate_canonical_name
+    from .core.namespaces import validate_canonical_name
 
     busy = rebuild_in_progress_note(db_path)
     if busy:
@@ -388,7 +388,7 @@ def rename_connection(db_path: Path, old_name: str, new_name: str) -> str:
     worth seeing, because it means the name was never used for a pull.
     """
     from .connections import ConnectionStore
-    from .namespaces import validate_connection_name
+    from .core.namespaces import validate_connection_name
 
     old_name = (old_name or "").strip()
     new_name = (new_name or "").strip().lower()
@@ -653,7 +653,7 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
 
 if TYPE_CHECKING:
     from .balance_anchors import EffectiveOpening
-    from .models import Transaction
+    from .core.models import Transaction
     from .movement_completeness import MovementCompleteness
     from .parsers.base import StatementParser
     from .parsers.pdf_statements import SectionReading
@@ -676,7 +676,7 @@ def _record_run(
     The same numbers the timings flag prints, kept where a trend is a
     SELECT instead of a docker-logs grep. Never allowed to fail the
     rebuild it describes."""
-    from .buildinfo import describe as build_describe
+    from .core.buildinfo import describe as build_describe
 
     with contextlib.suppress(Exception):
         store.record_rebuild_run(
@@ -1105,7 +1105,7 @@ def _scheduler_findings(db_path: Path, now: datetime) -> list[Finding]:
 
 
 def _starling_token_present() -> bool:
-    from .secrets import SecretError, read_secret
+    from .core.secrets import SecretError, read_secret
 
     try:
         return bool(read_secret("STARLING_PERSONAL_ACCESS_TOKEN", required=False))
@@ -1123,8 +1123,8 @@ def _starling_probe_runner(db_path: Path) -> Callable[[str], object]:
     """
 
     def run(raw_cutoff: str) -> object:
+        from .core.secrets import read_secret
         from .probe import parse_cutoff, probe_starling_changes
-        from .secrets import read_secret
 
         cutoff = parse_cutoff(raw_cutoff)
         if cutoff is None:
@@ -1189,8 +1189,8 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
     busy = rebuild_in_progress_note(db_path)
     if busy:
         raise ValueError(busy)
+    from .core.namespaces import MANUAL_SOURCE
     from .ingest import ImportSummary, reconcile_batch
-    from .namespaces import MANUAL_SOURCE
     from .rebuild import (
         _READS_NO_ROWS,
         _starling_defaults,
@@ -3769,8 +3769,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         first, so the count of what is kept fell with no word said. A filed
         copy is preferred to one waiting, because it says whose the bytes are.
         """
+        from .core.models import RawArtefact
         from .identity import artefact_digest
-        from .models import RawArtefact
         from .statement_extraction import is_kept as extraction_is_kept
         from .statement_extraction import keep_extraction
 
@@ -3845,7 +3845,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         None when there is no doubt, and also for everything `assign_kept_statement`
         answers without reading rows or by raising: those need no confirmation.
         """
-        from .namespaces import validate_canonical_name
+        from .core.namespaces import validate_canonical_name
 
         destination = account_id.strip()
         if not destination:
@@ -3866,7 +3866,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def recurring_data() -> RecurringFindings:
         """What recurs across every account's held transactions, judged against today on the
         owner's clock - two whole-table reads, whatever the store's size."""
-        from .page_times import local_day
+        from .core.page_times import local_day
         from .recurring import find_recurring
         from .statement_terms import statement_balances
 
@@ -3948,7 +3948,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         None where the statement is not kept, is not read by any parser, or is refused by the
         one that reads it: a count of what cannot be read is no answer.
         """
-        from .namespaces import validate_canonical_name
+        from .core.namespaces import validate_canonical_name
         from .parsers.uk_banks import detect
 
         destination = account_id.strip()
@@ -4012,8 +4012,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         `doubt_acknowledged` says a person has seen it and chose to go on; the
         result sentence then quotes it.
         """
+        from .core.namespaces import validate_canonical_name
         from .ingest import ImportSummary, reconcile_batch
-        from .namespaces import validate_canonical_name
 
         destination = account_id.strip()
         if not destination:
@@ -4165,7 +4165,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     ) -> tuple[int | None, str, tuple[str, str]]:
         import re
 
-        from .errors import DataError
+        from .core.errors import DataError
 
         try:
             days = sorted(
@@ -4184,7 +4184,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         Unlike `artefact_index` there is no LIMIT: a capped list buried
         statements under newer feed payloads, which is why this exists.
         """
-        from .errors import DataError
+        from .core.errors import DataError
         from .parsers.credit_union_pdf import section_key
         from .parsers.pdf_statements import PdfStatementParser
         from .parsers.uk_banks import detect
@@ -5990,7 +5990,7 @@ def main(argv: list[str] | None = None) -> int:
             apply_propagation,
             propagation_proposals,
         )
-        from .money import format_amount
+        from .core.money import format_amount
 
         tolerance = args.tolerance if args.tolerance is not None else PROPAGATION_AMOUNT_TOLERANCE
         with Store(db_path) as store:

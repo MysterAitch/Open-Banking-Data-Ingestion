@@ -31,8 +31,8 @@ import pytest
 
 from obdi import cli
 from obdi.alerts import Finding
+from obdi.core.models import RawArtefact
 from obdi.identity import artefact_digest, content_key
-from obdi.models import RawArtefact
 from obdi.overview import _alert_item
 from obdi.scheduler_status import (
     CYCLE_STEPS,

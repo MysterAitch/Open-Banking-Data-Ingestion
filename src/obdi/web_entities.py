@@ -22,6 +22,10 @@ from urllib.parse import quote
 
 from .account_names import AccountShown
 from .callback import render_page
+from .core.logs import say
+from .core.masking import mask_text
+from .core.money import format_amount
+from .core.plural import agree, plural
 from .entities import (
     COVERED_SHOWN,
     OPENING_WORDS,
@@ -35,11 +39,7 @@ from .entities import (
     Proposal,
     Suggestion,
 )
-from .logs import say
-from .masking import mask_text
-from .money import format_amount
 from .navigation import page_name
-from .plural import agree, plural
 from .web_recurring import values_mode
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone

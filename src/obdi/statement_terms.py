@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from .account_observations import Observation
-from .london_clock import london
+from .core.london_clock import london
+from .core.plural import plural
 from .parsers.base import ParseError
 from .parsers.pdf_statements import (
     NotExtracted,
@@ -34,7 +35,6 @@ from .parsers.statement_reading import (
     reading_from_json,
     reading_to_json,
 )
-from .plural import plural
 from .statement_extraction import not_yet_extracted_words, serving, stored_sections
 from .store import SectionAssignment, Store
 
@@ -771,7 +771,7 @@ def reversion_findings(
         owed = -stamped[1] if stamped else 0
         if owed <= 0:
             continue
-        from .money import format_amount
+        from .core.money import format_amount
 
         found.append(
             (

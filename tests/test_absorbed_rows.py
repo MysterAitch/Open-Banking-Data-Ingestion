@@ -47,12 +47,12 @@ from late_settlement_corpus import (
     late_settlement_payments,
 )
 from obdi import ingest
+from obdi.core.models import RawArtefact, Transaction
+from obdi.core.namespaces import ENTITY_KEYED_TABLES
 from obdi.exact_rule_measure import exact_rule_report
 from obdi.family_anchors import families_of
 from obdi.ingest import import_file, reconcile_batch
-from obdi.models import RawArtefact, Transaction
 from obdi.movement_completeness import check_rows
-from obdi.namespaces import ENTITY_KEYED_TABLES
 from obdi.protection import diff_span, fingerprint_of, span_rows
 from obdi.providers import starling
 from obdi.rebuild import parse_artefact_transactions, rebuild_from_raw

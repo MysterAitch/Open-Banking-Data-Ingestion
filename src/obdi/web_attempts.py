@@ -19,7 +19,7 @@ import html
 from collections import Counter
 
 from .account_names import code_html
-from .plural import plural
+from .core.plural import plural
 
 _esc = html.escape
 

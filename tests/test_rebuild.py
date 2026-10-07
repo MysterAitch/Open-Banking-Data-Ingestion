@@ -1110,7 +1110,7 @@ class TestEveryApiSourceHasExactlyOneReplayRole:
     """
 
     def test_TheTransactionalAndSkipSets_PartitionTheApiNamespace(self):
-        from obdi.namespaces import API_SOURCES
+        from obdi.core.namespaces import API_SOURCES
         from obdi.rebuild import _NON_TRANSACTIONAL, _TRANSACTIONAL
 
         assert _TRANSACTIONAL <= API_SOURCES

@@ -23,10 +23,10 @@ from .account_about import (
     windows_in_order,
 )
 from .accounts import AccountRecord, LimitWindow
-from .masking import MASKED_TOTAL
-from .money import format_amount
+from .core.masking import MASKED_TOTAL
+from .core.money import format_amount
+from .core.plural import plural
 from .navigation import account_address
-from .plural import plural
 from .statement_sections import masked
 
 

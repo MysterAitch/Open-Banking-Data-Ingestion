@@ -201,8 +201,8 @@ class TestTheEndToEndSkipPath:
     ):
         from datetime import datetime
 
-        from obdi.models import RawArtefact
-        from obdi.namespaces import UNASSIGNED_ACCOUNT
+        from obdi.core.models import RawArtefact
+        from obdi.core.namespaces import UNASSIGNED_ACCOUNT
         from obdi.store import Store
 
         db = tmp_path / "store.sqlite3"

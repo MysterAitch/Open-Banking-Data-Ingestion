@@ -43,8 +43,8 @@ from obdi.balance_anchors import (
     stated_anchors,
 )
 from obdi.balance_reconciliation import balance_reconciliation
+from obdi.core.models import TransactionStatus
 from obdi.ingest import import_file
-from obdi.models import TransactionStatus
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store
 from obdi.synthetic_pdf import build_pdf

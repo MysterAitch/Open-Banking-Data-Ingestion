@@ -13,7 +13,7 @@ duplicates real money, silently, in a store meant to be the authoritative copy.
 
 from __future__ import annotations
 
-from obdi.models import SourceTier
+from obdi.core.models import SourceTier
 from obdi.providers.truelayer import to_transaction
 
 BASE = {

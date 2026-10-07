@@ -20,8 +20,8 @@ from pathlib import Path
 import pytest
 
 from obdi.backup import BackupRefused, take_backup, verify_copy
+from obdi.core.models import SourceTier, Transaction
 from obdi.ingest import reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.store import TABLE_NAMES, Store
 
 

@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .plural import plural
+from .core.plural import plural
 from .review_report import SETTLED_CLASSES, FlagClass, assess_flags
 from .store import Store
 

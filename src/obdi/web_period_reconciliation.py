@@ -18,6 +18,7 @@ from __future__ import annotations
 import html
 
 from .account_names import AccountsShown
+from .core.plural import plural
 from .period_reconciliation import (
     AccountPeriods,
     Locus,
@@ -29,7 +30,6 @@ from .period_reconciliation import (
     _period_lines,
     _span,
 )
-from .plural import plural
 
 _esc = html.escape
 

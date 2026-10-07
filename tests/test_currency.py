@@ -16,8 +16,8 @@ from datetime import date
 
 import pytest
 
-from obdi.models import Transaction
-from obdi.money import AmountParseError, parse_amount
+from obdi.core.models import Transaction
+from obdi.core.money import AmountParseError, parse_amount
 from obdi.parsers.base import ParseError
 from obdi.parsers.uk_banks import StarlingCsvParser
 from obdi.providers.starling import StarlingError

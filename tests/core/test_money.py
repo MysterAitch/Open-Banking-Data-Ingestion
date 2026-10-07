@@ -1,6 +1,6 @@
 import pytest
 
-from obdi.money import AmountParseError, format_amount, parse_amount
+from obdi.core.money import AmountParseError, format_amount, parse_amount
 
 
 class TestAmountParsing:

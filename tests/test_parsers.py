@@ -1,8 +1,8 @@
 import pytest
 
-from obdi.errors import DataError
-from obdi.jsontypes import JsonShapeError
-from obdi.money import AmountParseError
+from obdi.core.errors import DataError
+from obdi.core.jsontypes import JsonShapeError
+from obdi.core.money import AmountParseError
 from obdi.parsers.base import ParseError
 from obdi.parsers.uk_banks import AmexUkCsvParser, MonzoCsvParser, StarlingCsvParser, detect
 

@@ -33,9 +33,9 @@ import pytest
 
 from obdi.accounts import AccountBinding, AccountMap
 from obdi.balance_anchors import effective_opening
+from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.identity import content_key
 from obdi.ingest import import_file, reconcile_batch
-from obdi.models import SourceTier, Transaction, TransactionStatus
 from obdi.period_reconciliation import (
     PeriodKind,
     gather_evidence,

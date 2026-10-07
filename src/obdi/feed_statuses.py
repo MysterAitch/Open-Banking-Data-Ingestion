@@ -38,9 +38,9 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from .core.models import Transaction
 from .family_anchors import feed_payload
 from .identity import normalise_description
-from .models import Transaction
 from .payment_links import FIRST_PARTY_FEEDS
 from .providers.starling import STATUS_MAP
 from .round_up_accounts import feed_uids_by_entity

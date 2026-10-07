@@ -39,9 +39,9 @@ from obdi.account_names import AccountsShown, accounts_shown
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.bring_in import UploadKind, files_wanted
 from obdi.connections import Connection, ConnectionStore
+from obdi.core.namespaces import UNASSIGNED_ACCOUNT as UNASSIGNED
+from obdi.core.page_words import RETIRED_ON_PAGES
 from obdi.fetch_gaps import FetchReport
-from obdi.namespaces import UNASSIGNED_ACCOUNT as UNASSIGNED
-from obdi.page_words import RETIRED_ON_PAGES
 from obdi.store import Store
 from obdi.synthetic_pdf import build_pdf
 from obdi.todo import wanted_days

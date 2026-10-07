@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
 
-from .errors import DataError
+from .core.errors import DataError
 from .store import Store
 
 

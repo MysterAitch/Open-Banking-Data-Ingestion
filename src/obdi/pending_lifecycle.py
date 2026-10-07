@@ -30,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from .plural import plural
+from .core.plural import plural
 from .store import Store
 
 #: How long after its pending date a settlement counterpart may book.

@@ -27,7 +27,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from .namespaces import UNASSIGNED_ACCOUNT
+from .core.namespaces import UNASSIGNED_ACCOUNT
 
 #: A year as a file name writes it: four digits, bounded by anything but a digit.
 _YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")

@@ -17,7 +17,7 @@ import httpx
 import pytest
 
 import obdi.web_ledger as web_ledger
-from obdi.errors import DataError
+from obdi.core.errors import DataError
 from obdi.ledger_scope import DEFAULT_KEY, default_key, set_default_key
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import SCHEMA_VERSION, Store

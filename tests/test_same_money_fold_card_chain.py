@@ -31,7 +31,7 @@ from card_chain_corpus import (
     statement_day,
     text_day,
 )
-from obdi.models import TransactionStatus
+from obdi.core.models import TransactionStatus
 from obdi.period_reconciliation import PeriodKind, gather_evidence, period_reconciliation
 from obdi.same_money_fold import fold_same_money, plan_same_money
 from obdi.statement_membership import Membership

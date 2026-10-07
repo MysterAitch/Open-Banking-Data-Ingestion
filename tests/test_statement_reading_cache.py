@@ -288,7 +288,7 @@ class TestTheStepsOfThePassAreTimed:
     def test_Rebuild_WithTimingsOn_RecordsEachStepOfTheSameMoneyPassAsASubPhase(
         self, store, tmp_path
     ):
-        from obdi import instrumentation
+        from obdi.core import instrumentation
 
         build_card(store, tmp_path)
         instrumentation.configure(True)

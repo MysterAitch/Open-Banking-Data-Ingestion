@@ -22,8 +22,8 @@ from datetime import UTC, date, datetime
 
 import pytest
 
+from obdi.core.models import SourceTier, Transaction
 from obdi.entities import OWNER_NAME, OWNER_ROLE, Entity, EntityRefused, view_of
-from obdi.models import SourceTier, Transaction
 from obdi.recurring import Series, find_recurring
 from obdi.store import Store
 

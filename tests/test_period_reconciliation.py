@@ -37,9 +37,9 @@ import pytest
 from coverage_page_world import repeated_lines
 from obdi.cli import build_web_config
 from obdi.connections import ConnectionStore
+from obdi.core.models import SourceTier, Transaction
 from obdi.identity import content_key
 from obdi.ingest import import_file, reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.period_reconciliation import Locus, PeriodKind, period_reconciliation
 from obdi.store import Store
 from obdi.synthetic_pdf import build_pdf

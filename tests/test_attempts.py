@@ -800,7 +800,7 @@ class TestConnectionRenameAcrossTheStore:
     def _seed(self, store, connection_id):
         from datetime import UTC, datetime
 
-        from obdi.models import RawArtefact
+        from obdi.core.models import RawArtefact
 
         store.land_artefact(
             RawArtefact(

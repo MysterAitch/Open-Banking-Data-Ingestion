@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 
-from .plural import plural as _plural
+from .core.plural import plural as _plural
 from .providers import starling
 from .spaces import HistoricalSpace
 from .store import Store

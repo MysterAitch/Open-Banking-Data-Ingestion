@@ -47,9 +47,9 @@ from .cash_withdrawals import (
     choose_cash_account,
     read_candidates,
 )
+from .core.models import SourceTier, Transaction, TransactionStatus
+from .core.namespaces import CASH_LEG_SOURCE
 from .identity import entity_id_for
-from .models import SourceTier, Transaction, TransactionStatus
-from .namespaces import CASH_LEG_SOURCE
 from .store import Store
 
 #: The words a leg is described in, which a page shows as the row's payee. The account the money

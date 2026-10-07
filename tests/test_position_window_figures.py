@@ -20,8 +20,8 @@ from datetime import date, timedelta
 import pytest
 
 from obdi.balance_anchors import EffectiveOpening
-from obdi.date_window import Resolution, sample_days
-from obdi.models import SourceTier, Transaction, TransactionStatus
+from obdi.core.date_window import Resolution, sample_days
+from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.position import (
     AccountInput,
     AssetInput,

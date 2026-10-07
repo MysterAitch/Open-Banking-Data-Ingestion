@@ -27,8 +27,8 @@ from pathlib import Path
 
 import httpx
 
-from .plural import agree, plural, word
-from .secrets import SecretError, read_secret
+from .core.plural import agree, plural, word
+from .core.secrets import SecretError, read_secret
 
 # Where a secret comes from is checked only when the deployment claims to have
 # one. An absent Starling token is a legitimate configuration (not everyone
@@ -330,7 +330,7 @@ def collision_checks(
     absent - and so is drift, where evidence carries a source name no
     part of the code declares any more.
     """
-    from .namespaces import FIRST_PARTY_CONNECTION_IDS, PROVIDERS, SOURCES
+    from .core.namespaces import FIRST_PARTY_CONNECTION_IDS, PROVIDERS, SOURCES
 
     results: list[CheckResult] = []
     connection = getattr(store, "connection", None)

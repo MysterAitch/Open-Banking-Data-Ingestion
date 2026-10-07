@@ -27,10 +27,10 @@ from urllib.parse import urlparse
 
 from .account_names import AccountsShown
 from .alerts import consent_rung
-from .buildinfo import describe
 from .callback import render_page
 from .connections import ConnectionStore
-from .page_times import instant_of
+from .core.buildinfo import describe
+from .core.page_times import instant_of
 from .values_sitting import more_line_html
 from .web_connections import Hooks, connections_body
 from .web_marks import FETCH_NEXT_LINE

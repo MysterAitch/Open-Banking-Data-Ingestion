@@ -27,8 +27,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from .core.masking import Structural
 from .family_anchors import ExportRow
-from .masking import Structural
 
 #: What the store holds for an export row.
 NOTHING = "nothing"

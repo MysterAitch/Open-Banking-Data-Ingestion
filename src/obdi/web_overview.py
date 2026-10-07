@@ -30,8 +30,17 @@ from urllib.parse import quote
 
 from .account_names import AccountShown
 from .agreement import Standing
+from .core.logs import say
+from .core.page_times import (
+    clock_text,
+    date_with_age,
+    instant_text,
+    local_day,
+    range_text,
+    span_phrase,
+)
+from .core.plural import plural
 from .fetch_gaps import FetchReport
-from .logs import say
 from .overview import (
     ALERT_CONDITIONS,
     ARCHIVED,
@@ -48,15 +57,6 @@ from .overview import (
     AccountOverview,
     Overview,
 )
-from .page_times import (
-    clock_text,
-    date_with_age,
-    instant_text,
-    local_day,
-    range_text,
-    span_phrase,
-)
-from .plural import plural
 from .rebuild_hold import RebuildInProgress
 from .standing_data import (
     ADDS_UP,

@@ -24,8 +24,8 @@ from datetime import date
 from typing import ClassVar
 
 from obdi.categorise import apply_rules
+from obdi.core.models import SourceTier, Transaction
 from obdi.ingest import pair_transfers_across_store, reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.store import Store
 
 

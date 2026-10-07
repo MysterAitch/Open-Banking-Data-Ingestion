@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from .core.plural import agree, plural
 from .fetch_gaps import Basis, FetchGap, GapKind
-from .plural import agree, plural
 from .statement_span import HoleReason
 
 

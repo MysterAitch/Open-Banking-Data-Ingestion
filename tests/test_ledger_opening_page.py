@@ -37,7 +37,7 @@ import pytest
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import STATED, Anchor, record_stated_anchor, stated_anchors
 from obdi.cli import build_web_config
-from obdi.masking import MASKED_TOTAL
+from obdi.core.masking import MASKED_TOTAL
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_account_pages import assert_tap_targets_are_thumb_sized

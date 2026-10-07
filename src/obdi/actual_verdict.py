@@ -41,7 +41,7 @@ from .actual_audit import (
     count_of,
     differing_accounts,
 )
-from .plural import plural as counted
+from .core.plural import plural as counted
 from .web_prune import align_plan, counts_from_audit
 
 #: Seconds without a heartbeat after which queued work is called stuck. The applier

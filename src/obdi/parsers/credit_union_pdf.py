@@ -73,7 +73,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
-from ..plural import plural
+from ..core.plural import plural
 from .base import ParseError
 from .statement_reading import StatementReading, StatementRow
 

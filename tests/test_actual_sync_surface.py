@@ -15,7 +15,7 @@ import httpx
 
 from obdi import web
 from obdi.connections import ConnectionStore
-from obdi.namespaces import QUEUE_KINDS
+from obdi.core.namespaces import QUEUE_KINDS
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 

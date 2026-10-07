@@ -23,9 +23,9 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
+from obdi.core.models import RawArtefact
+from obdi.core.namespaces import ENTITY_KEYED_TABLES
 from obdi.identity import artefact_digest
-from obdi.models import RawArtefact
-from obdi.namespaces import ENTITY_KEYED_TABLES
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store
 from source_tree import module_text

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.classification import (
+from obdi.core.classification import (
     CATEGORICAL_LIMIT,
     FIELD_CAVEATS,
     KNOWN_FIELDS,

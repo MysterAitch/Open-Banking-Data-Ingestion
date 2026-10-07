@@ -36,9 +36,9 @@ from .balance_anchors import (
     effective_opening,
     known_account,
 )
+from .core.masking import Structural
+from .core.models import Transaction
 from .fault_structure import StructureReport, account_report, walk_report
-from .masking import Structural
-from .models import Transaction
 
 if TYPE_CHECKING:
     from .family_anchors import Families

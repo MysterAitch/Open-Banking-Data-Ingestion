@@ -45,7 +45,7 @@ from obdi.accounts import (
     mint_account_id,
     read_registry_file,
 )
-from obdi.errors import DataError
+from obdi.core.errors import DataError
 from obdi.store import SCHEMA_VERSION, Store
 
 SCHEMA_HISTORY = pathlib.Path(__file__).resolve().parent / "schema_history"
@@ -412,8 +412,8 @@ class TestDeclaredAccountsSurviveARebuild:
         An account no artefact accounts for stays, because nothing could
         ever re-derive it.
         """
+        from obdi.core.models import SourceTier, Transaction
         from obdi.ingest import reconcile_batch
-        from obdi.models import SourceTier, Transaction
         from obdi.rebuild import rebuild_from_raw
 
         store.declare_account(FULL_RECORD)

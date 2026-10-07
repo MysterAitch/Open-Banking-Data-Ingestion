@@ -19,8 +19,8 @@ import re
 import httpx
 import pytest
 
-from obdi import page_words
-from obdi.page_words import RETIRED_ON_PAGES
+from obdi.core import page_words
+from obdi.core.page_words import RETIRED_ON_PAGES
 from page_walk import artefact_ids, invented, served  # noqa: F401
 from test_page_wording_vocabulary import text_of
 

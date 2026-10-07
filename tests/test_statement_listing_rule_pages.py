@@ -33,7 +33,7 @@ import pytest
 from obdi.account_names import AccountsShown
 from obdi.balance_anchors import effective_opening
 from obdi.cli import build_web_config
-from obdi.models import TransactionStatus
+from obdi.core.models import TransactionStatus
 from obdi.overview import NOW, standing_items_from
 from obdi.standing_data import standings_for
 from obdi.statement_listing_measure import StatementListingReport, statement_listing_report

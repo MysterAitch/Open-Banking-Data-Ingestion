@@ -37,7 +37,7 @@ from .actual_verdict import (
     unreadable_verdict,
     when,
 )
-from .plural import plural as counted
+from .core.plural import plural as counted
 from .web_empty import empty_section
 from .web_marker import (
     DIFFERS,

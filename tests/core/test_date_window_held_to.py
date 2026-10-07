@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from obdi.date_window import Period, Unit, between, length, named, resolve
+from obdi.core.date_window import Period, Unit, between, length, named, resolve
 
 D = date
 HELD_FROM = D(2019, 1, 1)

@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from enum import StrEnum
 
-from .page_times import date_with_age
+from .core.page_times import date_with_age
 from .standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,

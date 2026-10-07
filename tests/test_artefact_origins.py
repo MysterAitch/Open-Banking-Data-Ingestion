@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from obdi.models import RawArtefact
+from obdi.core.models import RawArtefact
 from obdi.store import Store
 
 SCHEMA_HISTORY = pathlib.Path(__file__).resolve().parent / "schema_history"
@@ -260,7 +260,7 @@ class TestAssigningAKeptStatement:
     def test_KeptStatement_WhenAssignedToItsAccount_KeepsEveryNameItArrivedUnder(
         self, store
     ):
-        from obdi.namespaces import UNASSIGNED_ACCOUNT
+        from obdi.core.namespaces import UNASSIGNED_ACCOUNT
 
         store.land_artefact(_statement(BARE_NAME, account_ref=UNASSIGNED_ACCOUNT))
         store.land_artefact(
@@ -288,7 +288,7 @@ class TestAssigningAKeptStatement:
         """The recovery-by-reimport case: the same document is already
         filed under the destination, so the misfiled copy is absorbed -
         and the name it was misfiled under is part of what it brings."""
-        from obdi.namespaces import UNASSIGNED_ACCOUNT
+        from obdi.core.namespaces import UNASSIGNED_ACCOUNT
 
         store.land_artefact(_statement(BARE_NAME, account_ref=ACCOUNT))
         store.land_artefact(

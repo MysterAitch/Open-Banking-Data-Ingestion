@@ -40,7 +40,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date
 
-from .models import Transaction
+from .core.models import Transaction
 from .statement_terms import StatementBalance
 from .store import Store
 

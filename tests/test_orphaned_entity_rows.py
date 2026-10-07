@@ -79,7 +79,7 @@ class TestCountingWorkLeftPointingAtNothing:
     def test_EveryTableKeyedToATransaction_IsChecked(self, tmp_path):
         """Read out of the registry rather than listed here, so a table added
         later is covered without this file being edited."""
-        from obdi.namespaces import ENTITY_KEYED_TABLES
+        from obdi.core.namespaces import ENTITY_KEYED_TABLES
 
         store_path = tmp_path / "store.sqlite3"
         _one_transaction(store_path)

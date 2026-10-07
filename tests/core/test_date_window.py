@@ -67,7 +67,7 @@ from itertools import pairwise
 
 import pytest
 
-from obdi.date_window import (
+from obdi.core.date_window import (
     DAILY_UP_TO_DAYS,
     TAX_YEAR_STARTS,
     WEEKLY_UP_TO_DAYS,

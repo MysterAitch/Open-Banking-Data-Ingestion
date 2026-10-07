@@ -740,7 +740,7 @@ def _overlaps(mark: Mark, first_day: date | None, last_day: date) -> bool:
 def _known_source(
     world: MarkWorld, account: str, source: str, statement_sources: frozenset[str]
 ) -> bool:
-    from .namespaces import FILE_SOURCES
+    from .core.namespaces import FILE_SOURCES
 
     if source in statement_sources or source in FILE_SOURCES:
         return True

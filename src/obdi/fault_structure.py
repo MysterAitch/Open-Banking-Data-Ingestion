@@ -45,6 +45,7 @@ from datetime import date
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
+from .core.masking import Structural, Total
 from .family_anchors import OPENED
 from .fault_explanation import (
     EXPLAINED_CHANGES,
@@ -53,7 +54,6 @@ from .fault_explanation import (
     Selection,
     WalkExplanation,
 )
-from .masking import Structural, Total
 
 if TYPE_CHECKING:
     from .balance_anchors import EffectiveOpening, FamilyWalk

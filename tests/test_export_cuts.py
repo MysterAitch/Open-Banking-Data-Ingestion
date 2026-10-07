@@ -22,10 +22,10 @@ from datetime import date
 import pytest
 
 from obdi.balance_anchors import FAMILY, OPENED, effective_opening
+from obdi.core.models import Transaction, TransactionStatus
 from obdi.family_anchors import families_of
 from obdi.fault_explanation import Lookalike, _nearest, explain_walk
 from obdi.ingest import import_file, pair_transfers_across_store
-from obdi.models import Transaction, TransactionStatus
 from obdi.sighting_placement import SightingPlacement
 from obdi.store import Store
 from test_export_dating import render

@@ -17,7 +17,7 @@ import json
 import pytest
 
 from obdi.actual_push import ActualAccountBinding, build_envelope
-from obdi.jsontypes import rows as json_rows
+from obdi.core.jsontypes import rows as json_rows
 from obdi.providers import starling
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store

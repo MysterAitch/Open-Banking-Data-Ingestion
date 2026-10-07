@@ -45,12 +45,12 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
-from .errors import DataError
+from .core.errors import DataError
+from .core.masking import Structural
+from .core.models import SourceTier, TransactionStatus
+from .core.page_words import REMOVE_PROTECTION, REMOVE_TYPED_TRANSACTION
 from .join_basis import how_words, sighting_views
-from .masking import Structural
 from .matching import EXACT_RULE_DOUBT
-from .models import SourceTier, TransactionStatus
-from .page_words import REMOVE_PROTECTION, REMOVE_TYPED_TRANSACTION
 from .payment_links import AGGREGATORS
 from .review_report import (
     GAP_AFTER,
@@ -329,7 +329,7 @@ def _row_view(
     account: str,
     views: dict[str, list[Any]],
 ) -> RowView:
-    from .money import format_amount
+    from .core.money import format_amount
 
     row = store.connection.execute(
         "SELECT amount_minor, value_date, status, description, currency FROM transactions "

@@ -27,8 +27,8 @@ from datetime import UTC, date, datetime
 
 import pytest
 
+from obdi.core.models import RawArtefact, SourceTier, Transaction
 from obdi.ingest import reconcile_batch
-from obdi.models import RawArtefact, SourceTier, Transaction
 from obdi.store import TABLE_NAMES, Store
 
 SCHEMA_HISTORY = pathlib.Path(__file__).resolve().parent / "schema_history"

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from obdi import instrumentation
+from obdi.core import instrumentation
 
 
 @pytest.fixture(autouse=True)

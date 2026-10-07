@@ -1,7 +1,7 @@
 import pytest
 
-from obdi.jsontypes import JsonShapeError
-from obdi.models import TransactionStatus
+from obdi.core.jsontypes import JsonShapeError
+from obdi.core.models import TransactionStatus
 from obdi.providers.starling import StarlingError, to_transaction
 
 

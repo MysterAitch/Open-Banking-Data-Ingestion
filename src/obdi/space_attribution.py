@@ -63,8 +63,8 @@ from dataclasses import dataclass
 from datetime import date
 
 from .accounts import AccountMap
+from .core.models import Transaction, TransactionStatus
 from .coverage import same_movement_days
-from .models import Transaction, TransactionStatus
 from .store import Store
 
 _FOLDABLE = (TransactionStatus.BOOKED, TransactionStatus.FOLDED)

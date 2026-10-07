@@ -18,8 +18,8 @@ from consecutive_days_corpus import consecutive_payments
 from late_settlement_corpus import ORDERS, household
 from obdi import rebuild
 from obdi.account_names import AccountShown, AccountsShown
+from obdi.core.page_words import INTERNAL_ON_PAGES
 from obdi.exact_rule_measure import exact_rule_report
-from obdi.page_words import INTERNAL_ON_PAGES
 from obdi.providers import starling
 from obdi.store import Store
 from round_up_corpus import card_payment

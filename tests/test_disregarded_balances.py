@@ -34,7 +34,7 @@ from obdi.balance_anchors import (
     use_balance_again,
 )
 from obdi.cli import build_web_config
-from obdi.errors import DataError
+from obdi.core.errors import DataError
 from obdi.rebuild import rebuild_from_raw
 from obdi.statement_terms import keep_statement_readings
 from obdi.store import SCHEMA_VERSION, Store

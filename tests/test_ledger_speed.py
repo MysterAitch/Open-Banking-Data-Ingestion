@@ -31,6 +31,7 @@ import pytest
 
 from large_store_corpus import MAIN, LargeStore, cached_large_store
 from large_store_pages import copy_of, serving
+from obdi.core.models import BASIS_OWN_ID
 from obdi.join_basis import (
     SightingView,
     StatedMoment,
@@ -42,7 +43,6 @@ from obdi.join_basis import (
     join_counts_of_bases,
     sighting_views,
 )
-from obdi.models import BASIS_OWN_ID
 from obdi.store import SightingDetail, Store
 
 LEDGER = f"/ledger?ref={MAIN}"
@@ -225,8 +225,8 @@ class TestMaskingAWrappedRecord:
     def test_RecordWrappedTwice_ExposesExactlyItsFieldsAndNoOthers(self):
         from dataclasses import fields
 
+        from obdi.core.masking import Disclosed
         from obdi.ledger import LedgerRow, Money
-        from obdi.masking import Disclosed
 
         money = Money(12345, "GBP")
         once = Disclosed(money, unmasked=True)
@@ -239,8 +239,8 @@ class TestMaskingAWrappedRecord:
         assert {f.name for f in fields(LedgerRow)}  # the type a page wraps most often
 
     def test_SameRecord_UnmaskedAndMasked_StillDifferInTheValueShown(self):
+        from obdi.core.masking import Disclosed
         from obdi.ledger import Money
-        from obdi.masking import Disclosed
 
         shown = Disclosed(Money(12345, "GBP"), unmasked=True)
         hidden = Disclosed(Money(12345, "GBP"), unmasked=False)

@@ -86,11 +86,11 @@ from obdi.balance_anchors import (
     effective_opening,
     record_stated_anchor,
 )
+from obdi.core.models import SourceTier, Transaction
 from obdi.family_anchors import Families, families_of
 from obdi.identity import content_key
 from obdi.ingest import reconcile_batch
 from obdi.ledger import running_balance
-from obdi.models import SourceTier, Transaction
 from obdi.protection import press
 from obdi.protection import tested_days as days_offered
 from obdi.space_attribution import fold_space_copies

@@ -39,6 +39,10 @@ from urllib.parse import quote, urlencode
 
 from .account_names import AccountShown, code_html
 from .callback import render_page
+from .core.date_window import resolve
+from .core.logs import say
+from .core.page_times import range_text, range_with_span
+from .core.plural import plural
 from .coverage_timeline import (
     ASK_HOLE,
     COMPLETE,
@@ -67,10 +71,6 @@ from .coverage_timeline import (
     seam_anchor,
     span_words,
 )
-from .date_window import resolve
-from .logs import say
-from .page_times import range_text, range_with_span
-from .plural import plural
 from .web_balance_chart import (
     EDGE,
     MAX_PIXELS_PER_DAY,

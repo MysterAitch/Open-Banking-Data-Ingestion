@@ -12,6 +12,7 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 
+from .core.errors import DataError
 from .entity_tokens import (
     Token,
     align_initials,
@@ -20,7 +21,6 @@ from .entity_tokens import (
     is_method_only,
     tokens_of,
 )
-from .errors import DataError
 from .identity import normalise_description
 
 #: The rules that can join two shapes into one proposed group, said once here and by name

@@ -16,8 +16,8 @@ from datetime import date
 from typing import ClassVar
 
 from obdi.categorise import apply_rules, load_rules, uncategorised_summary
+from obdi.core.models import SourceTier, Transaction
 from obdi.ingest import reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.store import Store
 
 
@@ -85,8 +85,8 @@ class TestTheAnnotationStore:
             )
             from datetime import datetime
 
+            from obdi.core.models import RawArtefact
             from obdi.identity import artefact_digest
-            from obdi.models import RawArtefact
 
             store.land_artefact(
                 RawArtefact(

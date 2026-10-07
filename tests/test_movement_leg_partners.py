@@ -37,7 +37,7 @@ from datetime import date
 
 import pytest
 
-from obdi.models import SourceTier, Transaction, TransactionStatus
+from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.movement_completeness import (
     NO_PARTNER,
     NOT_A_LEG,

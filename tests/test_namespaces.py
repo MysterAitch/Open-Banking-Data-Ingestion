@@ -14,7 +14,7 @@ import re
 
 import pytest
 
-from obdi.namespaces import (
+from obdi.core.namespaces import (
     API_SOURCES,
     FIRST_PARTY_CONNECTION_IDS,
     LEASES,

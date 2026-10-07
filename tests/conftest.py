@@ -242,9 +242,9 @@ def land_transaction():
     """
     from datetime import date as _date
 
+    from obdi.core.models import SourceTier, Transaction, TransactionStatus
     from obdi.identity import content_key as compute_content_key
     from obdi.ingest import reconcile_batch
-    from obdi.models import SourceTier, Transaction, TransactionStatus
 
     def land(
         store,

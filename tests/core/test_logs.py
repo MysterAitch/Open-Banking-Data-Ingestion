@@ -11,7 +11,7 @@ pasted somewhere and still mean something on its own.
 
 from __future__ import annotations
 
-from obdi.logs import event
+from obdi.core.logs import event
 
 
 class TestALineCarriesItsOwnContext:
@@ -20,7 +20,7 @@ class TestALineCarriesItsOwnContext:
         # the answer was in a page footer rather than the log.
         line = event("web.fault", route="/artefacts")
 
-        from obdi.buildinfo import describe
+        from obdi.core.buildinfo import describe
 
         assert describe() in line
 

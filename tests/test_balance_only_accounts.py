@@ -244,7 +244,7 @@ class TestAnOrdinaryAccountKeepsToday:
 class TestPureDerivation:
     def test_Derivation_CountsPendingRowsAsAPersonWouldAndIgnoresVoidOnes(self):
         """A person stating a balance means the account as they see it, pending included."""
-        from obdi.models import Transaction, TransactionStatus
+        from obdi.core.models import Transaction, TransactionStatus
 
         anchors = [Anchor(D(2026, 2, 1), 1000, STATED), Anchor(D(2026, 3, 1), 1500, STATED)]
 

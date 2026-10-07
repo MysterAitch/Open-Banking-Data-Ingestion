@@ -28,8 +28,8 @@ from account_states_world import (
     build_states,
 )
 from obdi.account_page import read_account
+from obdi.core.page_words import RETIRED_ON_PAGES
 from obdi.ledger import build_ledger
-from obdi.page_words import RETIRED_ON_PAGES
 from obdi.store import Store
 from page_dom import Node, elements, inside, parse, text_nodes
 from served_store import environment_for, served_store

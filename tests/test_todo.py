@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from obdi.agreement import AGREES, Agreement, Known, Standing
+from obdi.core.page_times import date_with_age
 from obdi.fetch_gaps import AccountOutlook, Basis, FetchGap, FetchReport, GapKind
 from obdi.overview import (
     HOUSEKEEPING,
@@ -19,7 +20,6 @@ from obdi.overview import (
     AttentionItem,
     Overview,
 )
-from obdi.page_times import date_with_age
 from obdi.standing_data import AccountStanding
 from obdi.todo import (
     Todo,

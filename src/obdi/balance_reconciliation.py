@@ -34,9 +34,9 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from .errors import DataError
-from .money import format_amount, parse_amount
-from .plural import plural
+from .core.errors import DataError
+from .core.money import format_amount, parse_amount
+from .core.plural import plural
 from .providers import truelayer
 from .store import Store
 

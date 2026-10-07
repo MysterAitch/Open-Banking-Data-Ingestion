@@ -23,8 +23,8 @@ from datetime import date
 
 from .account_names import AccountsShown
 from .bring_in import WantedFile
-from .page_times import range_text
-from .plural import plural
+from .core.page_times import range_text
+from .core.plural import plural
 
 _esc = html.escape
 

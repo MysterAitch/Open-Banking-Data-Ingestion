@@ -64,11 +64,11 @@ from typing import TYPE_CHECKING, Any
 
 from .agreement import Standing
 from .balance_anchors import EffectiveOpening, parse_calendar_day
-from .errors import DataError
-from .masking import Structural
-from .models import Transaction
-from .namespaces import CASH_LEG_SOURCE
-from .page_words import REMOVE_PROTECTION
+from .core.errors import DataError
+from .core.masking import Structural
+from .core.models import Transaction
+from .core.namespaces import CASH_LEG_SOURCE
+from .core.page_words import REMOVE_PROTECTION
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone

@@ -21,7 +21,7 @@ def _land(land, store, *, status, amount, description, value_date, source_id=Non
     recorded afterwards names it. A fixture choosing its own ids could not have
     noticed the writer and the reader disagreeing about which row was which.
     """
-    from obdi.models import TransactionStatus
+    from obdi.core.models import TransactionStatus
 
     return land(
         store,

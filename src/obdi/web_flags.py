@@ -19,9 +19,9 @@ from typing import TYPE_CHECKING, Any
 
 from . import values_sitting
 from .callback import render_page
-from .logs import say
-from .masking import Disclosed
-from .plural import agree, plural
+from .core.logs import say
+from .core.masking import Disclosed
+from .core.plural import agree, plural
 from .review_flags import FlagQueue, FlagRefused, Outcome
 from .web_accounts import submit_button
 from .web_answers import AnswerPages

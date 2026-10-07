@@ -23,9 +23,9 @@ from datetime import datetime
 
 import pytest
 
+from obdi.core.models import RawArtefact
 from obdi.fingerprint import code_fingerprint, rebuild_needed, stamp_fingerprint
 from obdi.identity import artefact_digest
-from obdi.models import RawArtefact
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store
 

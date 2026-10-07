@@ -26,7 +26,7 @@ from datetime import UTC, datetime, timedelta
 from http.cookies import CookieError, SimpleCookie
 from urllib.parse import urlparse
 
-from .page_times import clock_text
+from .core.page_times import clock_text
 
 COOKIE = "obdi-values"
 SITTING_HOURS = 12

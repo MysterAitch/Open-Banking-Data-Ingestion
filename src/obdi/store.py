@@ -39,9 +39,8 @@ from .accounts import (
     mint_account_id,
     read_registry_file,
 )
-from .entities import OWNER_ROLE, Entity, EntityRefused
-from .errors import DataError
-from .models import (
+from .core.errors import DataError
+from .core.models import (
     BASIS_FOLD,
     BASIS_ID,
     RawArtefact,
@@ -50,15 +49,16 @@ from .models import (
     TransactionStatus,
     Valuation,
 )
-from .namespaces import (
+from .core.namespaces import (
     API_SOURCES,
     MANUAL_SOURCE,
     MANUAL_WITHDRAWAL_SOURCE,
     provenance_rank,
     stored_provenance_rank,
 )
+from .core.plural import plural
+from .entities import OWNER_ROLE, Entity, EntityRefused
 from .payment_links import stated_link_of
-from .plural import plural
 from .stated_times import recorded_for
 from .stated_words import recorded_words
 
@@ -2055,7 +2055,7 @@ class Store:
         rule's. `transactions.entity_id` is the row itself and is deleted last, and
         `transactions.matched_entity_id` is a reference and moves with the rest.
         """
-        from .namespaces import ENTITY_KEYED_TABLES
+        from .core.namespaces import ENTITY_KEYED_TABLES
 
         if kept == absorbed:
             raise ValueError("a row cannot absorb itself")
@@ -2829,7 +2829,7 @@ class Store:
         transaction's identity, so a table added later is carried by this
         rename without anyone remembering it exists.
         """
-        from .namespaces import ENTITY_KEYED_TABLES
+        from .core.namespaces import ENTITY_KEYED_TABLES
 
         if not moves:
             return 0
@@ -2874,7 +2874,7 @@ class Store:
         offered to the survivor under the ordinary rank rule, so a person's
         categorisation is never quietly displaced by a rule's.
         """
-        from .namespaces import ENTITY_KEYED_TABLES
+        from .core.namespaces import ENTITY_KEYED_TABLES
 
         moves = self._entity_moves(
             old_account_id, new_account_id, artefact_digest=artefact_digest
@@ -2972,7 +2972,7 @@ class Store:
         `matched_entity_id` IS included - it points at another transaction, and
         a match naming a row that has gone is a claim nothing can check.
         """
-        from .namespaces import ENTITY_KEYED_TABLES
+        from .core.namespaces import ENTITY_KEYED_TABLES
 
         counts: dict[str, int] = {}
         for table, columns in ENTITY_KEYED_TABLES.items():
@@ -5173,7 +5173,7 @@ def _chosen_shapes(shapes: Iterable[str]) -> list[str]:
 def _row_to_transaction(row: sqlite3.Row) -> Transaction:
     from datetime import date
 
-    from .models import TransactionStatus
+    from .core.models import TransactionStatus
 
     return Transaction(
         account_id=row["account_id"],

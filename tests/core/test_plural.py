@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.plural import IRREGULARS, agree, plural, word
+from obdi.core.plural import IRREGULARS, agree, plural, word
 
 
 class TestCountWithNoun:

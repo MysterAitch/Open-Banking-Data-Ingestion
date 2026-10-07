@@ -23,6 +23,8 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 from .account_names import AccountShown, AccountsShown
+from .core.logs import say
+from .core.plural import plural
 from .coverage_timeline import (
     ASK_HOLE,
     KIND_NAMES,
@@ -32,10 +34,8 @@ from .coverage_timeline import (
 )
 from .fetch_gaps import FetchReport
 from .ledger import Ledger
-from .logs import say
 from .navigation import account_address
 from .overview import HOUSEKEEPING, AccountOverview, Overview
-from .plural import plural
 from .protection import ProtectionView
 from .rebuild_hold import RebuildInProgress
 from .standing_data import (

@@ -26,8 +26,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .namespaces import CASH_LEG_SOURCE
-from .plural import agree, plural
+from .core.namespaces import CASH_LEG_SOURCE
+from .core.plural import agree, plural
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 #: Artefact sources whose records name a payment by an id it will NOT keep.

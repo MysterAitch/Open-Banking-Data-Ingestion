@@ -18,7 +18,7 @@ from datetime import date
 
 import pytest
 
-from obdi.date_window import Anchor, Period, Unit
+from obdi.core.date_window import Anchor, Period, Unit
 from obdi.stylesheet_position import POSITION_STYLES
 from obdi.stylesheet_window import WINDOW_STYLES
 from obdi.window_control import WINDOW_FIELDS, window_choice, window_controls

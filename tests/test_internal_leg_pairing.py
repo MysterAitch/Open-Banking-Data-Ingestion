@@ -37,8 +37,8 @@ from dataclasses import replace
 
 import pytest
 
+from obdi.core.models import Transaction
 from obdi.matching import pair_transfer_entities
-from obdi.models import Transaction
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store
 from round_up_corpus import (

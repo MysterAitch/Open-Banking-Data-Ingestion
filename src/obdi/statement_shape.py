@@ -23,10 +23,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NewType
 
-from .masking import mask_characters
-from .plural import plural
+from .core.masking import mask_characters
+from .core.plural import plural
+from .core.timings import Timings
 from .statement_columns import Row
-from .timings import Timings
 
 #: Text taken verbatim from a statement: payees, addresses, account
 #: numbers, amounts. Never leaves the machine that read the file.

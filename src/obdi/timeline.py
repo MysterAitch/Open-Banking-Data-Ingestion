@@ -29,7 +29,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from .plural import agree, plural
+from .core.plural import agree, plural
 
 _FROM_TO = re.compile(r"from=(\d{4}-\d{2}-\d{2})&to=(\d{4}-\d{2}-\d{2})")
 _CHANGES = re.compile(r"changes[Ss]ince=([0-9T:.+Z-]+)")

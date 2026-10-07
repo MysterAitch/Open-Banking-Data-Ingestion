@@ -77,7 +77,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .accounts import AccountMap
 from .balance_reconciliation import _chain_ends
-from .models import Transaction
+from .core.models import Transaction
 from .parsers.uk_banks import StarlingCsvParser
 from .providers.starling import round_up_of
 from .space_attribution import space_parents

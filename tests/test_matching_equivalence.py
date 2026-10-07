@@ -42,6 +42,7 @@ import random
 from dataclasses import replace
 from datetime import date, timedelta
 
+from obdi.core.models import MatchTier, SourceTier, Transaction, TransactionStatus
 from obdi.matching import (
     FUZZY_WINDOW_DAYS,
     MANUAL_WINDOW_DAYS,
@@ -53,7 +54,6 @@ from obdi.matching import (
     resolve,
     supersede,
 )
-from obdi.models import MatchTier, SourceTier, Transaction, TransactionStatus
 
 #: Every (source, provider id) each row has been called, by entity id.
 Called = dict[str, set[tuple[str, str]]]

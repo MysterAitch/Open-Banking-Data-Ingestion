@@ -40,8 +40,8 @@ from dataclasses import dataclass, replace
 from datetime import date
 from urllib.parse import parse_qsl, urlencode
 
-from .date_window import Unit, WindowSpec, length, resolve
-from .errors import DataError
+from .core.date_window import Unit, WindowSpec, length, resolve
+from .core.errors import DataError
 from .ledger import LedgerWindow
 from .store import Store
 from .window_control import (

@@ -28,7 +28,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 
-from .date_window import (
+from .core.date_window import (
     Anchor,
     Period,
     Unit,

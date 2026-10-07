@@ -82,8 +82,13 @@ from .balance_chart_bins import (
     periods_of,
 )
 from .callback import render_page
-from .date_window import Window, WindowSpec, between, resolve
-from .errors import DataError
+from .core.date_window import Window, WindowSpec, between, resolve
+from .core.errors import DataError
+from .core.logs import say
+from .core.masking import Disclosed
+from .core.page_times import percent_text
+from .core.plural import agree
+from .core.plural import plural as _plural
 from .fault_structure import (
     EXPLAINED,
     GAP_BUCKETS,
@@ -96,11 +101,6 @@ from .fault_structure import (
     FaultStructure,
     StructureReport,
 )
-from .logs import say
-from .masking import Disclosed
-from .page_times import percent_text
-from .plural import agree
-from .plural import plural as _plural
 from .web_accounts import submit_button
 from .window_control import (
     BETWEEN,

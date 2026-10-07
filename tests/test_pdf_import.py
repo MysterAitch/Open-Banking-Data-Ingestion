@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.errors import DataError
+from obdi.core.errors import DataError
 from obdi.ingest import import_file
 from obdi.store import Store
 from test_statement_shape import build_pdf
@@ -156,8 +156,8 @@ def _keep(store: Store, payload: bytes, *, account: str = "(unassigned)") -> Non
     """Land a statement the way the statement-shape page keeps one."""
     from datetime import UTC, datetime
 
+    from obdi.core.models import RawArtefact
     from obdi.identity import artefact_digest
-    from obdi.models import RawArtefact
 
     store.land_artefact(
         RawArtefact(

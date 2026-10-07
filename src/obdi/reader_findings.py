@@ -20,8 +20,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
-from .errors import DataError
-from .page_times import range_text, range_with_span
+from .core.errors import DataError
+from .core.page_times import range_text, range_with_span
 from .parsers.base import ParseError
 from .parsers.pdf_statements import PdfStatementParser
 from .parsers.statement_reading import StatementReading

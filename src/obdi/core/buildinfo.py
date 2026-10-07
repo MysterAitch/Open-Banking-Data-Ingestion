@@ -44,7 +44,7 @@ def _version_from_source() -> str:
     from `src/obdi/buildinfo.py`, and somewhere else entirely if this file
     ever moves or lands beside an unrelated pyproject.
     """
-    candidate = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    candidate = Path(__file__).resolve().parents[3] / "pyproject.toml"
     try:
         text = candidate.read_text(encoding="utf-8")
     except OSError:

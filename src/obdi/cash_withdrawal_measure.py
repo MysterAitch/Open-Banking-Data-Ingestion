@@ -47,10 +47,10 @@ from .cash_withdrawals import (
     feed_excludes_cash,
     read_candidates,
 )
-from .models import Transaction, TransactionStatus
-from .namespaces import CASH_LEG_SOURCE
+from .core.models import Transaction, TransactionStatus
+from .core.namespaces import CASH_LEG_SOURCE
+from .core.plural import agree, plural
 from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS
-from .plural import agree, plural
 from .store import Store
 
 _CARD_ARTEFACT = "truelayer-card-booked"

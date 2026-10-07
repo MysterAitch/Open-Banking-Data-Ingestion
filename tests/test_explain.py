@@ -18,8 +18,8 @@ from __future__ import annotations
 from datetime import date
 
 from obdi.categorise import explain, uncategorised_summary
+from obdi.core.models import SourceTier, Transaction
 from obdi.ingest import reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.store import Store
 
 

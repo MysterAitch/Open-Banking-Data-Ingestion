@@ -22,9 +22,9 @@ from http.server import HTTPServer
 import httpx
 
 from obdi.connections import ConnectionStore
+from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.identity_health import ProviderIdTally, SharedIdentity, identity_health
 from obdi.ingest import reconcile_batch
-from obdi.models import SourceTier, Transaction, TransactionStatus
 from obdi.providers import starling, truelayer
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store

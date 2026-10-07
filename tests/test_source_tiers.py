@@ -15,9 +15,9 @@ from datetime import date
 
 import pytest
 
+from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.identity import content_key
 from obdi.matching import resolve
-from obdi.models import SourceTier, Transaction, TransactionStatus
 from obdi.parsers.uk_banks import AmexUkCsvParser, MonzoCsvParser, StarlingCsvParser
 from obdi.providers.starling import to_transaction as starling_txn
 from obdi.providers.truelayer import to_transaction as truelayer_txn

@@ -77,7 +77,7 @@ def store_with_a_deleted_space(tmp_path):
     import json
     from datetime import UTC, datetime
 
-    from obdi.models import RawArtefact
+    from obdi.core.models import RawArtefact
     from obdi.store import Store
 
     def landed(source: str, body: dict, name: str) -> RawArtefact:
@@ -309,7 +309,7 @@ class TestTheCanonicalNameASpaceGets:
     def test_TheRefIsAcceptedByTheNameValidator(self):
         """The canonical name is checked at every write door, so a ref this
         produces has to pass that check or the back-fill dies at the door."""
-        from obdi.namespaces import validate_canonical_name
+        from obdi.core.namespaces import validate_canonical_name
         from obdi.spaces import canonical_ref
 
         for name in ("Rent", "Rent & Bills", "  spaced  out  ", "Holiday 2024", ""):
@@ -349,7 +349,7 @@ class TestReadingItOutOfAStore:
         import json
         from datetime import UTC, datetime
 
-        from obdi.models import RawArtefact
+        from obdi.core.models import RawArtefact
         from obdi.spaces import recover
         from obdi.store import Store
 
@@ -481,7 +481,7 @@ class TestTheCommand:
         from datetime import UTC, datetime
 
         from obdi.cli import main
-        from obdi.models import RawArtefact
+        from obdi.core.models import RawArtefact
         from obdi.store import Store
 
         second_rent = "2nd7e117-0000-4000-8000-000000000009"

@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from datetime import date
 from enum import StrEnum
 
+from .core.plural import plural
 from .fetch_gaps import Basis, FetchReport, GapKind
-from .plural import plural
 from .standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .models import Transaction
+from .core.models import Transaction
 from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS
 
 #: The coded fields each source states, whose values are kept. The one place they are named.

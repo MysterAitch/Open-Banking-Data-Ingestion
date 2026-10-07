@@ -29,9 +29,9 @@ import pytest
 
 from obdi.balance_anchors import record_stated_anchor, remove_stated_anchor
 from obdi.cli import build_web_config
+from obdi.core.models import RawArtefact
 from obdi.identity import artefact_digest
 from obdi.ingest import import_file
-from obdi.models import RawArtefact
 from obdi.providers import starling, truelayer
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store

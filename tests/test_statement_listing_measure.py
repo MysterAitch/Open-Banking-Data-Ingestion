@@ -51,10 +51,10 @@ from credit_union_documents import nine_accounts, pdf
 from obdi.account_names import AccountsShown
 from obdi.balance_anchors import record_stated_anchor
 from obdi.connections import ConnectionStore
+from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from obdi.family_anchors import Families
 from obdi.identity import artefact_digest, content_key
 from obdi.ingest import import_file, media_type_of, reconcile_batch
-from obdi.models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from obdi.parsers.credit_union_pdf import section_key
 from obdi.statement_listing_measure import (
     DayReading,

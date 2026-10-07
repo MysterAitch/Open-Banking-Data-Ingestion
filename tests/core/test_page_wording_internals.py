@@ -16,7 +16,7 @@ import re
 
 import pytest
 
-from obdi.page_words import INTERNAL_ON_PAGES as INTERNAL
+from obdi.core.page_words import INTERNAL_ON_PAGES as INTERNAL
 from page_walk import invented, served, walked_pages  # noqa: F401
 
 DIAGNOSTIC_ROUTES = ("/artefact", "/statement-shape", "/account")

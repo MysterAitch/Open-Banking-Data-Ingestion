@@ -19,6 +19,7 @@ from typing import ClassVar
 
 import pytest
 
+from obdi.core.models import SourceTier, Transaction
 from obdi.coverage import (
     Agreement,
     agreements,
@@ -30,7 +31,6 @@ from obdi.coverage import (
     stale_feeds,
     transpositions,
 )
-from obdi.models import SourceTier, Transaction
 
 
 def txn(source, day, amount, *, account="current", source_id=None, month=1, desc=None,

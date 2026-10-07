@@ -11,9 +11,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import date
 
+from ..core.models import SourceTier, Transaction, TransactionStatus
+from ..core.money import parse_amount
 from ..identity import content_key
-from ..models import SourceTier, Transaction, TransactionStatus
-from ..money import parse_amount
 from .base import ParseError, StatementParser, parse_date
 
 #: Statement PDFs, tried only once every CSV parser has declined: a PDF

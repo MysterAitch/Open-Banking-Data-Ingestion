@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .models import Transaction
+from .core.models import Transaction
 
 #: Sources that are the bank's own feed, whose item uid an aggregator can state.
 FIRST_PARTY_FEEDS = frozenset({"starling"})

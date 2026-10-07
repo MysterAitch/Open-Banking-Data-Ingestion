@@ -33,7 +33,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from obdi.date_window import Period, named, resolve
+from obdi.core.date_window import Period, named, resolve
 
 D = date
 HELD = D(2015, 1, 1)

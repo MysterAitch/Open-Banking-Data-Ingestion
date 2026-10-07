@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date
 
 from obdi.callback import render_page
-from obdi.page_times import SPAN_CLOSE, SPAN_OPEN, range_with_span
+from obdi.core.page_times import SPAN_CLOSE, SPAN_OPEN, range_with_span
 from obdi.stylesheet import SERVED_STYLESHEET
 from obdi.window_control import window_choice, window_controls
 from page_dom import elements, parse

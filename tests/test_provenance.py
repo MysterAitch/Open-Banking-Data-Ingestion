@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from datetime import date
 
+from obdi.core.models import SourceTier, Transaction
 from obdi.ingest import reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.store import Store
 
 
@@ -107,7 +107,7 @@ class TestEmptyResultsAreEvidence:
     def test_Landing_WhenTwoAccountsReturnIdenticalEmptyBodies_BothLand(self, tmp_path):
         from datetime import UTC, datetime
 
-        from obdi.models import RawArtefact
+        from obdi.core.models import RawArtefact
 
         empty = b'{"results": [], "status": "Succeeded"}'
         with Store(tmp_path / "s.sqlite3") as store:
@@ -138,7 +138,7 @@ class TestEmptyResultsAreEvidence:
     def test_Landing_WhenTheSameRequestIsReimported_IsDeduplicated(self, tmp_path):
         from datetime import UTC, datetime
 
-        from obdi.models import RawArtefact
+        from obdi.core.models import RawArtefact
 
         artefact = RawArtefact(
             source="truelayer-booked",
@@ -363,7 +363,7 @@ class TestAccountSourceBreakdown:
         delivered it, so a Starling SPACE is named as the feeder it is."""
         from datetime import UTC, datetime
 
-        from obdi.models import RawArtefact
+        from obdi.core.models import RawArtefact
 
         db = tmp_path / "s.sqlite3"
         with Store(db) as store:
@@ -421,8 +421,8 @@ class TestRefilingAMislandedArtefact:
     def _land(store, ref, payload=b"a,b\n1,2\n", origin="chunk.csv") -> int:
         from datetime import datetime
 
+        from obdi.core.models import RawArtefact
         from obdi.identity import artefact_digest
-        from obdi.models import RawArtefact
 
         store.land_artefact(
             RawArtefact(

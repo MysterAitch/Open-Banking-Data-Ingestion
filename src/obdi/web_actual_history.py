@@ -26,8 +26,8 @@ from typing import TYPE_CHECKING
 
 from .actual_audit import accounts_of, differing_accounts
 from .actual_verdict import kind_of, moment, when
-from .namespaces import QUEUE_KINDS
-from .plural import plural
+from .core.namespaces import QUEUE_KINDS
+from .core.plural import plural
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from .web import _ResultHistory

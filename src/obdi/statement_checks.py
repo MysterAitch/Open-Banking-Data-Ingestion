@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
-from .masking import Structural
+from .core.masking import Structural
 
 #: Which check a statement that IS in use (it read whole, so its closing is a known balance) and
 #: does not add up by what it lists failed (`StatementCheck.fault`). The words each is said in

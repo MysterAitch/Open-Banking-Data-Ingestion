@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
 from .agreement import Standing, held_sentence, standing_line, standing_of
 from .balance_anchors import EffectiveOpening, effective_opening
+from .core.models import Transaction
 from .family_anchors import Families
-from .models import Transaction
 from .protection import check_span
 from .statement_checks import StatementChecks
 from .store import Store
@@ -320,7 +320,7 @@ def verification_sentence(counted: int, adding_up: int, not_adding_up: int, noth
 
     Empty where no account is counted: the caller says what an empty household says.
     """
-    from .plural import agree, plural
+    from .core.plural import agree, plural
 
     if counted == 0:
         return ""
@@ -339,7 +339,7 @@ def verification_sentence(counted: int, adding_up: int, not_adding_up: int, noth
 
 def not_adding_up_sentence(count: int) -> str:
     """How many accounts do not add up, as a sentence of its own: "1 account does not add up."."""
-    from .plural import agree, plural
+    from .core.plural import agree, plural
 
     return f"{plural(count, 'account')} {agree(count, 'does')} not add up."
 

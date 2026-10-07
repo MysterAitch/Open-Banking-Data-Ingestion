@@ -36,14 +36,14 @@ from .asked_coverage import (
     heal_plan,
 )
 from .connections import Connection, ConnectionStore, apply_refresh
+from .core.jsontypes import JsonObject, text
+from .core.jsontypes import rows as json_rows
+from .core.models import Transaction
+from .core.plural import plural
 from .declined_items import void_declined_items
 from .family_anchors import families_of
 from .ingest import ImportSummary, SpaceBlind, reconcile_batch
-from .jsontypes import JsonObject, text
-from .jsontypes import rows as json_rows
-from .models import Transaction
 from .pending_lifecycle import resolve_vanished_pending
-from .plural import plural
 from .providers import starling, truelayer
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
@@ -98,7 +98,7 @@ def _refusal_detail(exc: Exception) -> str:
 def _app_version() -> str:
     # Version plus build commit: the number alone lied for a whole release
     # series, so artefact provenance records both.
-    from .buildinfo import describe
+    from .core.buildinfo import describe
 
     return describe()
 

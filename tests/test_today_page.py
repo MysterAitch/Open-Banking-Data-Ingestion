@@ -530,7 +530,7 @@ class TestNothingIsSaidTwice:
         assert text.count("Find out why a statement does not add up") == 1
 
     def test_Page_Always_HoldsNoRetiredPhraseAndNoBareCheckedLabel(self) -> None:
-        from obdi.page_words import RETIRED_ON_PAGES
+        from obdi.core.page_words import RETIRED_ON_PAGES
 
         for build in (ordinary, bad, clear):
             of, gaps = build()

@@ -23,9 +23,9 @@ from urllib.parse import quote
 from .account_names import AccountsShown
 from .callback import render_page
 from .checks_index import CHECKS, CheckResult, result_of
+from .core.page_times import clock_text, instant_of
 from .navigation import PAGE_NAMES, page_name
 from .overview import OVERVIEW_CACHE_SECONDS, Overview
-from .page_times import clock_text, instant_of
 from .web_sections import HookTimer
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone

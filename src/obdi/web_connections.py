@@ -36,10 +36,10 @@ from .account_names import AccountShown, AccountsShown
 from .alerts import consent_rung
 from .bank_balances import BANK_SOURCE
 from .connections import Connection, ConnectionStore
+from .core.page_times import date_with_age
+from .core.plural import plural
 from .navigation import account_address
 from .overview import NOW, SOON
-from .page_times import date_with_age
-from .plural import plural
 from .pull import STARLING_CONNECTION
 from .todo import Control, Todo
 from .web_overview import actual_line, serial, todo_row_html

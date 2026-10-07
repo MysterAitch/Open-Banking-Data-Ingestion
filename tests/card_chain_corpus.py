@@ -66,9 +66,9 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 
+from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.identity import content_key
 from obdi.ingest import import_file, reconcile_batch
-from obdi.models import SourceTier, Transaction, TransactionStatus
 from obdi.store import Store
 from obdi.synthetic_pdf import build_pdf
 

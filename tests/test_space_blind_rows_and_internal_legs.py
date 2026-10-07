@@ -50,10 +50,10 @@ from typing import Any
 import pytest
 
 from obdi.balance_anchors import effective_opening
+from obdi.core.models import Transaction, TransactionStatus
 from obdi.family_anchors import families_of
 from obdi.ingest import import_file
 from obdi.matching import CandidateIndex, resolve
-from obdi.models import Transaction, TransactionStatus
 from obdi.providers import truelayer
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store

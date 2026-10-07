@@ -42,7 +42,7 @@ from datetime import date
 
 from .account_names import AccountsShown
 from .accounts import AccountMap, AccountRecord, AccountRef
-from .namespaces import UK_CARD_STATEMENT_SOURCE, validate_canonical_name
+from .core.namespaces import UK_CARD_STATEMENT_SOURCE, validate_canonical_name
 from .overview import held_by_account
 from .rebuild import _resolve_ref
 from .space_attribution import (

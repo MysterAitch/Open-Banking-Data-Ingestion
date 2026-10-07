@@ -31,7 +31,7 @@ from card_chain_corpus import (
 )
 from card_variant_corpus import CLOSINGS as MINI_CLOSINGS
 from card_variant_corpus import SIBLING_SCOPE, Variant, build_mini_card
-from obdi.models import TransactionStatus
+from obdi.core.models import TransactionStatus
 from obdi.period_reconciliation import (
     PeriodKind,
     dated_list,

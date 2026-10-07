@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-from obdi.buildinfo import describe
+from obdi.core.buildinfo import describe
 
 
 class TestWhatVersionIsRunning:
@@ -28,7 +28,7 @@ class TestWhatVersionIsRunning:
 
         declared = re.search(
             r'^version\s*=\s*"([^"]+)"',
-            (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(
+            (Path(__file__).resolve().parents[2] / "pyproject.toml").read_text(
                 encoding="utf-8"
             ),
             re.MULTILINE,
@@ -92,7 +92,7 @@ class TestWhatVersionIsRunning:
         # A stated absence is second-best and acceptable. A plausible wrong
         # number is the one outcome to avoid, so nothing here falls back to
         # a literal like "0.1.0".
-        monkeypatch.setattr("obdi.buildinfo._version_from_source", lambda: "")
+        monkeypatch.setattr("obdi.core.buildinfo._version_from_source", lambda: "")
         monkeypatch.setattr(
             "importlib.metadata.version",
             lambda _name: (_ for _ in ()).throw(RuntimeError("no metadata")),
@@ -107,10 +107,10 @@ class TestWhatVersionIsRunning:
         stranger = tmp_path / "pyproject.toml"
         stranger.write_text('[project]\nname = "elsewhere"\nversion = "3.2.1"\n')
         monkeypatch.setattr(
-            "obdi.buildinfo.__file__",
+            "obdi.core.buildinfo.__file__",
             str(tmp_path / "src" / "obdi" / "buildinfo.py"),
         )
 
-        from obdi.buildinfo import _version_from_source
+        from obdi.core.buildinfo import _version_from_source
 
         assert _version_from_source() != "3.2.1"

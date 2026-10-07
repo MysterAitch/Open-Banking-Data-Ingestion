@@ -37,7 +37,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from .errors import DataError
+from .core.errors import DataError
 from .parsers import pdf_statements
 from .parsers.base import ParseError
 from .parsers.pdf_statements import (

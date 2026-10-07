@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
-from obdi.page_times import marks_as_html
+from obdi.core.page_times import marks_as_html
 
 VOID = frozenset({"br", "hr", "img", "input", "meta", "link", "area", "base", "col", "wbr"})
 HEADINGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})

@@ -33,26 +33,26 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from . import instrumentation
 from .accounts import AccountMap
 from .arrival_order import in_arrival_order
-from .declined_items import void_declined_items
-from .errors import DataError
-from .family_anchors import families_of
-from .ingest import ImportSummary, SpaceBlind, pair_transfers_across_store, reconcile_batch
-from .jsontypes import rows as json_rows
-from .matching import CandidateIndex
-from .models import Transaction
-from .namespaces import (
+from .core import instrumentation
+from .core.errors import DataError
+from .core.jsontypes import rows as json_rows
+from .core.models import Transaction
+from .core.namespaces import (
     API_SOURCES,
     MANUAL_SOURCE,
     MANUAL_WITHDRAWAL_SOURCE,
     UNASSIGNED_ACCOUNT,
 )
+from .core.plural import plural
+from .declined_items import void_declined_items
+from .family_anchors import families_of
+from .ingest import ImportSummary, SpaceBlind, pair_transfers_across_store, reconcile_batch
+from .matching import CandidateIndex
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
 from .period_reconciliation import SAME_MONEY_PHASE
-from .plural import plural
 from .protection import recheck as recheck_protections
 from .providers import starling, truelayer
 from .review_flags import replay_joins

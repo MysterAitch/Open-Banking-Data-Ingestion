@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from obdi.london_clock import london
+from obdi.core.london_clock import london
 
 
 def utc(text: str) -> datetime:

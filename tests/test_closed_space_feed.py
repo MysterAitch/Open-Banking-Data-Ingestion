@@ -490,8 +490,8 @@ class TestWhatTheLedgerPageSaysOfAnUnheldSpace:
     def sentence(store, tmp_path) -> str:
         import re
 
+        from obdi.core.masking import Disclosed
         from obdi.ledger import family_view
-        from obdi.masking import Disclosed
         from obdi.web_ledger import _family_html
 
         import_export(store, tmp_path)

@@ -22,9 +22,9 @@ import pytest
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening, record_stated_anchor
 from obdi.cli import collect_alert_findings
+from obdi.core.models import TransactionStatus
 from obdi.ingest import import_file, pair_transfers_across_store
 from obdi.ledger import build_ledger
-from obdi.models import TransactionStatus
 from obdi.movement_completeness import MovementCompleteness
 from obdi.overview import NOW as NOW_BAND
 from obdi.overview import build_overview

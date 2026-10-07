@@ -105,9 +105,9 @@ from obdi.balance_anchors import (
     record_stated_anchor,
 )
 from obdi.checks_index import CHECKS, IN_ORDER, result_of
+from obdi.core.models import SourceTier, Transaction
 from obdi.identity import content_key
 from obdi.ingest import reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.movement_completeness import MovementCompleteness, movement_completeness
 from obdi.overview import Overview, standing_items_from
 from obdi.protection import tested_days as days_offered

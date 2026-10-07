@@ -51,7 +51,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
-from .plural import plural
+from .core.plural import plural
 from .synthetic_pdf import build_pdf
 
 #: Merchants a household actually repeats, with the shapes their descriptors

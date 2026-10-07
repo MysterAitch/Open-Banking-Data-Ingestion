@@ -38,7 +38,7 @@ import pytest
 
 from large_store_corpus import MAIN, LargeStore, cached_large_store
 from large_store_pages import copy_of
-from obdi import instrumentation
+from obdi.core import instrumentation
 from obdi.rebuild import RebuildReport, rebuild_from_raw
 from obdi.store import Store
 

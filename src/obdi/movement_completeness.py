@@ -77,11 +77,11 @@ from urllib.parse import parse_qs, urlparse
 
 from .accounts import AccountMap, AccountRef
 from .arrival_order import in_arrival_order
+from .core.models import SourceTier, Transaction
+from .core.namespaces import CASH_LEG_SOURCE
+from .core.page_times import clock_text
+from .core.plural import plural as _plural
 from .matching import INTERNAL_TRANSFER_WINDOW_DAYS, SETTLEMENT_KEEPS_ID
-from .models import SourceTier, Transaction
-from .namespaces import CASH_LEG_SOURCE
-from .page_times import clock_text
-from .plural import plural as _plural
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
@@ -930,7 +930,7 @@ def _measure_balances(
 def check_rows(
     store: Store, canonical_for_ref: Callable[[str], str] | None
 ) -> MovementCompleteness:
-    from .namespaces import UNASSIGNED_ACCOUNT
+    from .core.namespaces import UNASSIGNED_ACCOUNT
     from .rebuild import _READS_NO_ROWS, _starling_defaults, resolve_artefact_ref
 
     report = MovementCompleteness()

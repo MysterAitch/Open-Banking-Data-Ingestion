@@ -36,8 +36,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .buildinfo import describe as build_identifier
-from .namespaces import MANUAL_SOURCE
+from .core.buildinfo import describe as build_identifier
+from .core.namespaces import MANUAL_SOURCE
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime, types only
     from .store import Store

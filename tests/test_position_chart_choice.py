@@ -39,7 +39,7 @@ import pytest
 
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
-from obdi.masking import MASKED_TOTAL
+from obdi.core.masking import MASKED_TOTAL
 from obdi.position import Position, chart_series, read_position
 from obdi.store import Store
 from obdi.valuations import Asset, AssetKind, record_observation

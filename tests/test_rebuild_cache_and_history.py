@@ -136,8 +136,8 @@ class TestEveryRebuildLeavesARow:
     def test_ABackgroundRebuild_RecordsItsRunWithTimingsAndBuild(
         self, tmp_path, monkeypatch
     ):
-        from obdi import instrumentation
         from obdi.cli import rebuild_status_for, start_background_rebuild
+        from obdi.core import instrumentation
 
         monkeypatch.setenv("OBDI_DB_PATH", str(tmp_path / "s.sqlite3"))
         instrumentation.configure(True)

@@ -142,8 +142,8 @@ class TestBindCommand:
         from datetime import date as date_type
 
         from obdi.cli import _account_map, main
+        from obdi.core.models import SourceTier, Transaction
         from obdi.ingest import reconcile_batch
-        from obdi.models import SourceTier, Transaction
         from obdi.store import Store
 
         db = tmp_path / "store.sqlite3"

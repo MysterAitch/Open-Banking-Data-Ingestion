@@ -18,9 +18,9 @@ from datetime import date, timedelta
 
 import pytest
 
+from obdi.core.models import SourceTier, Transaction
 from obdi.identity import content_key
 from obdi.ingest import reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.store import Store
 
 

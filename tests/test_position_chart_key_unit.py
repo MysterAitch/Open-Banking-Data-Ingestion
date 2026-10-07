@@ -25,7 +25,7 @@ from html import unescape
 
 import pytest
 
-from obdi.date_window import Resolution
+from obdi.core.date_window import Resolution
 from obdi.position import Position, read_position
 from obdi.store import Store
 from obdi.web_position import render_position, unit_word

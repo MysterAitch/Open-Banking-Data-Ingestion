@@ -20,7 +20,7 @@ from datetime import date
 
 from .balance_anchors import Anchor, counted_by_day
 from .balance_chart import running_balance
-from .models import Transaction
+from .core.models import Transaction
 
 
 def balances_after(

@@ -20,8 +20,8 @@ import httpx
 import pytest
 
 from obdi.connections import ConnectionStore
+from obdi.core.models import SourceTier, Transaction
 from obdi.coverage import agreements, transpositions
-from obdi.models import SourceTier, Transaction
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 ACCOUNT = "starling-personal"
@@ -153,7 +153,7 @@ class TestTheAgreementsPageIsMaskedUnlessPostedFor:
         assert " net " not in page.replace("nets were compared", "")
 
     def test_Page_FetchedWithUnexplainedRows_ShowsDateAndMaskedTokenPerSampleRow(self):
-        from obdi.masking import MASKED_TOTAL
+        from obdi.core.masking import MASKED_TOTAL
 
         page = _request(_report(_held()), "GET", "/agreements").text
 

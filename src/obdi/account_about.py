@@ -15,7 +15,7 @@ from datetime import date, timedelta
 
 from .account_names import AccountShown, AccountsShown
 from .accounts import ARCHIVE_BASIS_PREFIX, AccountRecord, AccountRef, LimitWindow, RateWindow
-from .logs import say
+from .core.logs import say
 from .statement_terms import AccountReading, account_readings
 from .store import Store
 

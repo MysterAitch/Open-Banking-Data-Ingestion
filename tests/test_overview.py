@@ -443,7 +443,7 @@ class TestOneRowPerCanonicalAccount:
         assert not account(assemble(household), "acct-current").declared
 
     def test_VoidRows_AreNotCountedAsHeld(self, tmp_path):
-        from obdi.models import TransactionStatus
+        from obdi.core.models import TransactionStatus
 
         path = tmp_path / "v.sqlite3"
         with Store(path) as store:
@@ -460,7 +460,7 @@ class TestOneRowPerCanonicalAccount:
         assert account(assemble(path), "acct-v").rows == 1
 
     def test_ReversedRows_AreNotCountedAsHeld_AsTheLedgerDoesNotCountThem(self, tmp_path):
-        from obdi.models import TransactionStatus
+        from obdi.core.models import TransactionStatus
 
         path = tmp_path / "r.sqlite3"
         with Store(path) as store:

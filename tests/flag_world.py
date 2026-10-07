@@ -100,9 +100,9 @@ def add_unsettled_pair(db: Path) -> None:
     """
     from datetime import date
 
+    from obdi.core.models import SourceTier, Transaction
     from obdi.identity import content_key
     from obdi.ingest import reconcile_batch
-    from obdi.models import SourceTier, Transaction
 
     with Store(db) as store:
         for uid in ("late-1", "late-2"):

@@ -73,6 +73,7 @@ from pathlib import Path
 from flag_balance_world import build_balance_world
 from obdi.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
+from obdi.core.models import SourceTier, Transaction
 from obdi.fetch_gaps import (
     AccountOutlook,
     FetchEvidence,
@@ -82,7 +83,6 @@ from obdi.fetch_gaps import (
 )
 from obdi.identity import content_key
 from obdi.ingest import import_file, reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.standing_data import AccountStanding, standings_for
 from obdi.store import Store
 from obdi.synthetic_pdf import build_pdf

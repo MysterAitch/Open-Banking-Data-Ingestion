@@ -30,7 +30,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from .jsontypes import JsonObject, text, whole_number
+from .core.jsontypes import JsonObject, text, whole_number
 
 # Refresh a little before expiry rather than on it, so a slow request cannot
 # start valid and arrive expired.

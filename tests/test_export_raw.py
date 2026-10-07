@@ -12,7 +12,7 @@ import json
 from datetime import UTC, datetime
 
 from obdi.cli import main
-from obdi.models import RawArtefact
+from obdi.core.models import RawArtefact
 from obdi.store import Store
 
 

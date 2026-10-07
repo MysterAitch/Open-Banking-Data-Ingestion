@@ -33,7 +33,7 @@ from datetime import date
 
 import pytest
 
-from obdi.errors import DataError
+from obdi.core.errors import DataError
 from obdi.ingest import import_file
 from obdi.parsers.base import ParseError
 from obdi.parsers.pdf_statements import (

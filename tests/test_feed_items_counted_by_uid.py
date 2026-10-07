@@ -48,9 +48,9 @@ from typing import Any
 
 import pytest
 
+from obdi.core.models import RawArtefact
 from obdi.family_anchors import families_of
 from obdi.ingest import reconcile_batch
-from obdi.models import RawArtefact
 from obdi.movement_completeness import check_rows
 from obdi.providers import starling
 from obdi.rebuild import parse_artefact_transactions, rebuild_from_raw

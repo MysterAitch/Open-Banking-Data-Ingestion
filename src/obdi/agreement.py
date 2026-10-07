@@ -121,10 +121,10 @@ from .balance_anchors import (
     FamilyReading,
     FamilyWalk,
 )
+from .core.masking import Structural
+from .core.page_times import range_with_span
+from .core.plural import agree, plural
 from .family_anchors import OPENED
-from .masking import Structural
-from .page_times import range_with_span
-from .plural import agree, plural
 from .statement_checks import (
     DOES_NOT_REACH,
     HELD_TWICE,

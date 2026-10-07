@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta, timezone
 import pytest
 
 from obdi.arrival_order import in_arrival_order
-from obdi.models import RawArtefact
+from obdi.core.models import RawArtefact
 from obdi.providers import truelayer
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store

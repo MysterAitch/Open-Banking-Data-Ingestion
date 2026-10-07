@@ -28,7 +28,7 @@ from datetime import date, timedelta
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening, record_stated_anchor
-from obdi.models import Transaction
+from obdi.core.models import Transaction
 from obdi.movement_completeness import MovementCompleteness
 from obdi.protection import press
 from obdi.store import Store

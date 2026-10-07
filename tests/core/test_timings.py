@@ -13,7 +13,7 @@ same discipline as counts carrying denominators.
 
 from __future__ import annotations
 
-from obdi.timings import Timings
+from obdi.core.timings import Timings
 
 
 class TestWhatAPageSpentItsTimeOn:
@@ -211,7 +211,7 @@ class TestSayingOnlyWhatWasMeasured:
     """
 
     def test_ASecondOrMore_ReadsInSeconds(self) -> None:
-        from obdi.timings import duration
+        from obdi.core.timings import duration
 
         assert duration(1.234) == "1.23s"
         assert duration(31.4) == "31.40s"
@@ -221,25 +221,25 @@ class TestSayingOnlyWhatWasMeasured:
     ) -> None:
         # "0.02s" makes the eye count decimal places to find the
         # magnitude; "20ms" states it.
-        from obdi.timings import duration
+        from obdi.core.timings import duration
 
         assert duration(0.02) == "20ms"
         assert duration(0.163) == "163ms"
 
     def test_AFewMilliseconds_KeepAFraction_RatherThanRoundingToOne(self) -> None:
-        from obdi.timings import duration
+        from obdi.core.timings import duration
 
         assert duration(0.0045) == "4.5ms"
 
     def test_BelowTheResolution_IsABound_NotZero(self) -> None:
         # The work happened. Reporting it as zero says it did not.
-        from obdi.timings import duration
+        from obdi.core.timings import duration
 
         assert duration(0.0000004) == "<0.01ms"
         assert duration(0.0) == "<0.01ms"
 
     def test_ATrulyNegligibleShare_IsBounded_NotClaimedToBeNothing(self) -> None:
-        from obdi.timings import share
+        from obdi.core.timings import share
 
         assert share(0.63, 1.0) == "63%"
         assert share(0.004, 1.0) == "0.4%"
@@ -247,6 +247,6 @@ class TestSayingOnlyWhatWasMeasured:
         assert share(0.0, 1.0) == "<0.1%"
 
     def test_AShareOfNothing_SaysSo_RatherThanDividing(self) -> None:
-        from obdi.timings import share
+        from obdi.core.timings import share
 
         assert share(0.0, 0.0) == "-"

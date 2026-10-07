@@ -153,8 +153,8 @@ class TestTheDisplayHalf:
         """One account fed by two witnesses over different pipes."""
         from datetime import date
 
+        from obdi.core.models import SourceTier, Transaction, TransactionStatus
         from obdi.ingest import reconcile_batch
-        from obdi.models import SourceTier, Transaction, TransactionStatus
 
         store = Store(tmp_path / "s.sqlite3")
         for source, connection, digest in (
@@ -257,7 +257,7 @@ class TestSiblingHeavyDigests_DoNotExplodeTheWitnessMap:
     def test_ADigestWithManySiblings_YieldsEachConnectionOnce(self, tmp_path):
         from datetime import UTC, datetime
 
-        from obdi.models import RawArtefact, Transaction
+        from obdi.core.models import RawArtefact, Transaction
         from obdi.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:

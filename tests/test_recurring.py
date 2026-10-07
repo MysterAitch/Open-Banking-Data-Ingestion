@@ -17,8 +17,8 @@ from datetime import date, timedelta
 
 import pytest
 
-from obdi.jsontypes import JsonObject
-from obdi.models import SourceTier, Transaction, TransactionStatus
+from obdi.core.jsontypes import JsonObject
+from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.recurring import HABIT, PULLED, SCHEDULED, Series, find_recurring
 
 TODAY = date(2026, 10, 7)

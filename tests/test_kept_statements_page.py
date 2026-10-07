@@ -22,8 +22,8 @@ import httpx
 import pytest
 
 from obdi.cli import build_web_config
+from obdi.core.models import RawArtefact
 from obdi.identity import artefact_digest
-from obdi.models import RawArtefact
 from obdi.statement_extraction import keep_extraction
 from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler

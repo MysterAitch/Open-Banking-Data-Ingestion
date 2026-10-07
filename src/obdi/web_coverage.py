@@ -32,10 +32,10 @@ from datetime import date
 from urllib.parse import quote
 
 from .account_names import AccountShown, AccountsShown, code_html
+from .core.page_times import date_with_age
+from .core.plural import agree, plural
 from .coverage import SourceCoverage
 from .coverage_timeline import KIND_NAMES, LANE_ORDER, kind_of_source
-from .page_times import date_with_age
-from .plural import agree, plural
 from .spaces import ArchiveNote
 from .web_accounts import archive_label
 

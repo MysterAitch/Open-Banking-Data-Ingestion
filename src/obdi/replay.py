@@ -33,8 +33,8 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date
 
-from .models import Transaction, TransactionStatus
-from .namespaces import CASH_LEG_SOURCE, UNITEMISED_SOURCE
+from .core.models import Transaction, TransactionStatus
+from .core.namespaces import CASH_LEG_SOURCE, UNITEMISED_SOURCE
 
 
 class ReplayError(RuntimeError):

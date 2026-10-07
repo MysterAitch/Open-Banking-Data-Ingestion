@@ -11,9 +11,9 @@ the same events rather than as separate ledgers, which is what these cover.
 from datetime import date
 
 from obdi.accounts import AccountBinding, AccountMap
+from obdi.core.models import Transaction
 from obdi.identity import content_key
 from obdi.matching import MatchTier, resolve
-from obdi.models import Transaction
 
 
 def txn(

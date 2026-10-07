@@ -78,9 +78,9 @@ from pathlib import Path
 
 from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
+from obdi.core.models import RawArtefact, SourceTier, Transaction
 from obdi.identity import content_key
 from obdi.ingest import import_file, reconcile_batch
-from obdi.models import RawArtefact, SourceTier, Transaction
 from obdi.providers import starling
 from obdi.statement_terms import keep_statement_readings
 from obdi.store import Store

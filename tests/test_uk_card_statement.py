@@ -35,9 +35,9 @@ from datetime import date
 
 import pytest
 
-from obdi.errors import DataError
+from obdi.core.errors import DataError
+from obdi.core.namespaces import UK_CARD_STATEMENT_SOURCE
 from obdi.ingest import import_file
-from obdi.namespaces import UK_CARD_STATEMENT_SOURCE
 from obdi.parsers.base import ParseError
 from obdi.parsers.pdf_statements import (
     CreditUnionStatementPdfParser,

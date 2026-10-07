@@ -27,9 +27,9 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from itertools import combinations
 
-from .models import Transaction
-from .money import format_amount
-from .plural import plural
+from .core.models import Transaction
+from .core.money import format_amount
+from .core.plural import plural
 
 #: Two sources describing the SAME account may date one movement a day or two
 #: apart (statement value date versus feed settlement). Row matching within the

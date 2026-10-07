@@ -32,6 +32,7 @@ import pytest
 from obdi.account_names import accounts_shown
 from obdi.accounts import AccountMap, AccountRecord, AccountRef
 from obdi.cli import main as cli_main
+from obdi.core.models import RawArtefact
 from obdi.export_declared import export_declared
 from obdi.identity import artefact_digest
 from obdi.known_accounts import (
@@ -40,7 +41,6 @@ from obdi.known_accounts import (
     read_known_accounts,
     set_space_parents,
 )
-from obdi.models import RawArtefact
 from obdi.navigation import DESTINATIONS
 from obdi.providers import starling
 from obdi.rebuild import rebuild_from_raw

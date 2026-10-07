@@ -43,7 +43,7 @@ from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, NewType
 
-from .errors import DataError
+from .core.errors import DataError
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     # store.py imports this module, so the store is named for the annotation

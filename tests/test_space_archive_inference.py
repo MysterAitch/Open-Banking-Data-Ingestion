@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime
 
-from obdi.models import RawArtefact
+from obdi.core.models import RawArtefact
 from obdi.spaces import (
     ARCHIVE_BASIS_PREFIX,
     Listing,

@@ -29,10 +29,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Protocol
 from urllib.parse import parse_qs, urlparse
 
-from .buildinfo import describe
+from .core.buildinfo import describe
+from .core.page_times import marks_as_html
 from .navigation import navigation_html, with_way_out
 from .page_structure import structure_tables
-from .page_times import marks_as_html
 from .stylesheet import SERVED_STYLESHEET
 from .values_sitting import banner_html
 

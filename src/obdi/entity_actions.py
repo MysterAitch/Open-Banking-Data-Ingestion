@@ -10,8 +10,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
+from .core.plural import plural
 from .entities import OWNER_NAME, EntityRefused
-from .plural import plural
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from .store import Store

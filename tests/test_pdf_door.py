@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.errors import DataError
+from obdi.core.errors import DataError
 from obdi.ingest import import_file
 from obdi.parsers.uk_banks import ParseError, detect
 from obdi.store import Store

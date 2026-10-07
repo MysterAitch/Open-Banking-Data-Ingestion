@@ -31,7 +31,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from .jsontypes import JsonObject, text
+from .core.jsontypes import JsonObject, text
 from .store import Store
 
 #: How far behind the anchor each routine ask reaches. Large enough that

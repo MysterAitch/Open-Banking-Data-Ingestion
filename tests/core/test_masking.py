@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from obdi.masking import MASKED_TOTAL, Disclosed, Structural, Total
+from obdi.core.masking import MASKED_TOTAL, Disclosed, Structural, Total
 
 
 @dataclass(frozen=True)

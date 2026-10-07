@@ -18,7 +18,7 @@ from datetime import date
 
 import pytest
 
-from obdi.models import SourceTier, Transaction
+from obdi.core.models import SourceTier, Transaction
 from obdi.store import Store
 
 OLD_SCHEMA = """

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from datetime import date
 
+from obdi.core.models import SourceTier, Transaction
 from obdi.identity import content_key
 from obdi.ingest import reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.providers.truelayer import artefact_for
 from obdi.review_report import FlagClass, review_report
 from obdi.store import Store

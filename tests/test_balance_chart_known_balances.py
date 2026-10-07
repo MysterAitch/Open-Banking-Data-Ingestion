@@ -44,7 +44,7 @@ from obdi.balance_anchors import (
     record_stated_anchor,
 )
 from obdi.balance_chart import BalanceChart, build_balance_chart, chart_of_opening
-from obdi.models import Transaction
+from obdi.core.models import Transaction
 from obdi.store import Store
 from obdi.web_balance_chart import EDGE, PIXELS_PER_DAY, render_balance_chart
 from page_dom import Node, elements, parse

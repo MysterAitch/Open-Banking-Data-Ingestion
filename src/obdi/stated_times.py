@@ -28,9 +28,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from .errors import DataError
-from .jsontypes import JsonObject
-from .models import Transaction
+from .core.errors import DataError
+from .core.jsontypes import JsonObject
+from .core.models import Transaction
 from .payment_links import FIRST_PARTY_FEEDS
 
 SETTLEMENT_FIELD = "settlementTime"

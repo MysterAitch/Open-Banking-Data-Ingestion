@@ -41,7 +41,7 @@ import obdi.cli as cli
 import obdi.ingest as ingest
 import obdi.pull as pull_module
 import obdi.statement_sections as sections
-from obdi.models import Transaction
+from obdi.core.models import Transaction
 from obdi.providers import truelayer
 from obdi.rebuild import rebuild_from_raw
 from obdi.statement_sections import assign_section, check_assignment

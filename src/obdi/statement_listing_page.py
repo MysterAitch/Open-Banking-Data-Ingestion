@@ -12,7 +12,7 @@ import html
 from datetime import date
 
 from .account_names import AccountShown, AccountsShown, code_html
-from .plural import agree, plural
+from .core.plural import agree, plural
 from .standing_data import ADDS_UP, DOES_NOT_ADD_UP
 from .statement_listing_measure import (
     AccountListing,

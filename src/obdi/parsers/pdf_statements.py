@@ -23,10 +23,10 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import lru_cache
 
+from ..core.models import SourceTier, Transaction
+from ..core.namespaces import UK_CARD_STATEMENT_SOURCE
+from ..core.plural import plural
 from ..identity import artefact_digest, content_key
-from ..models import SourceTier, Transaction
-from ..namespaces import UK_CARD_STATEMENT_SOURCE
-from ..plural import plural
 from ..statement_columns import Row, aligned
 from .base import ParseError, StatementParser
 from .capital_one_pdf import read_statement as read_capital_one

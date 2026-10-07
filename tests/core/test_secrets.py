@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from obdi.secrets import SecretError, describe_source, read_secret
+from obdi.core.secrets import SecretError, describe_source, read_secret
 
 NAME = "OBDI_TEST_SECRET"
 

@@ -160,9 +160,9 @@ from dataclasses import dataclass
 from datetime import date
 from itertools import combinations
 
-from . import instrumentation
 from .accounts import AccountMap
-from .models import Transaction
+from .core import instrumentation
+from .core.models import Transaction
 from .period_reconciliation import (
     FEED_SIDE,
     SAME_MONEY_PHASE,

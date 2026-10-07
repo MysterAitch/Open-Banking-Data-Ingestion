@@ -33,8 +33,8 @@ from dataclasses import dataclass, replace
 from datetime import date
 
 from .accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef, is_cash_account
-from .models import Transaction, TransactionStatus
-from .namespaces import CASH_LEG_SOURCE
+from .core.models import Transaction, TransactionStatus
+from .core.namespaces import CASH_LEG_SOURCE
 from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS
 from .store import Store
 

@@ -68,8 +68,8 @@ from datetime import date, timedelta
 from itertools import pairwise
 from statistics import median_low
 
+from .core.models import Transaction, TransactionStatus
 from .entities import shape_of
-from .models import Transaction, TransactionStatus
 from .payment_methods import METHODS
 from .stated_words import words_in
 

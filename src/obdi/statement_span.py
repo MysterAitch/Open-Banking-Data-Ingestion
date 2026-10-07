@@ -68,8 +68,8 @@ from enum import StrEnum
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
+from .core.models import Transaction, TransactionStatus
 from .coverage import coverage
-from .models import Transaction, TransactionStatus
 from .parsers.pdf_statements import PDF_PARSERS
 from .statement_terms import StatementPeriod, statement_periods
 

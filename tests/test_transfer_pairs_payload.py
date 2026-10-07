@@ -22,7 +22,7 @@ from datetime import date
 
 from obdi.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.actual_push import build_audit_envelope, build_envelope, build_prune_envelope
-from obdi.models import TransactionStatus
+from obdi.core.models import TransactionStatus
 from obdi.providers import starling
 from obdi.rebuild import rebuild_from_raw
 from obdi.replay import (

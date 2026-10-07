@@ -32,6 +32,7 @@ import pytest
 
 from credit_union_documents import Move, document, pdf, section
 from obdi.connections import ConnectionStore
+from obdi.core.models import SourceTier, Transaction
 from obdi.coverage import (
     LOW_OVERLAP_MIN_ROWS,
     LOW_OVERLAP_THRESHOLD,
@@ -43,7 +44,6 @@ from obdi.coverage import (
 )
 from obdi.identity import content_key
 from obdi.ingest import ImportSummary, preview_reconcile, reconcile_batch
-from obdi.models import SourceTier, Transaction
 from obdi.parsers.credit_union_pdf import section_key
 from obdi.parsers.uk_banks import detect
 from obdi.statement_sections import read_sections

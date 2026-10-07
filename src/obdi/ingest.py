@@ -16,8 +16,17 @@ from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
-from . import instrumentation
 from .accounts import AccountMap
+from .core import instrumentation
+from .core.models import (
+    BASIS_FOUNDED,
+    MatchTier,
+    RawArtefact,
+    SourceTier,
+    Transaction,
+    TransactionStatus,
+)
+from .core.plural import plural
 from .identity import artefact_digest, entity_id_for
 from .matching import (
     EXACT_RULE_DOUBT,
@@ -30,17 +39,8 @@ from .matching import (
     second_row_named_by_exact_rules,
     supersede,
 )
-from .models import (
-    BASIS_FOUNDED,
-    MatchTier,
-    RawArtefact,
-    SourceTier,
-    Transaction,
-    TransactionStatus,
-)
 from .parsers.uk_banks import detect
 from .payment_links import stated_link_of
-from .plural import plural
 from .review_settlement import settle_review_flags
 from .same_money_fold import fold_same_money
 from .space_attribution import category_resolver, fold_space_copies
@@ -260,7 +260,7 @@ def import_file(
     # none, and a canonical name that could pose as a provider reference
     # merges two real accounts into one - after which the agreement report
     # cheerfully "corroborates" one bank's rows with another's.
-    from .namespaces import validate_canonical_name
+    from .core.namespaces import validate_canonical_name
 
     validate_canonical_name(account_id)
     payload = path.read_bytes()

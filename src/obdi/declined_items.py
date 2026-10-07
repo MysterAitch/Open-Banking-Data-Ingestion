@@ -48,6 +48,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .core.models import TransactionStatus
 from .feed_statuses import (
     FeedStatuses,
     accounts_holding_counted_rows_of,
@@ -56,7 +57,6 @@ from .feed_statuses import (
     uids_with_a_no_row_status_anywhere,
 )
 from .matching import EXACT_RULE_DOUBT
-from .models import TransactionStatus
 from .store import Store
 
 #: The start of the reason of a review flag raised for a row left counted although the newest

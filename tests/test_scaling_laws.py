@@ -15,9 +15,9 @@ the floor passes outright.
 import time
 from datetime import UTC, date, datetime
 
+from obdi.core.models import RawArtefact, Transaction
 from obdi.identity import artefact_digest
 from obdi.matching import pair_transfer_entities
-from obdi.models import RawArtefact, Transaction
 from obdi.store import Store
 
 SMALL, LARGE = 1500, 6000  # factor of 4

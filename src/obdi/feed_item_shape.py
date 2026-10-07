@@ -32,9 +32,9 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from math import ceil
 
-from .classification import CATEGORICAL, KNOWN_FIELDS, SHOW, UNCLASSIFIED, classify
+from .core.classification import CATEGORICAL, KNOWN_FIELDS, SHOW, UNCLASSIFIED, classify
+from .core.masking import Structural
 from .feed_statuses import FeedItem, FeedStatuses
-from .masking import Structural
 
 USUAL = 0.9
 RARE = 0.1

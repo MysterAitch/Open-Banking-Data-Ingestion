@@ -16,8 +16,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .models import Transaction
-from .plural import plural
+from .core.models import Transaction
+from .core.plural import plural
 from .store import Store
 
 
@@ -528,7 +528,7 @@ class Explanation:
         return ""
 
     def describe(self) -> str:
-        from .money import format_amount
+        from .core.money import format_amount
 
         if not self.count:
             return f"no transaction matches '{self.needle}'"

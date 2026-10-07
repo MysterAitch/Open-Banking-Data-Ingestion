@@ -14,6 +14,7 @@ import pytest
 
 import fault_structure_corpus as corpus
 from obdi.balance_anchors import FamilyWalk
+from obdi.core.masking import MASKED_TOTAL, Disclosed
 from obdi.fault_structure import (
     EXPLAINED,
     IRREGULAR,
@@ -29,7 +30,6 @@ from obdi.fault_structure import (
     structure,
     walk_report,
 )
-from obdi.masking import MASKED_TOTAL, Disclosed
 
 
 def whole(walk: FamilyWalk) -> FaultStructure:
