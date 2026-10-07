@@ -204,23 +204,20 @@ class TestEveryStatementParserKeepsTheContract:
                 )
 
 
-class TestARebrandedIssuerIsStillRecognised:
-    """The owner's Virgin Money card statement of October 2026 printed "Nationwide" where every
-    earlier one printed "Virgin Money" - the card's issuer was rebranded - and the same layout
-    to the line was refused as "no reader for this layout yet". A reader recognises a layout; a
-    name on it is one of the names that layout has carried."""
+class TestAnIssuersNameRunTogetherIsStillRecognised:
+    """The owner's Virgin Money card statement of October 2026 was refused as "no reader for
+    this layout yet", with the same layout to the line as September's. Its text layer never
+    prints "Virgin Money" with a space: the name is run together ("VirginMoney", as the footer's
+    "virginmoney.com" always is), and the reader matched the phrase with its space. The word
+    grid runs labels together on other documents too (the credit union's "AccountName"); a
+    phrase is recognised with whitespace disregarded on both sides."""
 
-    def test_VirginLayout_PrintingNationwideInsteadOfVirginMoney_IsReadByTheVirginReader(self):
-        rebranded = [
-            line.replace("Virgin Money", "Nationwide") for line in VIRGIN
-        ]
-        payload = build_pdf(rebranded)
+    def test_VirginLayout_WithTheIssuersNameRunTogether_IsReadByTheVirginReader(self):
+        fused = [line.replace("Virgin Money", "VirginMoney") for line in VIRGIN]
+        payload = build_pdf(fused)
 
-        assert "Virgin Money" not in "\n".join(rebranded)
+        assert "Virgin Money" not in "\n".join(fused)
         assert VirginMoneyCreditCardPdfParser().sniff(payload)
-        assert not NationwideStatementPdfParser().sniff(payload), (
-            "the current-account reader must not claim the card's statement"
-        )
         rows = list(VirginMoneyCreditCardPdfParser().parse(payload, account_id="an-account"))
         assert [row.amount_minor for row in rows] == [
             row.amount_minor
@@ -228,6 +225,11 @@ class TestARebrandedIssuerIsStillRecognised:
                 build_pdf(VIRGIN), account_id="an-account"
             )
         ]
+
+    def test_ARequiredPhraseRunTogether_IsStillRequiredAndStillFound(self):
+        fused = [line.replace("Statement  period:", "Statementperiod:") for line in VIRGIN]
+
+        assert VirginMoneyCreditCardPdfParser().sniff(build_pdf(fused))
 
     def test_NationwideCurrentAccountStatement_IsNotClaimedByTheVirginReader(self):
         assert not VirginMoneyCreditCardPdfParser().sniff(build_nationwide_pdf(NATIONWIDE))

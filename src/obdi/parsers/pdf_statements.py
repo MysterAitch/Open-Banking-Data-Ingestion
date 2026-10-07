@@ -274,12 +274,6 @@ class PdfStatementParser(StatementParser):
     #: Text that identifies the issuer. Matched against the document's own
     #: words rather than the filename, which a person can rename.
     marker: str
-    #: Other names the same layout has been printed under: a document must carry the marker OR
-    #: one of these, and every `requires` phrase besides. The Virgin Money card's statement of
-    #: October 2026 printed "Nationwide" where every earlier one printed "Virgin Money" - the
-    #: issuer rebranded - and the same layout to the line was refused as having no reader. A
-    #: reader recognises a LAYOUT; the name is one of the names that layout has carried.
-    also_named: tuple[str, ...] = ()
     #: Further words the document must ALSO carry, every one of them.
     #:
     #: Strict on purpose, and deliberately not clever. A brand name alone
@@ -306,17 +300,15 @@ class PdfStatementParser(StatementParser):
     def sniff(self, payload: bytes) -> bool:
         if not payload.startswith(PDF_MAGIC):
             return False
-        # Whitespace is squeezed on both sides: the text layer doubles the gap
-        # inside a phrase on some documents ("Statement  period:"), and a phrase
-        # a parser requires must not depend on how wide that gap came out.
-        lines = [" ".join(line.split()).casefold() for line in _text_of(payload)]
-
-        def printed(phrase: str) -> bool:
-            squeezed = " ".join(phrase.split()).casefold()
-            return any(squeezed in line for line in lines)
-
-        return any(printed(name) for name in (self.marker, *self.also_named)) and all(
-            printed(phrase) for phrase in self.requires
+        # Whitespace is disregarded on both sides: the text layer doubles the gap inside a
+        # phrase on some documents ("Statement  period:") and drops it on others - the Virgin
+        # Money card's statement of October 2026 never printed "Virgin Money" with a space, and
+        # was refused as having no reader though its layout was September's to the line. A
+        # phrase a parser requires must not depend on how the gap came out.
+        lines = ["".join(line.split()).casefold() for line in _text_of(payload)]
+        wanted = (self.marker, *self.requires)
+        return all(
+            any("".join(word.split()).casefold() in line for line in lines) for word in wanted
         )
 
     def read(self, payload: bytes) -> StatementReading:
@@ -499,9 +491,6 @@ class SantanderCreditCardPdfParser(PdfStatementParser):
 class VirginMoneyCreditCardPdfParser(PdfStatementParser):
     source = "virgin-money-cc-pdf"
     marker = "Virgin Money"
-    #: The card's statements print "Nationwide" from October 2026 (the issuer rebranded); the
-    #: source name stays, since the account and the layout are the same.
-    also_named = ("Nationwide",)
     #: The heading its reader takes the statement's dates from. A payee is free
     #: text, so another issuer's statement can name Virgin Money (a payment to
     #: one of its cards) without being one of its statements, and the name alone

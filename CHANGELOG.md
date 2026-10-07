@@ -26,6 +26,51 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.355] - 2026-10-07
+
+### Fixed
+- **The Capital One reader reads a card in credit, and a cover page whose
+  summary panel sits beside the table.** Four of ten statements uploaded
+  today were refused: three because the card was in credit - "Your new
+  balance −£x" and "NEW CLOSING BALANCE −£x" - which the reader took for an
+  unknown marker, and one because the cover page's right-hand panel put a
+  stray figure on the table's heading row, so the reader took page two's
+  heading as the heading and called page one's rows "above" it. A credit
+  balance is read with its sign (the store holds a balance owed negated, so
+  a card in credit is a positive balance and the arithmetic gate is
+  unchanged); the heading is found per page and a figure beyond the "Paid
+  out" column's edge belongs to the panel. The shape page's reader report
+  says "in credit" where that is what it read. Built from the masked shapes
+  alone; the real statements are re-read by the rebuild. The refused June
+  statement is the one that covers the days whose absence made July's
+  closing balance stop adding up.
+- **A statement reader recognises a phrase however the text layer spaces
+  it.** The Virgin Money card's October statement was refused as having no
+  reader though its layout was September's to the line: its text layer
+  never prints "Virgin Money" with a space (the name is run together, as the
+  footer's "virginmoney.com" always is), and the reader matched the phrase
+  with its space. Recognition now disregards whitespace on both sides, the
+  same fault the credit union's "AccountName" taught. The first reading of
+  this was wrong - it took "Nationwide" in the small print for a rebrand and
+  added it as a second name; that was withdrawn before release.
+
+### Added
+- **Limit and rate windows can be edited and removed** from the account's
+  edit page (0.4.353 could only add). A figure is never served into its
+  field, so the page stays masked on a GET; a blank figure keeps the held
+  one.
+- **An assigned section of an "all accounts" document can be moved** to
+  another account from the Statements page, as a whole statement could
+  since 0.4.346; the rows follow and the move survives a rebuild.
+
+### Changed
+- **Clock times are shown on the owner's London clock**, not the host's
+  UTC: Today's checks line, the sitting banner's "until", the Statements
+  page's "kept", the admin's rebuild records, and the rest of the page
+  times. Times that quote a source's own stamp (the scheduler's record,
+  Actual's push history, the fetch ledger, a bank's stated times) stay
+  marked Z, and the fold that holds them says so.
+
 ## [0.4.354] - 2026-10-06
 
 Store schema 22: a store written by this version is refused by any earlier one
