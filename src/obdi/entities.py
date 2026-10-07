@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 
 from .entity_tokens import (
     Token,
@@ -211,6 +212,27 @@ class Proposals:
     too_broad: tuple[Proposal, ...]
 
 
+#: Most transactions listed under one name before "and N more": enough to see what a merge would
+#: capture, and few enough that a page of proposals stays a page.
+COVERED_SHOWN = 10
+
+
+@dataclass(frozen=True)
+class Covered:
+    """One transaction a name covers, as far as the page lists it."""
+
+    day: date
+    account: str
+    #: The account's label as pages show it, "" where it has none.
+    account_label: str
+    amount_minor: int
+    currency: str
+    #: The description as the source printed it.
+    description: str
+    #: The ledger's key for the row (`ledger.row_anchor`), which a link to it names.
+    anchor: str
+
+
 @dataclass(frozen=True)
 class EntitiesView:
     """Everything the Entities page says: every shape with its transactions, the entities the
@@ -219,6 +241,9 @@ class EntitiesView:
     counts: Mapping[str, int]
     entities: tuple[Entity, ...]
     proposals: Proposals
+    #: The newest `COVERED_SHOWN` transactions of each name, newest first, from the one read of
+    #: the transactions the page already makes; `counts` says how many there are in all.
+    covers: Mapping[str, tuple[Covered, ...]] = field(default_factory=dict)
     #: The shapes that are mostly the legs of the owner's own transfers, offered before any payee.
     owner: OwnerGroup | None = None
     #: Free names that share a distinctive word with an entity, offered under it.
@@ -267,6 +292,7 @@ def view_of(
     counts: Mapping[str, int],
     entities: Iterable[Entity],
     legs: Mapping[str, int] | None = None,
+    covers: Mapping[str, tuple[Covered, ...]] | None = None,
 ) -> EntitiesView:
     """The page's view of the shapes held and the entities made from them.
 
@@ -281,7 +307,12 @@ def view_of(
     proposals = propose_groups(counts, taken=set_apart)
     offered = {s for g in (*proposals.groups, *proposals.too_broad) for s in g.shapes}
     return EntitiesView(
-        counts, made, proposals, owner, suggest_for_entities(counts, made, set_apart | offered)
+        counts=counts,
+        entities=made,
+        proposals=proposals,
+        covers=covers or {},
+        owner=owner,
+        suggestions=suggest_for_entities(counts, made, set_apart | offered),
     )
 
 

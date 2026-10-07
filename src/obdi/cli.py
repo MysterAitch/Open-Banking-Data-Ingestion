@@ -3896,18 +3896,44 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def entities_data() -> EntitiesView:
         """Every payee name held across every account with its transactions, and the entities
         made from them - one whole-table read of the transactions, whatever the store's size."""
-        from .entities import count_row_legs, count_row_shapes, view_of
+        from .entities import (
+            COVERED_SHOWN,
+            Covered,
+            count_row_legs,
+            count_row_shapes,
+            shape_of,
+            view_of,
+        )
+        from .ledger import row_anchor
         from .recurring import counts_as_occurrence
 
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
             leg_ids = store.confirmed_transfer_entities()
+            names = account_names(store)
+            listed: dict[str, list[Covered]] = {}
+            for t in sorted(rows, key=lambda r: (r.value_date, r.entity_id), reverse=True):
+                shape = shape_of(t.description, t.counterparty)
+                shown = listed.setdefault(shape, [])
+                if shape and len(shown) < COVERED_SHOWN:
+                    shown.append(
+                        Covered(
+                            t.value_date,
+                            t.account_id,
+                            names.of(t.account_id).label,
+                            t.amount_minor,
+                            t.currency,
+                            t.description,
+                            row_anchor(t.entity_id),
+                        )
+                    )
             return view_of(
                 count_row_shapes((t.description, t.counterparty) for t in rows),
                 store.entities_with_shapes(),
                 count_row_legs(
                     (t.description, t.counterparty, t.entity_id in leg_ids) for t in rows
                 ),
+                {shape: tuple(found) for shape, found in listed.items() if shape},
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:

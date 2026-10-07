@@ -16,7 +16,13 @@ ENTITIES_STYLES = """
  .ent-name-field input { flex: 1 1 6rem; min-width: 0; }
  .ent-name-field button { flex: none; }
  .ent-names { list-style: none; margin: 0; padding: 0; }
- .ent-names li { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: 0; line-height: 130%; }
+ .ent-names li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s3); padding: 0; line-height: 130%; }
+ .ent-rows { margin-left: auto; }
+ .ent-rows[open] { flex: 1 0 100%; order: 9; }
+ .ent-rows > summary { cursor: pointer; text-align: right; min-height: var(--hit); display: flex; align-items: center; justify-content: flex-end; }
+ .ent-tx { list-style: none; margin: 0; padding: 0; }
+ .ent-tx li { display: block; padding: var(--s1) 0; overflow-wrap: anywhere; }
+ .ent-tx a { display: block; }
  .ent-names label.tick { flex: 1 1 auto; min-height: var(--hit); }
  .ent-count { white-space: nowrap; font: var(--text-sm)/130% var(--sans); color: var(--ink-2); }
  .ent-why { font: var(--text-sm)/140% var(--sans); color: var(--ink-2); margin: var(--s1) 0 0; }

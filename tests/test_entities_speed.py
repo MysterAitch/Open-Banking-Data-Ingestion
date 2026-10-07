@@ -16,7 +16,14 @@ from large_store_pages import serving
 #: with another build: 8 statements and 0.20 to 0.22 s for a warm GET. The statement bound allows
 #: two more than measured (a read per name or per entity would add dozens); the time is loose, so
 #: a slow machine does not flake.
-ENTITIES_STATEMENTS = 10
+#:
+#: RE-MEASURED with the owner group, the transactions each name covers, and account labels: 21
+#: statements (8 before). Of the 13 added, one reads the confirmed transfer pairs (the owner's
+#: legs) and the rest are `account_names`, the one place an account's label is decided, which
+#: opens its own store and reads the declared accounts and the providers' landed names. None grows
+#: with the number of transactions, names, or entities: the covered rows come from the one
+#: whole-table read the page already made. The bound stays two above what was measured.
+ENTITIES_STATEMENTS = 23
 SECONDS = 5.0
 
 

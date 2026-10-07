@@ -15,13 +15,14 @@ from __future__ import annotations
 import os
 import threading
 from collections.abc import Iterator
+from datetime import date
 from http.server import HTTPServer
 from pathlib import Path
 
 import pytest
 
 from obdi.connections import ConnectionStore
-from obdi.entities import EntitiesView, Entity, view_of
+from obdi.entities import Covered, EntitiesView, Entity, view_of
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 sync_api = pytest.importorskip("playwright.sync_api")
@@ -37,6 +38,10 @@ SCREENS_OPEN = 5
 #: over three screens, so two groups moved into the fold. Opened, the fold lists every free name
 #: as a tick row of its own (a thumb-sized target each), which is the whole of the extra height;
 #: five screens is allowed for an act the owner chooses to make.
+#: Re-measured with each name's transactions listed in a fold of its own, the owner entities' fold
+#: of rename, fold-into, and make-its-own, and a "newest days" fold on each masked group: masked
+#: 1,390 closed and 1,826 open; shown 2,250 closed and 4,179 open (the count of each name is the
+#: summary of its fold, so a closed fold adds no line).
 MEASURED_CLOSED = 2300
 MEASURED_OPEN = 4250
 
@@ -68,7 +73,19 @@ def _view() -> EntitiesView:
     for index in range(30 - len(counts)):
         counts[f"singular{'abcdefghij'[index]} merchant{'klmnopqrst'[index]}"] = 1
     assert len(counts) == 30
-    return view_of(counts, gathered)
+    # Each name lists up to three transactions, so the folds the page offers on every name are
+    # part of what is measured (they are closed: the count is their summary).
+    covers = {
+        shape: tuple(
+            Covered(
+                date(2026, 9, 10 - n), "current-main", "", -1234 - n, "GBP",
+                f"{shape.upper()} 1041 LONDON GB", "0123456789ab",
+            )
+            for n in range(min(3, count))
+        )
+        for shape, count in counts.items()
+    }
+    return view_of(counts, gathered, None, covers)
 
 
 @pytest.fixture(scope="module")

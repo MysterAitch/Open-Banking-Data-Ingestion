@@ -531,6 +531,95 @@ class TestWhatAFirstMergeTeaches:
         assert self.could_forms(shown(base)) == []
 
 
+@pytest.fixture
+def busy_world(tmp_path, monkeypatch):
+    """One invented retailer's twelve London payments, on the 1st to the 12th of September
+    2026 at 10.01 to 10.12, and one in Reading on the 13th at 99.99."""
+    rows = [(f"{day:02d}/09/2026", "FERNHOLLOW GROCERS 1041 LONDON", f"10.{day:02d}")
+            for day in range(1, 13)]
+    rows.append(("13/09/2026", "FERNHOLLOW GROCERS 77 READING", "99.99"))
+    csv = tmp_path / "busy.csv"
+    _export(csv, rows)
+    db = tmp_path / "store.sqlite3"
+    with Store(db) as store:
+        import_file(store, csv, account_id="current-main")
+    environment(monkeypatch, tmp_path)
+    config = build_web_config(db)
+    assert config is not None
+    base, stop = serve_config(config)
+    yield base, db
+    stop()
+
+
+class TestWhatANameCoversBeforeMerging:
+    def folds(self, page: str):
+        return [d for d in elements(parse(page), "details") if "ent-rows" in d.classes]
+
+    def test_Fold_WhenValuesAreShown_ListsTheNewestTenWithDayAmountAndDescriptionAndCountsTheRest(
+        self, busy_world
+    ):
+        base, _db = busy_world
+
+        folds = self.folds(shown(base))
+
+        by_label = {
+            next(iter(elements(d, "summary"))).text(): d for d in folds
+        }
+        assert sorted(by_label) == ["1", "12"]
+        london = by_label["12"]
+        rows = [li.text() for li in elements(london, "li") if "muted" not in li.classes]
+        assert len(rows) == 10
+        assert rows[0].startswith("2026-09-12") and "-£10.12" in rows[0]
+        assert "FERNHOLLOW GROCERS 1041 LONDON" in rows[0], "the description is as printed"
+        assert rows[-1].startswith("2026-09-03")
+        assert "and 2 more" in london.text()
+
+    def test_Fold_WhenValuesAreShown_LinksEachRowToItsPlaceInTheLedger(self, busy_world):
+        from obdi.ledger import row_anchor
+
+        base, db = busy_world
+        with Store(db) as store:
+            newest = max(
+                (t for t in store.all_transactions() if t.amount_minor == -1012),
+                key=lambda t: t.value_date,
+            )
+
+        links = [a.attrs["href"] for a in elements(parse(shown(base)), "a")
+                 if a.attrs.get("href", "").startswith("/ledger")]
+
+        assert f"/ledger?ref=current-main&month=2026-09#t-{row_anchor(newest.entity_id)}" in links
+        assert len(links) == 11
+
+    def test_Fold_WhenFetchedMasked_HoldsDaysAndCountsAndNothingElse(self, busy_world):
+        base, _db = busy_world
+
+        page = httpx.get(f"{base}/entities", timeout=60).text
+
+        assert "2026-09-13" in page and "and 3 more" in page
+        for hidden in ("£", "10.12", "99.99", "fernhollow", "london", "reading"):
+            assert hidden not in page.casefold()
+        assert self.folds(page) == []
+
+    def test_Fold_WhenAGroupIsMerged_StillListsEachNameUnderTheEntity(self, busy_world):
+        base, _db = busy_world
+        london, reading = "fernhollow grocers london", "fernhollow grocers reading"
+
+        response = merge_group(base, shapes=(london, reading), name="Fernhollow")
+
+        assert response.status_code == 200
+        counts = sorted(
+            next(iter(elements(d, "summary"))).text() for d in self.folds(response.text)
+        )
+        assert counts == ["1", "12"]
+
+    def test_Fold_WhenAGroupHasFewerThanTenTransactions_SaysNothingOfMore(self, world):
+        base, _db = world
+
+        folds = self.folds(shown(base))
+
+        assert folds and all("more" not in d.text() for d in folds)
+
+
 class TestMakingANameItsOwnEntity:
     def parent(self, base: str, db) -> int:
         merge_group(base)

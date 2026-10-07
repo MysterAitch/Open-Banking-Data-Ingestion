@@ -16,15 +16,19 @@ unmasked page, the outcome said above it.
 from __future__ import annotations
 
 import html
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
+from .account_names import AccountShown
 from .callback import render_page
 from .entities import (
+    COVERED_SHOWN,
     OPENING_WORDS,
     OWNER_NAME,
     OWNER_ROLE,
     SAME_WORDS,
+    Covered,
     EntitiesView,
     Entity,
     EntityRefused,
@@ -33,6 +37,7 @@ from .entities import (
 )
 from .logs import say
 from .masking import mask_text
+from .money import format_amount
 from .navigation import page_name
 from .plural import agree, plural
 from .web_recurring import values_mode
@@ -110,14 +115,77 @@ def _across(names: int, transactions: int) -> str:
     return f"{plural(transactions, 'transaction')} across {plural(names, 'name')}"
 
 
-def _ticks(shapes: Sequence[str], counts: Mapping[str, int], *, checked: bool) -> str:
+def _ledger_address(covered: Covered) -> str:
+    """Where the ledger lists the row: its account's month, at the row's own key, the way a
+    transfer's other leg is linked (`web_ledger._facts_html`)."""
+    month = covered.day.isoformat()[:7]
+    return (
+        f"/ledger?ref={quote(covered.account, safe='')}&month={month}"
+        f"#t-{quote(covered.anchor, safe='')}"
+    )
+
+
+def _covered_row(covered: Covered) -> str:
+    """One transaction a name covers: its day, account, amount, and description as printed, the
+    whole line a link to its row in the ledger."""
+    account = AccountShown.named(covered.account, covered.account_label).as_name()
+    amount = format_amount(covered.amount_minor, currency=covered.currency)
+    return (
+        f'<li><a class="tap" href="{_esc(_ledger_address(covered))}">'
+        f'<span class="mono">{covered.day.isoformat()}</span> {account} '
+        f'<span class="mono">{_esc(amount)}</span> '
+        f'<span class="txt">{_esc(covered.description)}</span></a></li>'
+    )
+
+
+def _count_or_rows(shape: str, view: EntitiesView) -> str:
+    """The number of transactions a name has; where the page holds them, that number opens the
+    newest of them (`COVERED_SHOWN`), so what a merge would capture can be seen before pressing."""
+    total = view.counts.get(shape, 0)
+    found = view.covers.get(shape, ())
+    if not found:
+        return f'<span class="ent-count">{total:,}</span>'
+    more = total - len(found)
+    tail = f'<li class="muted">and {more:,} more</li>' if more > 0 else ""
+    return (
+        f'<details class="ent-rows"><summary class="ent-count">{total:,}</summary>'
+        f'<ol class="ent-tx">{"".join(_covered_row(c) for c in found)}{tail}</ol></details>'
+    )
+
+
+def _masked_days(shapes: Sequence[str], view: EntitiesView) -> str:
+    """For a masked page, the newest days a group's names were used on and how many more there
+    are: days and a count, nothing a name or an amount could be read from."""
+    found = sorted(
+        (c.day for shape in shapes for c in view.covers.get(shape, ())), reverse=True
+    )[:COVERED_SHOWN]
+    if not found:
+        return ""
+    total = sum(view.counts.get(s, 0) for s in shapes)
+    more = total - len(found)
+    tail = f"<li>and {more:,} more</li>" if more > 0 else ""
+    days = "".join(f'<li class="mono">{day.isoformat()}</li>' for day in found)
+    return (
+        '<details class="ent-fold"><summary>Newest days</summary>'
+        f'<ol class="ent-tx">{days}{tail}</ol></details>'
+    )
+
+
+def _ticks(
+    shapes: Sequence[str], view: EntitiesView, *, checked: bool, rows: bool = True
+) -> str:
     items = []
     for shape in shapes:
         box = f'<input type="checkbox" name="shape" value="{_esc(shape)}"'
         box += " checked>" if checked else ">"
+        count = (
+            _count_or_rows(shape, view)
+            if rows
+            else f'<span class="ent-count">{view.counts.get(shape, 0):,}</span>'
+        )
         items.append(
             f'<li><label class="tick">{box}<span class="txt">{_esc(shape)}</span></label>'
-            f'<span class="ent-count">{counts.get(shape, 0):,}</span></li>'
+            f"{count}</li>"
         )
     return f'<ul class="ent-names">{"".join(items)}</ul>'
 
@@ -132,17 +200,17 @@ def _name_field(value: str, press: str, *, label: str = "Name") -> str:
     )
 
 
-def _group(group: Proposal, counts: Mapping[str, int], *, unmasked: bool) -> str:
+def _group(group: Proposal, view: EntitiesView, *, unmasked: bool) -> str:
     across = _across(len(group.shapes), group.transactions)
     if not unmasked:
         return (
             f'<section class="ent-group"><h3>{_sealed(group.name)}</h3>'
-            f'<p class="ent-why">{across}.</p></section>'
+            f'<p class="ent-why">{across}.</p>{_masked_days(group.shapes, view)}</section>'
         )
     return (
         f'<section class="ent-group"><form method="post" action="{MERGE_ROUTE}">'
         f"{_name_field(group.name, 'Merge')}"
-        f"{_ticks(group.shapes, counts, checked=True)}"
+        f"{_ticks(group.shapes, view, checked=True)}"
         f'<p class="ent-why">{across}; {_why(group)}.</p></form></section>'
     )
 
@@ -151,10 +219,10 @@ def _groups(view: EntitiesView, *, unmasked: bool) -> str:
     groups = view.proposals.groups
     if not groups:
         return ""
-    lead = "".join(_group(g, view.counts, unmasked=unmasked) for g in groups[:GROUPS_SHOWN])
+    lead = "".join(_group(g, view, unmasked=unmasked) for g in groups[:GROUPS_SHOWN])
     rest = groups[GROUPS_SHOWN:]
     if rest:
-        more = "".join(_group(g, view.counts, unmasked=unmasked) for g in rest)
+        more = "".join(_group(g, view, unmasked=unmasked) for g in rest)
         lead += (
             f'<details class="ent-more"><summary>{plural(len(rest), "more group")}</summary>'
             f"{more}</details>"
@@ -180,7 +248,7 @@ def _owner(view: EntitiesView, *, unmasked: bool) -> str:
         return (
             f'{heading}<section class="ent-group"><p class="ent-why">{across}; '
             f"{group.legs:,} of them are the two sides of a transfer between your accounts.</p>"
-            "</section>"
+            f"{_masked_days(group.shapes, view)}</section>"
         )
     owner = next((e for e in view.entities if e.role == OWNER_ROLE), None)
     if owner is None:
@@ -192,19 +260,20 @@ def _owner(view: EntitiesView, *, unmasked: bool) -> str:
         )
     return (
         f'{heading}<section class="ent-group"><form method="post" action="{OWN_ROUTE}">'
-        f"{field}{_ticks(group.shapes, view.counts, checked=True)}"
+        f"{field}{_ticks(group.shapes, view, checked=True)}"
         f'<p class="ent-why">{across}; {group.legs:,} of them are the two sides of a transfer '
         "between your accounts, so the other side is you, not a payee.</p></form></section>"
     )
 
 
 def _could_belong(
-    entity: Entity, suggestion: Suggestion | None, counts: Mapping[str, int], *, unmasked: bool
+    entity: Entity, suggestion: Suggestion | None, view: EntitiesView, *, unmasked: bool
 ) -> str:
     """Free names that share a distinctive word with the entity, ticked, with one press that adds
     them to it (a merge under the entity's own name, which attaches)."""
     if suggestion is None:
         return ""
+    counts = view.counts
     across = _across(len(suggestion.shapes), sum(counts.get(s, 0) for s in suggestion.shapes))
     if not unmasked:
         more = plural(len(suggestion.shapes), "more name")
@@ -214,7 +283,7 @@ def _could_belong(
         f'<form class="ent-could" method="post" action="{MERGE_ROUTE}">'
         f'<input type="hidden" name="name" value="{_esc(entity.name)}">'
         f"<h4>Could belong to {_esc(entity.name)}</h4>"
-        f"{_ticks(suggestion.shapes, counts, checked=True)}"
+        f"{_ticks(suggestion.shapes, view, checked=True)}"
         f'<p class="ent-why">{across}; they share {shared}.</p>'
         f'<button class="tap" type="submit">Add to {_esc(entity.name)}</button></form>'
     )
@@ -222,19 +291,18 @@ def _could_belong(
 
 def _entity(
     entity: Entity,
-    counts: Mapping[str, int],
+    view: EntitiesView,
     *,
     unmasked: bool,
     suggestion: Suggestion | None = None,
     children: Sequence[Entity] = (),
     nested: bool = False,
 ) -> str:
+    counts = view.counts
     total = sum(counts.get(shape, 0) for shape in entity.shapes)
     across = _across(len(entity.shapes), total)
-    could = _could_belong(entity, suggestion, counts, unmasked=unmasked)
-    inside = "".join(
-        _entity(child, counts, unmasked=unmasked, nested=True) for child in children
-    )
+    could = _could_belong(entity, suggestion, view, unmasked=unmasked)
+    inside = "".join(_entity(child, view, unmasked=unmasked, nested=True) for child in children)
     if inside:
         inside = f'<div class="ent-children">{inside}</div>'
     kind = "ent-entity ent-child" if nested else "ent-entity"
@@ -242,11 +310,11 @@ def _entity(
         heading = "h4" if nested else "h3"
         return (
             f'<section class="{kind}"><{heading}>{_sealed(entity.name)}</{heading}>'
-            f'<p class="ent-why">{across}.</p>{could}{inside}</section>'
+            f'<p class="ent-why">{across}.</p>{_masked_days(entity.shapes, view)}'
+            f"{could}{inside}</section>"
         )
     lines = "".join(
-        f'<li><span class="txt">{_esc(shape)}</span><span class="ent-count">'
-        f"{counts.get(shape, 0):,}</span>"
+        f'<li><span class="txt">{_esc(shape)}</span>{_count_or_rows(shape, view)}'
         f'<form method="post" action="{SPLIT_ROUTE}">'
         f'<input type="hidden" name="shape" value="{_esc(shape)}">'
         '<button class="tap" type="submit">Split apart</button></form></li>'
@@ -297,7 +365,7 @@ def _entities(view: EntitiesView, *, unmasked: bool) -> str:
     return "<h2>Entities</h2>" + "".join(
         _entity(
             e,
-            view.counts,
+            view,
             unmasked=unmasked,
             suggestion=offered.get(e.id),
             children=children.get(e.id, ()),
@@ -317,7 +385,7 @@ def _by_hand(view: EntitiesView) -> str:
         f'<details class="ent-more"><summary>Gather names yourself '
         f"({plural(len(free), 'name')} under no entity)</summary>"
         f'<form method="post" action="{MERGE_ROUTE}">{_name_field("", "Merge")}'
-        f"{_ticks(free, view.counts, checked=False)}</form></details>"
+        f"{_ticks(free, view, checked=False, rows=False)}</form></details>"
     )
 
 
