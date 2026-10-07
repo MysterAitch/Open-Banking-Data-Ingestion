@@ -84,7 +84,7 @@ class TestTheMaskedPage:
 
         assert response.status_code == 200
         assert summary_of(response.text) == (
-            "1 recurring thing across 1 account: 1 pulled, 0 scheduled, 0 habits; "
+            "1 recurring series across 1 account: 1 pulled, 0 scheduled, 0 habits; "
             "1 payment, 0 transfers, 0 incomes; 1 stopped, 1 changed"
         )
         text = response.text
@@ -217,7 +217,7 @@ class TestStoppedLongAgoFold:
 
         (line,) = [p for p in elements(root, "p") if "recur-summary" in p.classes]
         assert line.text() == (
-            "4 recurring things across 1 account: 4 pulled, 0 scheduled, 0 habits; "
+            "4 recurring series across 1 account: 4 pulled, 0 scheduled, 0 habits; "
             "4 payments, 0 transfers, 0 incomes; 3 stopped, 2 of them over a year ago, 0 changed"
         )
 
@@ -309,7 +309,7 @@ class TestKindOnThePage:
 
         (line,) = [p for p in elements(root, "p") if "recur-summary" in p.classes]
         assert line.text() == (
-            "4 recurring things across 1 account: 2 pulled, 1 scheduled, 1 habit; "
+            "4 recurring series across 1 account: 2 pulled, 1 scheduled, 1 habit; "
             "4 payments, 0 transfers, 0 incomes; 0 stopped, 0 changed"
         )
 

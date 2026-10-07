@@ -111,7 +111,7 @@ def summary_line(findings: RecurringFindings) -> str:
         f"{plural(sum(s.kind == HABIT for s in found), 'habit')}"
     )
     return (
-        f"{plural(len(found), 'recurring thing')} across "
+        f"{plural(len(found), 'recurring series', 'recurring series')} across "
         f"{plural(len({s.account for s in found}), 'account')}: {kinds}; "
         f"{plural(payments, 'payment')}, {plural(transfers, 'transfer')}, "
         f"{plural(incomes, 'income')}; {sum(s.stopped for s in found)} stopped{of_them}, "
@@ -221,7 +221,7 @@ def render_recurring(findings: RecurringFindings, names: AccountsShown, *, unmas
     found = findings.series
     if not found:
         listing = (
-            "<p>Nothing recurring was found. A recurring thing needs the same payee at a "
+            "<p>Nothing recurring was found. A recurring series needs the same payee at a "
             "regular interval, over at least four of those intervals.</p>"
         )
         lead = ""
@@ -283,7 +283,7 @@ class RecurringPages:
         hook = config.recurring_data
         if hook is None:
             self._respond(
-                404, render_page("Not available", "<p>Recurring things are not wired.</p>")
+                404, render_page("Not available", "<p>Recurring payments are not wired.</p>")
             )
             return
         try:
