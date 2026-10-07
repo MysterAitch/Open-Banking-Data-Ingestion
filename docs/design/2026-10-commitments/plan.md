@@ -166,6 +166,22 @@ Target / accrual (what a category must hold by when; what a prepaid period costs
   count. The one distinction that stays is HELD versus EXTERNAL, and it is a fact about an
   account, not an entity: a leg from or to an account obdi holds is checked; one from or to an
   account it does not hold is declared and never checked.
+
+  An entity may have a PARENT (the owner, 2026-10-07: "Maybe entities need a recursive
+  parent/child relationship? e.g. Microsoft being a parent over azure and Xbox and
+  OneDrive/storage and emails and o365 etc.? ... UK government could be over DfE/DfT/NHS (which
+  is then over NHSBA ...)/DVLA"). One optional field and one rule: anything asked of an entity
+  - its transactions, its commitments, what it is owed, what it costs a month - is answered
+  over its subtree, so "everything linked to me", "everything linked to Microsoft", and
+  "everything linked to the government" are the same query at different roots, and the
+  overview rolls up to whichever level is looked at. The rule that keeps this from becoming
+  granular detail for its own sake, which the owner was wary of ("Just because the capability
+  is there it doesn't necessarily mean it has to be used?"): a CHILD ENTITY is a different
+  thing (Azure and Xbox are different products of Microsoft; NHSBSA is a different body), and a
+  different PRINTING of the same thing is a VARIANT, not a child - "LIDL ABC" and "Lidl 1234"
+  are Lidl, with the store code kept as a site on the variant, exactly as printed. Per-store
+  analysis is then a grouping of one entity's variants by site, with no further entities. So
+  the hierarchy costs nothing until it is used, and nothing is lost by not using it.
 - **Product.** What is bought from an entity that provides: M365 Family, 1 TB extra storage,
   Xbox Live. One provider, several products, each its own commitment. This is the owner's
   "noting e.g. Microsoft offer m365 plus additional storage plus Xbox live".
@@ -540,8 +556,9 @@ at four; never a fault item; gone once answered; "Later" returns on the next occ
 before; the masked page carries no payee or amount in the item.
 
 **R2. The entity and the display name on the ledger.**
-Build: the one entity kind with its variants, and its first two roles - counterparty of a
-transaction, and provider of a product; `me` is created as an entity with the store; the ledger
+Build: the one entity kind with its variants and its optional parent (queries over the
+subtree from the first table, so nothing is retrofitted), and its first two roles - counterparty
+of a transaction, and provider of a product; `me` is created as an entity with the store; the ledger
 row shows the entity's name where one exists and the fold lists the variants as each source
 printed them with their metadata; a press on a row names it, and names every row sharing the
 shape; a commitment points at the entity. The detector groups by entity where one exists and
