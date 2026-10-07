@@ -43,6 +43,7 @@ ROUTE = "/entities"
 MERGE_ROUTE = "/entities-merge"
 SPLIT_ROUTE = "/entities-split"
 RENAME_ROUTE = "/entities-rename"
+FOLD_ROUTE = "/entities-fold"
 
 #: How many proposed groups lead the page; the rest are behind one fold, so thirty names stay
 #: within three phone screens (`test_entities_phone_layout`).
@@ -154,7 +155,8 @@ def _groups(view: EntitiesView, *, unmasked: bool) -> str:
             f"{more}</details>"
         )
     hint = (
-        '<p class="muted">Merge makes the ticked names one entity; untick one to leave it out.</p>'
+        '<p class="muted">Merge makes the ticked names one entity, or adds them to the entity '
+        "that already has that name; untick one to leave it out.</p>"
         if unmasked
         else ""
     )
@@ -180,9 +182,13 @@ def _entity(entity: Entity, counts: Mapping[str, int], *, unmasked: bool) -> str
     return (
         f'<section class="ent-entity"><h3>{_esc(entity.name)}</h3>'
         f'<p class="ent-why">{across}.</p><ul class="ent-names">{lines}</ul>'
+        '<details class="ent-fold"><summary>Rename, or fold into another entity</summary>'
         f'<form method="post" action="{RENAME_ROUTE}">'
         f'<input type="hidden" name="entity" value="{entity.id}">'
-        f"{_name_field(entity.name, 'Rename', label='Name')}</form></section>"
+        f"{_name_field(entity.name, 'Rename', label='Name')}</form>"
+        f'<form method="post" action="{FOLD_ROUTE}">'
+        f'<input type="hidden" name="entity" value="{entity.id}">'
+        f"{_name_field('', 'Fold into', label='Entity')}</form></details></section>"
     )
 
 

@@ -22,5 +22,5 @@ ENTITIES_STYLES = """
  .ent-why { font: var(--text-sm)/140% var(--sans); color: var(--ink-2); margin: var(--s1) 0 0; }
  .ent-names form { margin: 0; }
  .ent-names li > span.txt { min-width: 0; overflow-wrap: anywhere; }
- .ent-more > summary { padding: var(--s2) 0; cursor: pointer; }
+ .ent-more > summary, .ent-fold > summary { padding: var(--s2) 0; cursor: pointer; }
 """

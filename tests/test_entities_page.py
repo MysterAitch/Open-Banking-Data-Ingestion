@@ -264,13 +264,28 @@ class TestMergingAGroup:
         assert "already belongs to an entity" in refusal_of(response.text)
         assert "1 name gathered into 1 entity" in summary_of(shown(served))
 
-    def test_Merge_WhenTheNameIsAnotherEntitys_IsRefused(self, served):
-        merge_group(served, shapes=(LONDON,))
+    def test_Merge_WhenTheNameIsAnotherEntitys_AddsToThatEntityAndSaysSo(self, world):
+        base, db = world
+        merge_group(base, shapes=(LONDON,))
 
-        response = merge_group(served, shapes=(READING,), name="fernhollow GROCERS")
+        response = merge_group(base, shapes=(READING,), name="fernhollow GROCERS")
+
+        assert response.status_code == 200
+        assert outcome_of(response.text) == "1 name added to Fernhollow Grocers."
+        assert "2 names gathered into 1 entity" in summary_of(response.text)
+        with Store(db) as store:
+            (entity,) = store.entities_with_shapes()
+        assert entity.name == "Fernhollow Grocers"
+        assert set(entity.shapes) == {LONDON, READING}
+
+    def test_Merge_WhenAddingANameAlreadyUnderAnotherEntity_IsStillRefused(self, served):
+        merge_group(served, shapes=(LONDON,), name="Fernhollow")
+        merge_group(served, shapes=(READING,), name="Fernhollow Express")
+
+        response = merge_group(served, shapes=(READING,), name="Fernhollow")
 
         assert response.status_code == 400
-        assert "already an entity" in refusal_of(response.text)
+        assert "already belongs to an entity" in refusal_of(response.text)
 
     def test_Merge_ByHand_GathersNamesTheRulesLeaveWhenTheOwnerChoosesThem(self, served):
         response = merge_group(served, shapes=(BAKERY, INSURANCE), name="Marlowe")
@@ -351,6 +366,108 @@ class TestRenaming:
 
         assert response.status_code == 400
         assert "no such entity" in refusal_of(response.text)
+
+
+class TestFoldingOneEntityIntoAnother:
+    def two_merges(self, base: str) -> None:
+        merge_group(base, shapes=(LONDON, READING), name="Fernhollow")
+        merge_group(base, shapes=(EXPRESS,), name="Fernhollow Express")
+
+    def entity_id(self, db, name: str) -> int:
+        with Store(db) as store:
+            return next(e.id for e in store.entities_with_shapes() if e.name == name)
+
+    def test_Fold_AfterTwoMerges_CombinesThemIntoOneEntityOfThreeNames(self, world):
+        base, db = world
+        self.two_merges(base)
+
+        response = press(
+            base, "/entities-fold", entity=self.entity_id(db, "Fernhollow Express"),
+            name="fernhollow",
+        )
+
+        assert response.status_code == 200
+        assert outcome_of(response.text) == (
+            "Folded Fernhollow Express into Fernhollow; 1 name moved."
+        )
+        assert "3 names gathered into 1 entity" in summary_of(response.text)
+        with Store(db) as store:
+            (entity,) = store.entities_with_shapes()
+        assert entity.name == "Fernhollow"
+        assert set(entity.shapes) == {LONDON, READING, EXPRESS}
+
+    def test_Fold_WhenIntoItself_IsRefusedWithTheReasonAndChangesNothing(self, world):
+        base, db = world
+        self.two_merges(base)
+
+        response = press(
+            base, "/entities-fold", entity=self.entity_id(db, "Fernhollow"), name="Fernhollow"
+        )
+
+        assert response.status_code == 400
+        assert refusal_of(response.text) == "An entity cannot be folded into itself."
+        assert "3 names gathered into 2 entities" in summary_of(shown(base))
+
+    def test_Fold_WhenIntoARemovedEntity_IsRefusedWithTheReason(self, world):
+        base, db = world
+        self.two_merges(base)
+        press(base, "/entities-split", shape=EXPRESS)
+
+        response = press(
+            base, "/entities-fold", entity=self.entity_id(db, "Fernhollow"),
+            name="Fernhollow Express",
+        )
+
+        assert response.status_code == 400
+        assert "was removed" in refusal_of(response.text)
+
+    @pytest.mark.parametrize("entity", ["", "abc", "9999"])
+    def test_Fold_WhenTheEntityIsNotThere_IsRefused(self, served, entity):
+        response = press(served, "/entities-fold", entity=entity, name="Anything")
+
+        assert response.status_code == 400
+        assert "no such entity" in refusal_of(response.text)
+
+    def test_Fold_WhenNoEntityHasTheNameTyped_IsRefusedAndChangesNothing(self, world):
+        base, db = world
+        self.two_merges(base)
+
+        response = press(
+            base, "/entities-fold", entity=self.entity_id(db, "Fernhollow Express"),
+            name="Nobody",
+        )
+
+        assert response.status_code == 400
+        assert "no entity called" in refusal_of(response.text)
+
+    def test_Fold_WhenValuesAreShown_EachEntityOffersAFoldPressAndTheMaskedPageOffersNone(
+        self, world
+    ):
+        base, _db = world
+        self.two_merges(base)
+
+        forms = [
+            f for f in elements(parse(shown(base)), "form")
+            if f.attrs.get("action") == "/entities-fold"
+        ]
+        masked = httpx.get(f"{base}/entities", timeout=60).text
+
+        assert len(forms) == 2
+        assert "/entities-fold" not in masked
+
+    def test_Fold_ThenSplitApart_FreesTheNameAndKeepsTheEntity(self, world):
+        base, db = world
+        self.two_merges(base)
+        press(
+            base, "/entities-fold", entity=self.entity_id(db, "Fernhollow Express"),
+            name="Fernhollow",
+        )
+
+        press(base, "/entities-split", shape=EXPRESS)
+
+        with Store(db) as store:
+            (entity,) = store.entities_with_shapes()
+        assert set(entity.shapes) == {LONDON, READING}
 
 
 class TestThePageAsItIsRead:

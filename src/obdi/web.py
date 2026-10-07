@@ -6419,6 +6419,9 @@ class ConnectionHandler(
         if route == "/entities-rename":
             self._entities_press_post(entity_actions.RENAME)
             return
+        if route == "/entities-fold":
+            self._entities_press_post(entity_actions.FOLD)
+            return
         if route == "/review-flags-two":
             self._flags_answer_post(self._read_form(), one=False)
             return

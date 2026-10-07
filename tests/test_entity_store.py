@@ -185,6 +185,138 @@ class TestRenaming:
             store.rename_entity(7, "Anything")
 
 
+class TestGatheringIntoAnEntityAlreadyNamed:
+    def test_Gather_WhenTheNameIsNew_MakesTheEntityAndSaysItWasMade(self, store):
+        entity, name, made = store.gather_into("Fernhollow", GROCER[:2], now=NOW)
+
+        assert (name, made) == ("Fernhollow", True)
+        assert names_and_shapes(store) == {"Fernhollow": tuple(sorted(GROCER[:2]))}
+        assert store.shape_entities()[GROCER[0]][0] == entity
+
+    def test_Gather_WhenTheNameMatchesAnEntityInAnotherCase_AddsToItAndKeepsItsSpelling(
+        self, store
+    ):
+        first = store.create_entity("Fernhollow", GROCER[:1], now=NOW)
+
+        entity, name, made = store.gather_into("  FERNHOLLOW ", GROCER[1:], now=NOW)
+
+        assert (entity, name, made) == (first, "Fernhollow", False)
+        assert names_and_shapes(store) == {"Fernhollow": tuple(sorted(GROCER))}
+
+    def test_Gather_WhenTheNameIsOnlyARemovedEntitys_MakesANewOne(self, store):
+        store.create_entity("Fernhollow", GROCER[:1], now=NOW)
+        store.detach_shape(GROCER[0], now=NOW)
+
+        _entity, _name, made = store.gather_into("Fernhollow", GROCER[1:2], now=NOW)
+
+        assert made is True
+        assert names_and_shapes(store) == {"Fernhollow": (GROCER[1],)}
+
+    def test_Gather_WhenAShapeIsUnderAnotherEntity_IsRefusedWholeAndTheTargetIsUntouched(
+        self, store
+    ):
+        store.create_entity("Fernhollow", GROCER[:1], now=NOW)
+        store.create_entity("Other", GROCER[1:2], now=NOW)
+
+        with pytest.raises(EntityRefused, match="already belongs"):
+            store.gather_into("Fernhollow", (GROCER[2], GROCER[1]), now=NOW)
+
+        assert names_and_shapes(store) == {"Fernhollow": (GROCER[0],), "Other": (GROCER[1],)}
+
+    @pytest.mark.parametrize("name", ["", "  "])
+    def test_Gather_WhenNamedNothing_IsRefused(self, store, name):
+        with pytest.raises(EntityRefused, match="needs a name"):
+            store.gather_into(name, GROCER, now=NOW)
+
+    def test_Gather_WhenNoShapeIsGiven_IsRefusedEvenForAnExistingName(self, store):
+        store.create_entity("Fernhollow", GROCER[:1], now=NOW)
+
+        with pytest.raises(EntityRefused, match="at least one shape"):
+            store.gather_into("Fernhollow", (), now=NOW)
+
+
+class TestFoldingOneEntityIntoAnother:
+    def two(self, store):
+        first = store.create_entity("Fernhollow", GROCER[:2], now=NOW)
+        second = store.create_entity("Fernhollow Express", GROCER[2:], now=NOW)
+        return first, second
+
+    def test_Fold_WhenNamedForAnotherEntity_MovesEveryShapeAndRemovesTheFolded(self, store):
+        first, second = self.two(store)
+
+        moved, into = store.fold_entity(second, "fernhollow", now=NOW)
+
+        assert (moved, into) == (1, "Fernhollow")
+        assert names_and_shapes(store) == {"Fernhollow": tuple(sorted(GROCER))}
+        assert store.shape_entities()[GROCER[2]][0] == first
+
+    def test_Fold_WhenDone_KeepsTheFoldedEntitysHistoryAsAStampedRow(self, store):
+        _first, second = self.two(store)
+
+        store.fold_entity(second, "Fernhollow", now=NOW)
+
+        rows = store.connection.execute(
+            "SELECT of_entity, detached_at FROM entity_shapes WHERE shape = ?", (GROCER[2],)
+        ).fetchall()
+        assert sorted((r["of_entity"] == second, r["detached_at"] is None) for r in rows) == [
+            (False, True),
+            (True, False),
+        ]
+        removed = store.connection.execute(
+            "SELECT removed_at FROM entities WHERE id = ?", (second,)
+        ).fetchone()
+        assert removed["removed_at"] is not None
+
+    def test_Fold_WhenThenSplitApart_LeavesTheShapeFreeAndTheTargetKept(self, store):
+        _first, second = self.two(store)
+        store.fold_entity(second, "Fernhollow", now=NOW)
+
+        store.detach_shape(GROCER[2], now=NOW)
+
+        assert names_and_shapes(store) == {"Fernhollow": tuple(sorted(GROCER[:2]))}
+
+    def test_Fold_WhenIntoItself_IsRefusedAndNothingMoves(self, store):
+        first, _second = self.two(store)
+
+        with pytest.raises(EntityRefused, match="itself"):
+            store.fold_entity(first, "FERNHOLLOW", now=NOW)
+
+        assert len(names_and_shapes(store)) == 2
+
+    def test_Fold_WhenTheTargetWasRemoved_IsRefusedWithThatReason(self, store):
+        first, second = self.two(store)
+        store.fold_entity(first, "Fernhollow Express", now=NOW)
+
+        with pytest.raises(EntityRefused, match="was removed"):
+            store.fold_entity(second, "Fernhollow", now=NOW)
+
+        assert names_and_shapes(store) == {"Fernhollow Express": tuple(sorted(GROCER))}
+
+    def test_Fold_WhenNoEntityHasTheName_IsRefused(self, store):
+        _first, second = self.two(store)
+
+        with pytest.raises(EntityRefused, match="no entity called"):
+            store.fold_entity(second, "Nobody Of That Name", now=NOW)
+
+        assert len(names_and_shapes(store)) == 2
+
+    def test_Fold_WhenTheFoldedEntityIsRemovedOrMissing_IsRefused(self, store):
+        first, second = self.two(store)
+        store.fold_entity(second, "Fernhollow", now=NOW)
+
+        with pytest.raises(EntityRefused, match="no such entity"):
+            store.fold_entity(second, "Fernhollow", now=NOW)
+        with pytest.raises(EntityRefused, match="no such entity"):
+            store.fold_entity(9999, "Fernhollow", now=NOW)
+        assert first in {e.id for e in store.entities_with_shapes()}
+
+    def test_Fold_WhenNamedNothing_IsRefused(self, store):
+        _first, second = self.two(store)
+
+        with pytest.raises(EntityRefused, match="needs a name"):
+            store.fold_entity(second, "  ", now=NOW)
+
+
 class TestSurvivingTheRebuildFromRaw:
     def test_Entities_WhenTheStoreIsRebuiltFromRaw_AreStillThere(self, store):
         entity = store.create_entity("Fernhollow", GROCER, now=NOW)

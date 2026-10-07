@@ -4558,6 +4558,91 @@ class Store:
             raise
         self.connection.commit()
 
+    def gather_into(
+        self, name: str, shapes: Iterable[str], *, now: datetime | None = None
+    ) -> tuple[int, str, bool]:
+        """Put `shapes` under the entity `name` names, making it where none has that name.
+
+        Names are compared without regard to case or spacing, so two merges the owner gave one
+        name to are one entity and not a refusal that leaves him splitting both apart. Returns
+        the entity's id, its name as kept (the first spelling wins), and whether it was made.
+        Refused whole, as `create_entity` and `attach_shapes` are, for no name, no shape, or a
+        shape another entity holds.
+        """
+        clean = _entity_name(name)
+        found = self._live_entity_named(clean)
+        if found is None:
+            return self.create_entity(clean, shapes, now=now), clean, True
+        self.attach_shapes(found[0], shapes, now=now)
+        return found[0], found[1], False
+
+    def fold_entity(
+        self, entity: int, into_name: str, *, now: datetime | None = None
+    ) -> tuple[int, str]:
+        """Move every shape of `entity` under the entity named `into_name`, and remove `entity`,
+        in one commit; returns how many shapes moved and the target's name as kept.
+
+        The shapes are stamped detached from the folded entity and attached again under the
+        target, so what was folded stays in the history as a split does, and splitting a shape
+        apart afterwards frees it as it would have been. Entities that sat under the folded one
+        are put under the target. Refused, with nothing written, for a folded entity that is
+        missing or removed, no name, a name no entity has, a name only a removed entity had, and
+        the entity itself.
+        """
+        self._refuse_missing_entity(entity)
+        wanted = _entity_name(into_name)
+        target = self._live_entity_named(wanted)
+        if target is None:
+            removed = any(
+                str(row["name"]).casefold() == wanted.casefold()
+                for row in self.connection.execute(
+                    "SELECT name FROM entities WHERE removed_at IS NOT NULL"
+                )
+            )
+            if removed:
+                raise EntityRefused(
+                    "That entity was removed; fold into one that is still there."
+                )
+            raise EntityRefused("There is no entity called that to fold into.")
+        if target[0] == entity:
+            raise EntityRefused("An entity cannot be folded into itself.")
+        stamp = (now or datetime.now(UTC)).isoformat()
+        shapes = [
+            str(row["shape"])
+            for row in self.connection.execute(
+                "SELECT shape FROM entity_shapes WHERE of_entity = ? AND detached_at IS NULL "
+                "ORDER BY shape",
+                (entity,),
+            )
+        ]
+        try:
+            self.connection.execute(
+                "UPDATE entity_shapes SET detached_at = ? WHERE of_entity = ? "
+                "AND detached_at IS NULL",
+                (stamp, entity),
+            )
+            self._insert_shapes(target[0], shapes, stamp)
+            self.connection.execute(
+                "UPDATE entities SET parent_id = ? WHERE parent_id = ? AND removed_at IS NULL",
+                (target[0], entity),
+            )
+            self.connection.execute(
+                "UPDATE entities SET removed_at = ? WHERE id = ?", (stamp, entity)
+            )
+        except BaseException:
+            self.connection.rollback()
+            raise
+        self.connection.commit()
+        return len(shapes), target[1]
+
+    def _live_entity_named(self, name: str) -> tuple[int, str] | None:
+        for row in self.connection.execute(
+            "SELECT id, name FROM entities WHERE removed_at IS NULL ORDER BY id"
+        ):
+            if str(row["name"]).casefold() == name.casefold():
+                return int(row["id"]), str(row["name"])
+        return None
+
     def detach_shape(self, shape: str, *, now: datetime | None = None) -> bool:
         """Split `shape` apart from its entity, and commit; False where it belonged to none.
 

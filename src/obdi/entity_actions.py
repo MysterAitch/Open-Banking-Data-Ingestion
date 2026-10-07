@@ -1,4 +1,4 @@
-"""The three presses on the Entities page, from the form each sends to what the store keeps.
+"""The presses on the Entities page, from the form each sends to what the store keeps.
 
 `apply_action` is the one place a press is read, refused, or kept, so the page and its tests meet
 the same rules. Anything it refuses leaves the store as it was, and says why in the words the
@@ -19,7 +19,8 @@ if TYPE_CHECKING:  # pragma: no cover - imported for types alone
 MERGE = "merge"
 SPLIT = "split"
 RENAME = "rename"
-ACTIONS = (MERGE, SPLIT, RENAME)
+FOLD = "fold"
+ACTIONS = (MERGE, SPLIT, RENAME, FOLD)
 
 
 def _one(form: Mapping[str, Sequence[str]], field: str) -> str:
@@ -39,9 +40,9 @@ def apply_action(
     if action == MERGE:
         shapes = [shape.strip() for shape in form.get("shape", []) if shape.strip()]
         _refuse_unknown(shapes, known)
-        name = _one(form, "name")
-        store.create_entity(name, shapes)
-        return f"Merged {plural(len(set(shapes)), 'name')} into {' '.join(name.split())}."
+        _entity, kept, made = store.gather_into(_one(form, "name"), shapes)
+        count = plural(len(set(shapes)), "name")
+        return f"Merged {count} into {kept}." if made else f"{count} added to {kept}."
     if action == SPLIT:
         shape = _one(form, "shape")
         held = store.shape_entities().get(shape)
@@ -59,6 +60,13 @@ def apply_action(
             raise EntityRefused("There is no such entity; it may have been removed.")
         store.rename_entity(int(entity), _one(form, "name"))
         return f"Renamed to {' '.join(_one(form, 'name').split())}."
+    if action == FOLD:
+        entity = _one(form, "entity")
+        if not entity.isdigit():
+            raise EntityRefused("There is no such entity; it may have been removed.")
+        folded = next((e.name for e in store.entities_with_shapes() if e.id == int(entity)), "")
+        moved, into = store.fold_entity(int(entity), _one(form, "name"))
+        return f"Folded {folded} into {into}; {plural(moved, 'name')} moved."
     raise EntityRefused("That press is not one this page makes.")
 
 
