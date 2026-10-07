@@ -26,6 +26,41 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.359] - 2026-10-07
+
+### Added
+- **An Entities page, under More, gathers the names a counterparty prints
+  under into one thing.** The owner, 2026-10-07: "an early 'manage payees'
+  (or entities) page to allow for aggregating transaction counterparties.
+  This will presumably help with streamlining the recurring transactions
+  work ... I expect we can get an 80/20 jump start with simple text analysis
+  and pattern matching." The page lists every counterparty shape by count
+  across the accounts, proposes groups by plain text rules alone - a shared
+  opening of two or more words, or the same words in another order, after
+  store codes, references, and digits are dropped - and merges a group into
+  a named entity in one press, with each printed variant kept and a
+  "Split apart" press for a wrong merge; a "Gather names yourself" fold
+  covers what the rules leave, which is most names. The decisions are the
+  owner's, so they live in two declared tables (schema 23) kept across every
+  rebuild from raw, and the wipe warning counts them as irreplaceable. The
+  recurring detector then counts the names gathered into one entity as one
+  series, named by the entity, so a renamed subscription is one line, not
+  two. The first run over the large invented store joined 25 merchants under
+  the words that name how a payment was made rather than who it was to; a
+  group of more than eight names is now shown as too broad and never offered
+  for the one press. Measured on the invented stores: 79 shapes, 4
+  proposals covering 12 (the series count there is unchanged, because the
+  variants are town names of retailers visited at random, which is what
+  invented data looks like - the real store is the measurement that
+  matters); the page issues eight statements however many names are held
+  and takes about 0.2 s warm. Not done: attaching a free name to an existing
+  entity from the page, merging two entities, setting a parent (stored,
+  unread), and the declared export does not yet write entities out.
+
+### Changed
+- **The Recurring page's count line says "recurring series"**, the word the
+  rest of the page and its documents use, in place of "recurring things".
+
 ## [0.4.358] - 2026-10-07
 
 ### Changed
