@@ -3867,12 +3867,18 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         owner's clock - two whole-table reads, whatever the store's size."""
         from .page_times import local_day
         from .recurring import find_recurring
+        from .statement_terms import statement_balances
 
         with Store(db_path) as store:
             transactions = store.all_transactions()
             pairs = store.confirmed_transfer_pairs()
+            held, _unusable = statement_balances(store)
+        closings: dict[str, list[tuple[date, int]]] = {}
+        for closing in held:
+            owed = (closing.day, closing.balance_minor)
+            closings.setdefault(closing.account_ref, []).append(owed)
         today = local_day(datetime.now(UTC))
-        return RecurringFindings(find_recurring(transactions, pairs, today), today)
+        return RecurringFindings(find_recurring(transactions, pairs, today, closings), today)
 
     def preview_kept_statement(artefact_id: int, account_id: str) -> MatcherPreview | None:
         """How the matcher would resolve a kept statement's transactions against an account,

@@ -39,6 +39,41 @@ three occurrences in a fortnight are a coincidence, not a rhythm.
 - **Order matters.** Weekly, fortnightly, four-weekly, monthly, quarterly, yearly; the first
   that fits wins. A series of 28-day gaps is not monthly because the day of the month drifts out
   of tolerance within three occurrences.
+- **Kind: who starts the payment.** Frequent is not the same as scheduled. A series is PULLED
+  (the other side collects: Direct Debit, a card subscription, a card provider taking what is
+  owed), SCHEDULED (the owner set it running: standing order, standing transfer), or a HABIT
+  (the owner pays each time by choice: Sunday climbing and the clean air zone charge that goes
+  with it). Decided by the stated type first, said as "by type: Direct Debit"; the words are
+  `recurring._TYPE_WORDS`, taken from `stated_words.CODED_FIELDS` and read from the row's own
+  raw (`stated_words.words_in`). Measured on a real store: the feed's `source` DIRECT_DEBIT and
+  `sourceSubType` CARD_SUBSCRIPTION, the aggregator's `transaction_category` DIRECT_DEBIT. NOT
+  measured: the aggregator's STANDING_ORDER (its documented word) and whatever the feed calls a
+  standing order, so a standing order through the feed is told by shape and reads as pulled
+  while it is steady. A card or faster payment says nothing about who started it. Where no type
+  decides, the shape does ("by shape: ..."): a month-counted cadence is a payee collecting on its
+  own day (steady amount: a subscription; varying amounts on one day of the month: a bill or a
+  card provider's collection, which a habit does not keep to), except a transfer between the
+  owner's own accounts, which is scheduled; a weekday rhythm is a habit, unless an unbroken run of
+  one amount every second or fourth week. Rejected: calling every varying-amount series a habit
+  (a card provider's collection varies and is pulled), and deciding by merchant name. Only
+  pulled and scheduled series can be STOPPED or have MISSED slots; a habit is reported as
+  "most Sundays - 38 of 52 weeks", never as missing a payment. When the types the occurrences
+  state disagree the commoner wins.
+- **A pulled payment can skip for a reason the store holds.** A card paid off has a nil minimum
+  and no Direct Debit is taken; a utility's Direct Debit can fall or pause once the account is in
+  credit. For a pulled series paid to a card account the pairing pass proved, a missed slot (or a
+  slot since the last occurrence) is EXPLAINED, counted as neither missed nor stopped and marked
+  "nothing was due", when the card's held statement for the cycle (the latest dated within 45
+  days before the slot) closed at exactly nil. A slot with no such statement held is NOT explained:
+  a statement not held cannot be told from one never issued. Unexplained slots are "not taken; no
+  reason held". What is not built: (b) a changed Direct Debit amount is a change (a new window
+  later), never a fault, and needs the series to carry amount windows rather than one usual
+  amount; the utility case needs the utility account's balance or its statements read for a
+  credit before a skip (the store holds no utility account); a counterparty found by the
+  description matching a held card, where no pairing proved the transfer; "no statement fell
+  due" as an explanation, which needs a card's statement cadence known and the gap proved to be
+  absence and not a missing file; and a card in credit, which reads as unexplained until a
+  measurement says it should not.
 - **Missed slots.** At most a third of the slots between the first and last occurrence may be
   empty, and there must be at least four slots (so four occurrences unbroken, or three seen
   over four with one missed). A missed month is counted (`missed`) and does not break the

@@ -30,7 +30,7 @@ from .masking import MASKED_TOTAL, mask_text
 from .navigation import page_name
 from .page_times import date_with_age, percent_text, span_words
 from .plural import plural
-from .recurring import RecurringFindings, Series
+from .recurring import HABIT, PULLED, SCHEDULED, RecurringFindings, Series
 from .web_accounts import submit_button
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -64,6 +64,20 @@ def cadence_words(series: Series) -> str:
     return f"{series.cadence}, about the {_ordinal(series.usual_day)}"
 
 
+#: What a habit's periods are called, for the cadences a habit can have (a weekday rhythm).
+_PERIODS = {"weekly": "weeks", "fortnightly": "fortnights", "four-weekly": "four-week periods"}
+
+
+def habit_words(series: Series) -> str:
+    """`most Sundays - 38 of 52 weeks`: how often the owner did it, and never a missed payment."""
+    unit = _PERIODS[series.cadence]
+    share = f"{series.count} of {series.periods} {unit}"
+    if series.weekday is not None and series.cadence == "weekly":
+        often = "most" if series.count * 2 > series.periods else "some"
+        return f"{often} {_WEEKDAYS[series.weekday]} - {share}"
+    return f"{cadence_words(series)} - {share}"
+
+
 def _needs_a_look(series: Series) -> bool:
     return series.stopped or series.changed
 
@@ -91,11 +105,16 @@ def summary_line(findings: RecurringFindings) -> str:
     payments = len(found) - transfers - incomes
     old = sum(long_stopped(s, findings.today) for s in found)
     of_them = f", {old} of them over a year ago" if old else ""
+    kinds = (
+        f"{sum(s.kind == PULLED for s in found)} pulled, "
+        f"{sum(s.kind == SCHEDULED for s in found)} scheduled, "
+        f"{plural(sum(s.kind == HABIT for s in found), 'habit')}"
+    )
     return (
         f"{plural(len(found), 'recurring thing')} across "
-        f"{plural(len({s.account for s in found}), 'account')}: "
+        f"{plural(len({s.account for s in found}), 'account')}: {kinds}; "
         f"{plural(payments, 'payment')}, {plural(transfers, 'transfer')}, "
-        f"{plural(incomes, 'income')}, {sum(s.stopped for s in found)} stopped{of_them}, "
+        f"{plural(incomes, 'income')}; {sum(s.stopped for s in found)} stopped{of_them}, "
         f"{sum(s.changed for s in found)} changed"
     )
 
@@ -110,6 +129,11 @@ def _marks(series: Series, names: AccountsShown, today: date) -> str:
             f'<span class="pill pill-warn">changed: {way} '
             f"{_esc(percent_text(abs(series.drift_percent) / 100))}</span>"
         )
+    if series.missed:
+        held = f"{series.missed} not taken; no reason held"
+        marks.append(f'<span class="pill pill-warn">{held}</span>')
+    if series.explained:
+        marks.append(f'<span class="pill">{series.explained} not taken; nothing was due</span>')
     if series.off_account:
         marks.append(f'<span class="pill">{series.off_account}&times; other account</span>')
     if series.is_transfer:
@@ -155,7 +179,12 @@ def _row(series: Series, names: AccountsShown, today: date, *, unmasked: bool) -
         if series.stopped
         else f"over {_esc(span)}"
     )
-    how = f"{_esc(cadence_words(series))} &middot; {plural(series.count, 'time')} {ending}"
+    if series.kind == HABIT:
+        rhythm = _esc(habit_words(series))
+    else:
+        rhythm = f"{_esc(cadence_words(series))} &middot; {plural(series.count, 'time')} {ending}"
+    kind = f"{_esc(series.kind)}, {_esc(series.basis)}"
+    how = f'{rhythm} &middot; <span class="recur-kind">{kind}</span>'
     return (
         f'<li class="{klass}"><span class="recur-name">{_name(series, unmasked=unmasked)}</span>'
         f'<span class="recur-fig">{_amount(series, unmasked=unmasked)}</span>'
@@ -204,6 +233,7 @@ def render_recurring(findings: RecurringFindings, names: AccountsShown, *, unmas
             rows = sorted(
                 by_account[ref],
                 key=lambda s: (
+                    s.kind == HABIT,
                     not _needs_a_look(s),
                     _ORDER.index(s.cadence),
                     s.usual_day,

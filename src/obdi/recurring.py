@@ -41,8 +41,18 @@ A TRANSFER is a movement the provider calls internal or the pairing pass proved.
 is one series, reported under the account the money left, with the account it went to beside it;
 the opposite leg is not an occurrence of its own.
 
-STOPPED is judged against the newest day the account holds, capped at today, because a feed
-that stopped arriving says nothing about what stopped being paid.
+A KIND says who starts the payments (`PULLED`, `SCHEDULED`, `HABIT`, decided in `_kind_of`).
+
+STOPPED is judged, for pulled and scheduled series only, against the newest day the account
+holds, capped at today, because a feed that stopped arriving says nothing about what stopped
+being paid.
+
+A PULLED PAYMENT CAN SKIP FOR A REASON THE STORE HOLDS. A card provider collects nothing when the
+card was paid off and its statement closed at nil, so for a pulled series paid to a card account
+(a transfer the pairing pass proved) a slot is EXPLAINED, and counts as neither missed nor
+stopped, when that card's held statement for the cycle closed at exactly nil (`_nothing_due`).
+Nothing else explains a slot yet: `docs/design/2026-10-commitments/notes.md` says what the
+remaining cases need.
 
 AN AMOUNT'S DRIFT is a percentage, which is not a figure: it says how far the latest amount sits
 from the usual, never what either is.
@@ -52,7 +62,7 @@ from __future__ import annotations
 
 import calendar
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from itertools import pairwise
@@ -60,6 +70,7 @@ from statistics import median_low
 
 from .identity import normalise_description
 from .models import Transaction, TransactionStatus
+from .stated_words import words_in
 
 #: Fewest occurrences that make a series. Two is a coincidence of a payee and a gap.
 MIN_OCCURRENCES = 3
@@ -84,6 +95,29 @@ STEADY_SHARE = 0.5
 
 #: Of the occurrences of a weekly or four-weekly series, the share on its commonest weekday.
 WEEKDAY_SHARE = 0.75
+
+#: WHO STARTS A PAYMENT. PULLED: the other side collects on its own timetable (a Direct Debit, a
+#: card subscription, a card provider taking what is owed). SCHEDULED: the owner set it up once
+#: and the bank runs it (a standing order, a standing transfer). HABIT: the owner pays each time
+#: by choice, so skipping a week or taking another route is not a missed payment. Only pulled and
+#: scheduled series can stop or miss a period; a habit is a pattern with a share of periods seen.
+PULLED = "pulled"
+SCHEDULED = "scheduled"
+HABIT = "habit"
+
+#: The coded words a source states that decide a kind outright: (field, word) -> (kind, said as).
+#: Taken from the words `stated_words.CODED_FIELDS` keeps. Measured on a real store: the feed's
+#: `source` DIRECT_DEBIT and `sourceSubType` CARD_SUBSCRIPTION, and the aggregator's
+#: `transaction_category` DIRECT_DEBIT. Not yet measured: the aggregator's STANDING_ORDER (its
+#: documented word) and any word the bank's feed uses for a standing order, which is why a
+#: standing order paid through the feed is told by its shape. A card or faster payment says
+#: nothing about who started it, so it is not here.
+_TYPE_WORDS: dict[tuple[str, str], tuple[str, str]] = {
+    ("source", "DIRECT_DEBIT"): (PULLED, "Direct Debit"),
+    ("transaction_category", "DIRECT_DEBIT"): (PULLED, "Direct Debit"),
+    ("sourceSubType", "CARD_SUBSCRIPTION"): (PULLED, "card subscription"),
+    ("transaction_category", "STANDING_ORDER"): (SCHEDULED, "standing order"),
+}
 
 #: name -> (period in days, tolerance in days) for the cadences counted in days.
 _DAY_CADENCES: tuple[tuple[str, int], ...] = (
@@ -143,7 +177,18 @@ class Series:
     #: Whether most amounts sit at the usual one; a bill that varies every time is not steady.
     steady: bool
     count: int
-    #: Expected occurrences between the first and the last that were not seen.
+    #: PULLED, SCHEDULED, or HABIT, and the signal that decided it, said as the page says it:
+    #: "by type: Direct Debit" or "by shape: steady amount, same day".
+    kind: str
+    basis: str
+    #: Slots of the cadence from the first occurrence to the last, seen or not: the denominator of
+    #: a habit's "38 of 52 weeks".
+    periods: int
+    #: Slots a pulled series did not fill because the card account it pays had nothing due for
+    #: the cycle (`_nothing_due`), counting a slot after the last occurrence. Not missed.
+    explained: int
+    #: Expected occurrences between the first and the last that were not seen and that nothing
+    #: held explains; always 0 for a habit, which is never missing a payment.
     missed: int
     first_seen: date
     last_seen: date
@@ -162,6 +207,17 @@ class _Fit:
     weekday: int | None
     missed: int
     next_expected: date
+    #: The date of each slot between the first and last occurrence that was not filled.
+    missing: tuple[date, ...]
+    #: The cadence's period, in days for a cadence counted in days and else in months.
+    period_days: int
+    period_months: int
+
+    def after(self, slot: date) -> date:
+        """The slot following `slot`."""
+        if self.period_days:
+            return slot + timedelta(days=self.period_days)
+        return _on_day(_month_index(slot) + self.period_months, self.usual_day)
 
 
 @dataclass(frozen=True)
@@ -195,20 +251,32 @@ def _spans_enough(seen: int, missed: int) -> bool:
 
 
 def _fit_days(days: Sequence[date], cadence: str, period: int) -> _Fit | None:
-    steps = [(b - a).days for a, b in pairwise(days)]
     missed = 0
-    for gap in steps:
+    missing: list[date] = []
+    for before, after in pairwise(days):
+        gap = (after - before).days
         slots = round(gap / period)
         if slots < 1 or abs(gap - slots * period) > 1:
             return None
         missed += slots - 1
+        missing += [before + timedelta(days=period * n) for n in range(1, slots)]
     if not _spans_enough(len(days), missed):
         return None
     weekdays = Counter(d.weekday() for d in days)
     weekday, on_it = weekdays.most_common(1)[0]
     if on_it / len(days) < WEEKDAY_SHARE:
         return None
-    return _Fit(cadence, 0, 0, weekday, missed, days[-1] + timedelta(days=period))
+    return _Fit(
+        cadence,
+        0,
+        0,
+        weekday,
+        missed,
+        days[-1] + timedelta(days=period),
+        tuple(missing),
+        period,
+        0,
+    )
 
 
 def _fit_months(days: Sequence[date], cadence: str, period: int, tolerance: int) -> _Fit | None:
@@ -222,15 +290,27 @@ def _fit_months(days: Sequence[date], cadence: str, period: int, tolerance: int)
             return None
         slots.append(nearest)
     missed = 0
+    missing: list[date] = []
     for before, after in pairwise(slots):
         step, left = divmod(after - before, period)
         if step < 1 or left:
             return None
         missed += step - 1
+        missing += [_on_day(before + period * n, usual) for n in range(1, step)]
     if not _spans_enough(len(days), missed):
         return None
     month = (slots[0] % 12) + 1 if cadence == "yearly" else 0
-    return _Fit(cadence, usual, month, None, missed, _on_day(slots[-1] + period, usual))
+    return _Fit(
+        cadence,
+        usual,
+        month,
+        None,
+        missed,
+        _on_day(slots[-1] + period, usual),
+        tuple(missing),
+        0,
+        period,
+    )
 
 
 def _fit(days: Sequence[date]) -> _Fit | None:
@@ -271,12 +351,90 @@ class _Leg:
     other: str
 
 
+#: How long before a slot the statement for its cycle may be dated: a card statement closes some
+#: days before its payment is collected, and the next closes a month after.
+_STATEMENT_LEAD_DAYS = 45
+
+#: Per account, the closing balance each held statement states: (statement date, balance in the
+#: store's sign, money owed negative). Read once for every account by the caller.
+Closings = Mapping[str, Sequence[tuple[date, int]]]
+
+
+def _nothing_due(card: Sequence[tuple[date, int]], slot: date) -> bool:
+    """Whether the card's statement for the cycle `slot` collects was held and closed at nil.
+
+    The cycle's statement is the latest one dated before the slot and no more than
+    `_STATEMENT_LEAD_DAYS` earlier. NOT HELD IS NOT NIL: no such statement may mean none was
+    issued (nothing owed, so none) or that it was never added, and the two cannot be told apart
+    from what is held, so only a statement held at exactly nil explains a slot. A card in credit
+    or with nothing claimed is left unexplained too, until a measurement says otherwise.
+    """
+    cycle = [
+        (day, minor)
+        for day, minor in card
+        if slot - timedelta(days=_STATEMENT_LEAD_DAYS) <= day < slot
+    ]
+    if not cycle:
+        return False
+    return max(cycle)[1] == 0
+
+
+def _kind_by_type(legs: Sequence[_Leg]) -> tuple[str, str] | None:
+    """The kind the occurrences' stated types decide, and the type said, or None where none do.
+
+    One statement on one occurrence is enough, since a feed and an aggregator do not each state
+    a type for every row. Where occurrences state different types the commoner wins, and of two
+    as common the one stated most recently.
+    """
+    stated: list[tuple[str, str]] = []
+    for leg in legs:
+        for pair in words_in(leg.row.source, leg.row.raw):
+            if pair in _TYPE_WORDS:
+                stated.append(_TYPE_WORDS[pair])
+                break
+    if not stated:
+        return None
+    counts = Counter(stated)
+    best = max(counts.values())
+    for found in reversed(stated):
+        if counts[found] == best:
+            return found
+    return None  # pragma: no cover - the commonest is always among the stated
+
+
+def _kind_of(
+    legs: Sequence[_Leg], fit: _Fit, *, steady: bool, is_transfer: bool
+) -> tuple[str, str]:
+    """Who starts the payment, and which signal said so: the stated type, else the shape.
+
+    By shape: a month-counted cadence is a payee collecting on its own day of the month, which a
+    payment made by choice does not keep (a steady amount is a subscription, a varying one a
+    bill or a card provider's collection), unless it is a transfer between the owner's own
+    accounts, which he set running. A weekday rhythm is the owner's: a weekly series is a habit,
+    and so is a fortnightly or four-weekly one that has gaps or varies; only an unbroken run of
+    one amount every few weeks reads as pulled.
+    """
+    typed = _kind_by_type(legs)
+    if typed is not None:
+        return typed[0], f"by type: {typed[1]}"
+    if fit.weekday is None:
+        if is_transfer:
+            return SCHEDULED, "by shape: transfer between own accounts, same day"
+        if steady:
+            return PULLED, "by shape: steady amount, same day"
+        return PULLED, "by shape: same day each month, amount varies"
+    if steady and fit.missed == 0 and fit.cadence != "weekly":
+        return PULLED, "by shape: steady amount, same weekday every few weeks"
+    return HABIT, "by shape: weekday rhythm, " + ("amounts vary" if not steady else "gaps allowed")
+
+
 def _series_of(
     legs: Sequence[_Leg],
     fit: _Fit,
     *,
     shape: str,
     reach: dict[str, date],
+    closings: Closings,
     today: date,
 ) -> Series:
     newest = legs[-1].row
@@ -301,7 +459,25 @@ def _series_of(
     # Where a series was paid from more than one account, none has stopped while any account it
     # uses still reaches a day past the expected one.
     horizon = min(today, max(reach.get(ref, today) for ref in paid_from))
-    stopped = horizon > fit.next_expected + timedelta(days=_GRACE_DAYS[fit.cadence])
+    kind, basis = _kind_of(legs, fit, steady=steady, is_transfer=is_transfer)
+    habit = kind == HABIT
+    grace = timedelta(days=_GRACE_DAYS[fit.cadence])
+    # A pulled series collected by a card account the store holds statements for: a slot the
+    # payee did not take is explained where that card owed nothing for the cycle.
+    explained_inside = 0
+    explained_after = 0
+    stopped = not habit and horizon > fit.next_expected + grace
+    if kind == PULLED and legs[-1].other:
+        card = closings.get(legs[-1].other, ())
+        explained_inside = sum(_nothing_due(card, slot) for slot in fit.missing)
+        trailing: list[date] = []
+        slot = fit.next_expected
+        while slot + grace < horizon:
+            trailing.append(slot)
+            slot = fit.after(slot)
+        if trailing and all(_nothing_due(card, slot) for slot in trailing):
+            stopped = False
+            explained_after = len(trailing)
     return Series(
         account=usual_account,
         off_account=len(legs) - paid_from[usual_account],
@@ -321,7 +497,10 @@ def _series_of(
         drift_percent=drift,
         steady=steady,
         count=len(legs),
-        missed=fit.missed,
+        kind=kind,
+        basis=basis,
+        periods=len(legs) + fit.missed,        explained=explained_inside + explained_after,
+        missed=0 if habit else fit.missed - explained_inside,
         first_seen=legs[0].row.value_date,
         last_seen=newest.value_date,
         next_expected=fit.next_expected,
@@ -333,10 +512,10 @@ def _series_of(
 
 
 def _series_in_group(
-    legs: list[_Leg], shape: str, reach: dict[str, date], today: date
+    legs: list[_Leg], shape: str, reach: dict[str, date], closings: Closings, today: date
 ) -> list[Series]:
     """The series one group holds: the whole group if it fits, otherwise each exact amount."""
-    return _split(legs, shape, reach, today, _SPLITS)
+    return _split(legs, shape, reach, closings, today, _SPLITS)
 
 
 #: What a group that does not fit as a whole is divided by, in turn: exact amount, then account.
@@ -352,6 +531,7 @@ def _split(
     legs: list[_Leg],
     shape: str,
     reach: dict[str, date],
+    closings: Closings,
     today: date,
     splits: Sequence[Callable[[_Leg], object]],
 ) -> list[Series]:
@@ -360,17 +540,17 @@ def _split(
         return []
     fit = _fit([leg.row.value_date for leg in legs])
     if fit is not None:
-        return [_series_of(legs, fit, shape=shape, reach=reach, today=today)]
+        return [_series_of(legs, fit, shape=shape, reach=reach, closings=closings, today=today)]
     if not splits:
         return []
     parts: dict[object, list[_Leg]] = defaultdict(list)
     for leg in legs:
         parts[splits[0](leg)].append(leg)
     if len(parts) == 1:
-        return _split(legs, shape, reach, today, splits[1:])
+        return _split(legs, shape, reach, closings, today, splits[1:])
     found: list[Series] = []
     for part in parts.values():
-        found.extend(_split(part, shape, reach, today, splits[1:]))
+        found.extend(_split(part, shape, reach, closings, today, splits[1:]))
     return found
 
 
@@ -382,10 +562,13 @@ def find_recurring(
     transactions: Iterable[Transaction],
     pairs: Iterable[tuple[str, str]],
     today: date,
+    closings: Closings | None = None,
 ) -> list[Series]:
     """Every series the transactions hold, by account and then by what they are called.
 
     `pairs` is the pairing pass's (leaving entity, arriving entity) for each proved transfer.
+    `closings` is each account's held statement closings, which explain a pulled series' missed
+    slot where the card it pays owed nothing.
     Pending and history rows (void, folded, reversed) are not occurrences: a pending row will be
     replaced by its settlement, and history is not money.
     """
@@ -423,6 +606,6 @@ def find_recurring(
 
     found: list[Series] = []
     for key, legs in groups.items():
-        found.extend(_series_in_group(legs, shapes[key], reach, today))
+        found.extend(_series_in_group(legs, shapes[key], reach, closings or {}, today))
     found.sort(key=lambda s: (s.account, s.label.casefold(), s.cadence, s.usual_minor))
     return found

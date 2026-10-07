@@ -10,6 +10,7 @@ The payee and both amounts are distinctive tokens that no other text on the page
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import httpx
@@ -19,7 +20,7 @@ from obdi import values_sitting
 from obdi.account_names import AccountsShown
 from obdi.cli import build_web_config
 from obdi.ingest import import_file
-from obdi.recurring import RecurringFindings, Series
+from obdi.recurring import HABIT, PULLED, SCHEDULED, RecurringFindings, Series
 from obdi.store import Store
 from obdi.web_recurring import render_recurring
 from page_dom import Node, elements, parse
@@ -83,8 +84,8 @@ class TestTheMaskedPage:
 
         assert response.status_code == 200
         assert summary_of(response.text) == (
-            "1 recurring thing across 1 account: 1 payment, 0 transfers, 0 incomes, "
-            "1 stopped, 1 changed"
+            "1 recurring thing across 1 account: 1 pulled, 0 scheduled, 0 habits; "
+            "1 payment, 0 transfers, 0 incomes; 1 stopped, 1 changed"
         )
         text = response.text
         assert "monthly, about the 3rd" in text
@@ -138,6 +139,10 @@ def _stopped_series(account: str, name: str, last: date, *, stopped: bool = True
         drift_percent=0.0,
         steady=True,
         count=6,
+        kind=PULLED,
+        basis="by shape: steady amount, same day",
+        periods=6,
+        explained=0,
         missed=0,
         first_seen=last.replace(year=last.year - 1),
         last_seen=last,
@@ -212,8 +217,8 @@ class TestStoppedLongAgoFold:
 
         (line,) = [p for p in elements(root, "p") if "recur-summary" in p.classes]
         assert line.text() == (
-            "4 recurring things across 1 account: 4 payments, 0 transfers, 0 incomes, "
-            "3 stopped, 2 of them over a year ago, 0 changed"
+            "4 recurring things across 1 account: 4 pulled, 0 scheduled, 0 habits; "
+            "4 payments, 0 transfers, 0 incomes; 3 stopped, 2 of them over a year ago, 0 changed"
         )
 
     def test_RecurringPage_WithNothingStoppedLongAgo_HasNoFoldAndNoExtraWords(self):
@@ -259,6 +264,81 @@ class TestStoppedLongAgoFold:
 
         assert "gamma" not in page.casefold().split("</style>")[-1]
         assert "15.00" not in page
+
+
+class TestKindOnThePage:
+    """The page says who starts each payment and by what signal, counts the kinds, lists habits
+    last within an account, and says a habit as a pattern and never as a missing payment.
+
+    KNOWN ANSWER: one account holds a habit (most Sundays, 38 of 52 weeks), a scheduled series
+    (standing order), and a pulled one (Direct Debit) with one slot not taken and no reason held,
+    and a second pulled one with one slot not taken where nothing was due.
+    """
+
+    def five(self) -> list[Series]:
+        last = date(2026, 9, 10)
+        habit = replace(
+            _stopped_series("acct-x", "aaa sunday charge", last, stopped=False),
+            kind=HABIT,
+            basis="by shape: weekday rhythm, amounts vary",
+            cadence="weekly",
+            weekday=6,
+            usual_day=0,
+            count=38,
+            periods=52,
+        )
+        scheduled = replace(
+            _stopped_series("acct-x", "bbb rent", last, stopped=False),
+            kind=SCHEDULED,
+            basis="by type: standing order",
+        )
+        pulled = replace(
+            _stopped_series("acct-x", "ccc gas", last, stopped=False),
+            basis="by type: Direct Debit",
+            missed=1,
+        )
+        explained = replace(
+            _stopped_series("acct-x", "ddd card", last, stopped=False),
+            basis="by type: Direct Debit",
+            explained=1,
+        )
+        return [habit, scheduled, pulled, explained]
+
+    def test_RecurringPage_WithEachKind_CountsThemInTheSummaryLine(self):
+        root = _rendered(self.five())
+
+        (line,) = [p for p in elements(root, "p") if "recur-summary" in p.classes]
+        assert line.text() == (
+            "4 recurring things across 1 account: 2 pulled, 1 scheduled, 1 habit; "
+            "4 payments, 0 transfers, 0 incomes; 0 stopped, 0 changed"
+        )
+
+    def test_RecurringPage_WithAHabit_ListsItAfterTheOthersAsAPatternNotAMissedPayment(self):
+        (names,) = _list_names(_rendered(self.five()))
+
+        assert names[-1] == "aaa sunday charge"
+        text = " ".join(
+            li.text() for li in elements(_rendered(self.five()), "li") if "aaa" in li.text()
+        )
+        assert "habit, by shape: weekday rhythm, amounts vary" in text
+        assert "most Sundays - 38 of 52 weeks" in text
+        assert "not taken" not in text and "stopped" not in text
+
+    def test_RecurringPage_WithEachKind_SaysWhichSignalDecidedIt(self):
+        text = " ".join(li.text() for li in elements(_rendered(self.five()), "li"))
+
+        assert "scheduled, by type: standing order" in text
+        assert "pulled, by type: Direct Debit" in text
+
+    def test_RecurringPage_WithASlotNotTaken_SaysWhetherAReasonIsHeld(self):
+        root = _rendered(self.five())
+
+        rows = {li.text(): li for li in elements(root, "li")}
+        gas = next(t for t in rows if "ccc gas" in t)
+        card = next(t for t in rows if "ddd card" in t)
+        assert "1 not taken; no reason held" in gas
+        assert "1 not taken; nothing was due" in card
+        assert "no reason held" not in card
 
 
 class TestShowingValues:

@@ -1,13 +1,13 @@
-"""The recurring-payments page with thirty series fits a phone: three screens, no sideways scroll.
+"""The recurring-payments page with thirty series fits a phone: four screens, no sideways scroll.
 
 THE BUDGET: at 390 px by 844 px, thirty series in five accounts, with a third of them marked
 (stopped, changed, from another account, a transfer, income, a varying amount) and the longest
-payee names a bank prints, the page is at most three screens tall. Measured with the values
-masked and with them shown, which is the taller. The allowance is recorded beside the
-measurements in `MEASURED_CLOSED` (folds closed, held to three screens) and `MEASURED_OPEN`
-(every fold opened). Twelve of the thirty are marked, which is more than a real
+payee names a bank prints, the page is at most four screens tall (it was three before every row
+said its kind). Measured with the values masked and with them shown, which is the taller. The
+allowance is recorded beside the measurements in `MEASURED_CLOSED` (folds closed) and
+`MEASURED_OPEN` (every fold opened). Twelve of the thirty are marked, which is more than a real
 store is likely to hold: a mark that wraps costs a line. Marking twenty-four of the thirty
-(measured 2026-10-07) made the masked page 2,733 px, which is over three screens.
+(measured 2026-10-07) made the masked page 2,733 px, which was then over three screens.
 
 Set RECURRING_SHOTS_DIR to keep a picture of each rendering for a person to look at. Skipped
 where Playwright or its browser is not installed (`playwright install chromium`).
@@ -26,23 +26,25 @@ from pathlib import Path
 import pytest
 
 from obdi.connections import ConnectionStore
-from obdi.recurring import RecurringFindings, Series
+from obdi.recurring import HABIT, PULLED, RecurringFindings, Series
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 sync_api = pytest.importorskip("playwright.sync_api")
 
 PHONE_WIDTH = 390
 PHONE_HEIGHT = 844
-SCREENS = 3
+SCREENS = 4
 
 #: The tallest rendering of the thirty, in pixels, as last measured; the budget is SCREENS tall.
 #: Measured 2026-10-07 with four of the thirty folded as stopped over a year ago (two at the foot
-#: of each of two accounts): closed, masked 2,328 and shown 2,437; every fold opened, masked
-#: 2,618 and shown 2,726. Three screens is 2,532, which the closed page is held to. Opened,
-#: the page is a reader's choice and is held to the measurement (four screens would be 3,376),
-#: because the folded rows carry the stopped mark and a date with its age, a line each.
-MEASURED_CLOSED = 2440
-MEASURED_OPEN = 2730
+#: of each of two accounts). Before each row said who starts the payment and by which signal
+#: ("pulled, by type: Direct Debit"): closed, masked 2,328 and shown 2,437; every fold opened,
+#: masked 2,618 and shown 2,726, within three screens (2,532) when closed. With the kind on every
+#: row, which wraps about every other row onto another line: closed, masked 2,683 and shown 2,791;
+#: opened, masked 2,991 and shown 3,099. That is over three screens and under four (3,376), so
+#: the allowance moved to four, a cost the owner is to judge against the kind being on the row.
+MEASURED_CLOSED = 2800
+MEASURED_OPEN = 3110
 SCREENS_OPEN = 4
 
 TODAY = date(2026, 10, 7)
@@ -81,6 +83,10 @@ def _series(index: int) -> Series:
         drift_percent=0.0,
         steady=True,
         count=6 + index % 7,
+        kind=PULLED,
+        basis="by type: Direct Debit",
+        periods=6 + index % 7,
+        explained=0,
         missed=0,
         first_seen=date(2026, 1, 1 + index % 28),
         last_seen=date(2026, 9, 1 + index % 28),
@@ -106,7 +112,15 @@ def _series(index: int) -> Series:
         case 7:
             return replace(base, cadence="yearly", usual_month=10, usual_day=14)
         case 8:
-            return replace(base, cadence="weekly", weekday=4, usual_day=0)
+            return replace(
+                base,
+                cadence="weekly",
+                weekday=4,
+                usual_day=0,
+                kind=HABIT,
+                basis="by shape: weekday rhythm, amounts vary",
+                periods=10 + index % 7 + 4,
+            )
         case 9 | 10:
             # Stopped years ago: the page folds these at the foot of their account.
             return replace(
