@@ -26,6 +26,28 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.362] - 2026-10-07
+
+### Fixed
+- **One payee keeps one shape whatever the source.** 0.4.361 made a stated
+  counterparty the shape's first source, and the real store answered within
+  the hour, in counts alone: the Recurring page kept 61 series but stopped
+  went 31 to 36, the one habit went to none, and an eighth account gained a
+  series. A bank's merchant name is present only where the provider
+  identified one, and a statement row carries none, so one payee's rows
+  took two shapes depending on which source each month came from, and a
+  series spanning both became a stopped half and a new half - the weekly
+  habit whole in neither. The invented stores could not show it: their
+  counterparties are on every row or on rows that carry no series. The
+  shape reads the description alone again, and the bank's merchant name
+  becomes what it is - evidence: two shapes whose rows the bank names as
+  one merchant are proposed together on the Entities page, "the bank names
+  both as X", with that name offered. Pinned by the constructed case the
+  rule lacked: twelve monthly rows, six from a statement and six from a
+  feed with a counterparty, are one live series. On the large invented
+  store the shapes return to 79 and the 18 series stay, since they came
+  from the account-first split and not from the counterparty.
+
 ## [0.4.361] - 2026-10-07
 
 ### Changed
