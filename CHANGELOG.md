@@ -26,6 +26,35 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.373] - 2026-10-07
+
+### Fixed
+- **A description cut off at a column's width is the party it opens.** The
+  real store after 0.4.371, counts only: the exact-match rung named 17
+  transactions, and the habit and stopped lines did not move - most
+  description-only rows print the party in some form the feed does not
+  state exactly, and the statements seen today say why: a PDF column cuts a
+  merchant at a fixed width, which exact matching refuses by design. One
+  more rung, below the exact match and above the bare description: a
+  description-only row whose compared form is a strict opening of exactly
+  one stated party's form - every word equal and the last a prefix of three
+  or more letters of the party's word there, or every word equal with the
+  party having more - is that party, "a truncation of the bank's merchant
+  name “X”". One word alone is never a truncation unless it is eight or
+  more letters and the party's name is one word (a shared opening is a
+  proposal for the owner, not a link); two candidates mean none; a form that
+  is itself a party's form belongs to the exact rung; a shape that also
+  appears beside a counterparty belongs to the learned link. Pinned by
+  constructed cases: a venue's 39-of-52-week habit cut to its first
+  eighteen letters is one weekly series; a two-letter cut is two; a cut
+  that opens two parties is neither. Measured first and the expectation
+  corrected: "TESCO STORES BIRM" is not ambiguous because "birm" opens one
+  town. The invented statements do not truncate, so their counts did not
+  move; the real store's "from the description" count and the habit are
+  the measurement, and if they do not move the party is printed in a form
+  neither exact nor a truncation and the owner's confirmation is the only
+  honest next step.
+
 ## [0.4.372] - 2026-10-07
 
 ### Added
