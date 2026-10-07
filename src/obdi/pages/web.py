@@ -6458,6 +6458,9 @@ class ConnectionHandler(
         if route == "/entity-split":
             self._entity_press_post(entity_actions.SPLIT)
             return
+        if route == "/entity-parent":
+            self._entity_press_post(entity_actions.PARENT)
+            return
         if route == "/entity-rule-try":
             self._entity_trial_post()
             return

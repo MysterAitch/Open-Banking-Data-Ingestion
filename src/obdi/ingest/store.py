@@ -5005,6 +5005,37 @@ class Store:
         check of its own to make and wants this one said first, as the store's writes say it."""
         self._refuse_missing_entity(entity)
 
+    def set_entity_parent(self, entity: int, parent: int | None) -> None:
+        """Put an entity not removed under `parent`, or under nothing for None, and commit.
+
+        Refused, with nothing written, for an entity or a parent that is missing or removed, an
+        entity under itself, a parent that is itself under another, and an entity that has
+        entities under it: the pages show one level.
+        """
+        self._refuse_missing_entity(entity)
+        if parent is not None:
+            if parent == entity:
+                raise EntityRefused("An entity cannot be put under itself.")
+            self._refuse_missing_entity(parent)
+            above = self.connection.execute(
+                "SELECT 1 FROM entities c JOIN entities p ON p.id = c.parent_id "
+                "WHERE c.id = ? AND p.removed_at IS NULL",
+                (parent,),
+            ).fetchone()
+            if above is not None:
+                raise EntityRefused(
+                    "That entity is itself under another; choose the one it is under."
+                )
+            below = self.connection.execute(
+                "SELECT 1 FROM entities WHERE parent_id = ? AND removed_at IS NULL", (entity,)
+            ).fetchone()
+            if below is not None:
+                raise EntityRefused(
+                    "That entity has entities under it, so it cannot go under another."
+                )
+        self.connection.execute("UPDATE entities SET parent_id = ? WHERE id = ?", (parent, entity))
+        self.connection.commit()
+
     def _refuse_missing_entity(self, entity: int) -> None:
         found = self.connection.execute(
             "SELECT 1 FROM entities WHERE id = ? AND removed_at IS NULL", (entity,)

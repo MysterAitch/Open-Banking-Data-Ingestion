@@ -51,6 +51,7 @@ RULE_TRIAL_ROUTE = "/entity-rule-try"
 RULE_REMOVE_ROUTE = "/entity-rule-remove"
 RENAME_ROUTE = "/entity-rename"
 SPLIT_ROUTE = "/entity-split"
+PARENT_ROUTE = "/entity-parent"
 
 _KIND_LABELS = {BEGINS: "Begins with", CONTAINS: "Contains the words"}
 _KIND_CHOICES = {BEGINS: "begins with", CONTAINS: "contains, in any order"}
@@ -189,14 +190,29 @@ def _rules(
 
 
 def _looking_after(page: EntityPage) -> str:
-    """Rename it, or fold it into another entity: for an entity looked at unmasked."""
+    """Rename it, fold it into another entity, or put it under one: for an entity looked at
+    unmasked."""
     entity = page.entity
     return (
-        '<details class="ent-fold"><summary>Rename it, or fold it into another entity</summary>'
+        '<details class="ent-fold"><summary>Rename it, fold it into another entity, or put it '
+        "under one</summary>"
         f'<form method="post" action="{RENAME_ROUTE}">{_hidden(entity.id)}'
         f"{_name_field(entity.name, 'Rename', label='Name')}</form>"
         f'<form method="post" action="{FOLD_ROUTE}">{_hidden(entity.id)}'
-        f"{_name_field('', 'Fold into', label='Entity')}</form></details>"
+        f"{_name_field('', 'Fold into', label='Entity')}</form>"
+        f"{_parent_form(page)}</details>"
+    )
+
+
+def _parent_form(page: EntityPage) -> str:
+    """Put the entity under another by that one's name, or under nothing by leaving it empty.
+    The name is not `required`, since an empty one is the way to take it out again."""
+    current = page.parent.name if page.parent is not None else ""
+    return (
+        f'<form method="post" action="{PARENT_ROUTE}">{_hidden(page.entity.id)}'
+        '<div class="ent-name-field"><label><span>Under (empty for none)</span>'
+        f'<input name="name" value="{_esc(current)}" maxlength="{NAME_LENGTH}"></label>'
+        '<button class="tap" type="submit">Put under</button></div></form>'
     )
 
 

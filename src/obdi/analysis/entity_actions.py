@@ -33,7 +33,8 @@ CHILD = "child"
 KEEP_RULE = "keep-rule"
 DROP_RULE = "drop-rule"
 NEW = "new"
-ACTIONS = (MERGE, SPLIT, RENAME, FOLD, OWN, CHILD, KEEP_RULE, DROP_RULE, NEW)
+PARENT = "parent"
+ACTIONS = (MERGE, SPLIT, RENAME, FOLD, OWN, CHILD, KEEP_RULE, DROP_RULE, NEW, PARENT)
 
 
 def _one(form: Mapping[str, Sequence[str]], field: str) -> str:
@@ -103,6 +104,21 @@ def apply_action(
         parent = next((e.name for e in entities_of(store) if e.id == int(entity)), "")
         store.make_child_entity(int(entity), _one(form, "shape"), _one(form, "name"))
         return f"Made {' '.join(_one(form, 'name').split())} its own entity under {parent}."
+    if action == PARENT:
+        entity = _one(form, "entity")
+        if not entity.isdigit():
+            raise EntityRefused("There is no such entity; it may have been removed.")
+        wanted = " ".join(_one(form, "name").split())
+        everyone = store.entities_with_shapes()
+        put = next((e.name for e in everyone if e.id == int(entity)), "")
+        if not wanted:
+            store.set_entity_parent(int(entity), None)
+            return f"Took {put} out from under any other entity."
+        above = next((e for e in everyone if e.name.casefold() == wanted.casefold()), None)
+        if above is None:
+            raise EntityRefused(f"There is no entity called {wanted}.")
+        store.set_entity_parent(int(entity), above.id)
+        return f"Put {put} under {above.name}."
     if action == FOLD:
         entity = _one(form, "entity")
         if not entity.isdigit():
