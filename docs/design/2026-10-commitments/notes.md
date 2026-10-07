@@ -254,7 +254,11 @@ income, and one more changed window than before (0.4.365, the same effect as the
 the large invented store); and the method-word, token, one-word-opening, and bank-name rules
 cover 830 of 1,297 names in proposals against 529 of 1,335 before, with no group too broad.
 The Entities page serves in 0.9 s masked at this size (0.65 s before the drill-down folds).
-The owner's precision read of the proposals is still to come.
+The owner's first read of the 0.4.365 proposals (2026-10-07): "There are some good matches
+there but it's not good enough to blindly follow it." So: proposals stay one press per group
+with the names shown and the transactions one fold away, there is no merge-everything press,
+and the nudge gate (fewer than one wrong in ten) is not yet met by the rules alone; the
+count of wrong groups among the first twenty, and of what kind, is still to be taken.
 
 ## Rejected so far
 
