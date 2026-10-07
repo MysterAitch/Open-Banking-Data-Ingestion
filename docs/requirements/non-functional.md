@@ -55,6 +55,12 @@ conversation.
 | NF-DEPLOY-01 | A deploy runs a rebuild and a converge that refuses to finish while the rebuild's answer is not yet known; nothing is lost by waiting. | DONE (the owner's playbook) |
 | NF-DEPLOY-02 | The live instance is reached only from the owner's network; the store itself is not reachable from the development machine. | DONE - memory `live-instance-is-http-only-from-this-machine` |
 
+## Traceability on the page (TRACE)
+
+| Id | Requirement | Status |
+|---|---|---|
+| NF-TRACE-01 | Anything a page derives from a transaction and asks the owner to act on - a payee name, a proposed group, a rule's match - is traceable ON THAT PAGE to the field it was read from, the printed text it came from, and the steps that turned one into the other, in order; the steps shown are the steps the code applies, from one constant both read. A rule says which field it reads and how the comparison is made. An explanation given in conversation or a document does not satisfy this. The owner, 2026-10-07, reading the Entities page: "these are not merchant / payee names ... it doesn't scream trustworthy and traceable if fields/values are being conflated AND THEN ALSO transformed ... What is being matched? In what fields? Following which normalisation/sanitisation steps?" and "even if you explain it here, it doesn't help the next web UI user to understand/follow along". | NOT YET (in build for the Entities page; applies to every later derivation) |
+
 ## Accessibility and the phone (ACCESS)
 
 | Id | Requirement | Status |
