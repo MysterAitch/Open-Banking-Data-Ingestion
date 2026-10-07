@@ -43,20 +43,6 @@ from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from . import values_sitting
-from .actual_audit import (
-    NAMED_DIFFERENCES as _AUDIT_NAMED_DIFFERENCES,
-)
-from .actual_audit import (
-    WORDED_DIFFERENCES as _AUDIT_WORDED_DIFFERENCES,
-)
-from .actual_audit import (
-    audit_has_differences as _audit_has_differences,
-)
-from .actual_audit import (
-    count_of as _count_of,
-)
-from .actual_push import NothingQueued, valid_progress
-from .actual_verdict import APPLIER_STALE_SECONDS
 from .analysis import entity_actions
 from .analysis.entities import EntitiesView
 from .analysis.recurring import RecurringFindings
@@ -82,6 +68,20 @@ from .core.page_words import (
 from .core.plural import plural, word
 from .core.secrets import SecretError, read_secret
 from .core.timings import Timings
+from .export.actual_audit import (
+    NAMED_DIFFERENCES as _AUDIT_NAMED_DIFFERENCES,
+)
+from .export.actual_audit import (
+    WORDED_DIFFERENCES as _AUDIT_WORDED_DIFFERENCES,
+)
+from .export.actual_audit import (
+    audit_has_differences as _audit_has_differences,
+)
+from .export.actual_audit import (
+    count_of as _count_of,
+)
+from .export.actual_push import NothingQueued, valid_progress
+from .export.actual_verdict import APPLIER_STALE_SECONDS
 from .ingest.accounts import AccountRecord, ArchiveOutcome
 from .ingest.asked_coverage import Hole, describe_spans
 from .ingest.attended_fetch import PRESS_KIND, PressRefused

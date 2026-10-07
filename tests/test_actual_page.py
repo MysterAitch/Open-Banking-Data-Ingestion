@@ -13,7 +13,7 @@ import pytest
 
 from actual_states import STATES, audit, push, render_state
 from obdi import web_actual
-from obdi.actual_verdict import State
+from obdi.export.actual_verdict import State
 
 
 def _page(state: str) -> str:

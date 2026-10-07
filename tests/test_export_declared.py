@@ -105,7 +105,7 @@ def _exported(directory, name: str):
 
 class TestExportingWhatCannotBeFetchedAgain:
     def test_Annotations_AreKeyedOnContentIdentityRatherThanEntityId(self, tmp_path):
-        from obdi.export_declared import export_declared
+        from obdi.export.export_declared import export_declared
 
         store_path = tmp_path / "store.sqlite3"
         entities = _store_with_hand_work(store_path)
@@ -127,7 +127,7 @@ class TestExportingWhatCannotBeFetchedAgain:
         """The property the whole design is for. A rebuild re-mints entity ids;
         content identity survives it, so an export taken before still lines up
         with the store afterwards."""
-        from obdi.export_declared import export_declared
+        from obdi.export.export_declared import export_declared
         from obdi.ingest.rebuild import rebuild_from_raw
 
         store_path = tmp_path / "store.sqlite3"
@@ -159,7 +159,7 @@ class TestExportingWhatCannotBeFetchedAgain:
             )
 
     def test_DeclaredAccountsAndReviewDecisions_AreExportedToo(self, tmp_path):
-        from obdi.export_declared import export_declared
+        from obdi.export.export_declared import export_declared
 
         store_path = tmp_path / "store.sqlite3"
         _store_with_hand_work(store_path)
@@ -177,7 +177,7 @@ class TestExportingWhatCannotBeFetchedAgain:
         """The most at-risk thing in the store. An annotation pointing at
         nothing is invisible everywhere else, so an export that dropped it would
         discard exactly what it exists to preserve."""
-        from obdi.export_declared import export_declared
+        from obdi.export.export_declared import export_declared
 
         store_path = tmp_path / "store.sqlite3"
         entities = _store_with_hand_work(store_path)
@@ -200,7 +200,7 @@ class TestExportingWhatCannotBeFetchedAgain:
         )
 
     def test_TheManifest_SaysWhatWasWrittenAndWhatItCameFrom(self, tmp_path):
-        from obdi.export_declared import export_declared
+        from obdi.export.export_declared import export_declared
 
         store_path = tmp_path / "store.sqlite3"
         _store_with_hand_work(store_path)
@@ -220,7 +220,7 @@ class TestStatedBalances:
     def test_AStatedBalance_IsExportedWithItsAccountDateAndSignedAmount(self, tmp_path):
         """A balance a person stated has no artefact to replay it from, so an
         export that left it out would lose it silently. Owed is negative."""
-        from obdi.export_declared import export_declared
+        from obdi.export.export_declared import export_declared
         from obdi.verify.balance_anchors import record_stated_anchor
 
         store_path = tmp_path / "store.sqlite3"
@@ -242,7 +242,7 @@ class TestStatedBalances:
         assert _exported(out, "manifest.json")["counts"]["stated_balances"] == 1
 
     def test_WithNothingStated_TheFileIsPresentAndEmptyRatherThanMissing(self, tmp_path):
-        from obdi.export_declared import export_declared
+        from obdi.export.export_declared import export_declared
 
         store_path = tmp_path / "store.sqlite3"
         _store_with_hand_work(store_path)

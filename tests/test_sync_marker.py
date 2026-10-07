@@ -30,9 +30,9 @@ import httpx
 import pytest
 
 from obdi import web, web_actual
-from obdi.actual_push import build_marker_envelope
 from obdi.cli import queue_actual_marker
 from obdi.core.namespaces import QUEUE_KINDS
+from obdi.export.actual_push import build_marker_envelope
 from obdi.ingest import leases
 from obdi.ingest.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig

@@ -31,7 +31,7 @@ import pytest
 
 from obdi.cli import main as cli_main
 from obdi.core.models import RawArtefact
-from obdi.export_declared import export_declared
+from obdi.export.export_declared import export_declared
 from obdi.ingest.accounts import AccountMap, AccountRecord, AccountRef
 from obdi.ingest.identity import artefact_digest
 from obdi.ingest.providers import starling

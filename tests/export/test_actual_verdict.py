@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from actual_states import MARKER, align, audit, push, queued
-from obdi.actual_verdict import (
+from obdi.export.actual_verdict import (
     APPLIER_STALE_SECONDS,
     Press,
     State,

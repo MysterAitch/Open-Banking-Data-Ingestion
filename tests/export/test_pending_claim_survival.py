@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 
-from obdi.actual_push import merge_pending_bindings
+from obdi.export.actual_push import merge_pending_bindings
 
 
 def _map_with(tmp_path, *canonicals: str):

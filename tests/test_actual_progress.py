@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from obdi.actual_push import queue_with_progress
+from obdi.export.actual_push import queue_with_progress
 from obdi.web import _actual_rows
 
 REQUEST = "prune-20261002T101000000000Z.json"

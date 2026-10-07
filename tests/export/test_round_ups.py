@@ -438,8 +438,8 @@ def replace_item(item):
 
 
 def test_Leg_WhenReplayedByTheShippedPushBuilder_TravelsAsALinkedTransfer(rebuilt):
-    from obdi.actual_push import transactions_to_push
-    from obdi.replay import ActualAccountBinding, build_transfer_pairs
+    from obdi.export.actual_push import transactions_to_push
+    from obdi.export.replay import ActualAccountBinding, build_transfer_pairs
 
     bindings = [
         ActualAccountBinding(MAIN, "act-main"),

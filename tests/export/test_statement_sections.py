@@ -32,7 +32,7 @@ from credit_union_documents import (
     pdf,
     section,
 )
-from obdi.export_declared import export_declared
+from obdi.export.export_declared import export_declared
 from obdi.ingest.accounts import AccountMap, AccountRecord, AccountRef
 from obdi.ingest.backup import take_backup
 from obdi.ingest.parsers.base import ParseError

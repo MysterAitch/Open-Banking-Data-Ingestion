@@ -52,6 +52,7 @@ from ..core.masking import Structural, Total
 from ..core.models import Transaction
 from ..core.namespaces import CASH_LEG_SOURCE, MANUAL_SOURCE, UNITEMISED_SOURCE
 from ..core.page_times import instant_of
+from ..export.replay import ReplayError, to_actual_transaction, withheld_reason
 from ..ingest.accounts import AccountRef
 from ..ingest.family_anchors import OPENED, Families
 from ..ingest.feed_statuses import FeedStatuses
@@ -61,7 +62,6 @@ from ..ingest.round_up_accounts import RoundUpGaps
 from ..ingest.spaces import ArchiveNote
 from ..ingest.store import Store
 from ..ingest.typed_transactions import TypedEntry, typed_entries
-from ..replay import ReplayError, to_actual_transaction, withheld_reason
 from ..verify.agreement import Standing, standing_of
 from ..verify.balance_anchors import (
     ASSUMED_NIL,

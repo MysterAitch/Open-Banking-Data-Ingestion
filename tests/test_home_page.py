@@ -532,7 +532,7 @@ class TestTheActualLine:
         assert line.word == "no push"
 
     def test_Chips_ForEveryStateTheVerdictCanBeIn_HaveAWordOfTheirOwn(self):
-        from obdi.actual_verdict import State
+        from obdi.export.actual_verdict import State
         from obdi.web_overview import _ACTUAL_CHIPS
 
         assert {state.value for state in State} == set(_ACTUAL_CHIPS)

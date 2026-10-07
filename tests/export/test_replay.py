@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from obdi.core.models import Transaction, TransactionStatus
-from obdi.replay import (
+from obdi.export.replay import (
     ActualAccountBinding,
     ReplayError,
     build_payload,
@@ -139,7 +139,7 @@ class TestInternalTransfers:
 class TestVoidRowsNeverReachTheBudget:
     def test_BuildPayload_SkipsVoidedPendingPhantoms(self):
         from obdi.core.models import TransactionStatus
-        from obdi.replay import ActualAccountBinding, build_payload
+        from obdi.export.replay import ActualAccountBinding, build_payload
 
         bindings = [
             ActualAccountBinding(

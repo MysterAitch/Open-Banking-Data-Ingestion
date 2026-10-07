@@ -24,14 +24,14 @@ import httpx
 import pytest
 
 from obdi import cli
-from obdi.actual_push import (
+from obdi.cli import queue_actual_empty
+from obdi.export.actual_push import (
     EMPTY_SETTLED_FILE,
     build_empty_envelope,
     queue_push,
     settle_emptied_budgets,
     valid_progress,
 )
-from obdi.cli import queue_actual_empty
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
@@ -1054,7 +1054,7 @@ class TestTheResultRow:
         base = serve(
             [],
             empty_actual=Calls(),
-            actual_queue=lambda: __import__("obdi.actual_push", fromlist=["x"]).queued_requests(
+            actual_queue=lambda: __import__("obdi.export.actual_push", fromlist=["x"]).queued_requests(
                 actual_dir
             ),
         )

@@ -11,7 +11,8 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from obdi.actual_push import (
+from obdi.core.models import SourceTier, Transaction
+from obdi.export.actual_push import (
     applier_heartbeat,
     build_audit_envelope,
     build_envelope,
@@ -23,10 +24,9 @@ from obdi.actual_push import (
     queue_push,
     queued_requests,
 )
-from obdi.core.models import SourceTier, Transaction
+from obdi.export.replay import ActualAccountBinding
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.store import Store
-from obdi.replay import ActualAccountBinding
 
 
 def _seed(store: Store, account_id: str, entity: str) -> None:
@@ -501,7 +501,7 @@ class TestDuplicateIdentityGuard:
         silently vanish."""
         import pytest
 
-        from obdi.actual_push import ActualAccountBinding, build_envelope
+        from obdi.export.actual_push import ActualAccountBinding, build_envelope
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -536,7 +536,7 @@ class TestMergeClaimsBeforeReading:
         merge folds in - nothing is archived unread."""
         import json as _json
 
-        from obdi.actual_push import merge_pending_bindings
+        from obdi.export.actual_push import merge_pending_bindings
 
         actual_dir = tmp_path / "actual"
         actual_dir.mkdir()
@@ -566,7 +566,7 @@ class TestMergeClaimsBeforeReading:
     def test_CrashedClaim_IsSweptAndMergedByTheNextCall(self, tmp_path):
         import json as _json
 
-        from obdi.actual_push import merge_pending_bindings
+        from obdi.export.actual_push import merge_pending_bindings
 
         actual_dir = tmp_path / "actual"
         actual_dir.mkdir()
