@@ -6,12 +6,16 @@ reads the findings against his own knowledge to judge whether finding them is a 
 in before anything is declared (`docs/design/2026-10-commitments/notes.md` says what is decided
 and what cannot be told).
 
-A SERIES is the transactions of one account that share a payee shape and a direction, coming
-round on a regular cadence at least `MIN_OCCURRENCES` times. The payee shape is
-`identity.normalise_description` (the normaliser the matcher's content key already uses) with
-every word that holds a digit taken out, since a reference, a mandate number, or a card tail is
-what changes between two sightings of one payee. Two payees that merely share words have
-different shapes and are never joined.
+A SERIES is the transactions, in any account, that share a payee shape and a direction, coming
+round on a regular cadence at least `MIN_OCCURRENCES` times. It belongs to a payee and not to an
+account: a subscription normally paid from one account and, this month, from another is one
+series with an occurrence marked as paid from elsewhere (`Series.off_account`), never a missed
+month followed by a new series. The series reports the account it is usually paid from.
+
+The payee shape is `identity.normalise_description` (the normaliser the matcher's content key
+already uses) with every word that holds a digit taken out, since a reference, a mandate
+number, or a card tail is what changes between two sightings of one payee. Two payees that
+merely share words have different shapes and are never joined.
 
 CADENCE is decided from where the occurrences fall, never from a label:
 
@@ -27,9 +31,10 @@ In both families no more than a third of the expected occurrences may be missing
 occurrences in one expected slot are not a series (the same payee taking two payments in a
 month is something else).
 
-WHEN NO WHOLE GROUP FITS the transactions of the group are tried again by exact amount, so that
-a fixed monthly charge among a payee's random purchases, or two subscriptions to one payee at
-different prices, are found by the one thing that tells them apart.
+WHEN NO WHOLE GROUP FITS the transactions of the group are tried again by exact amount, then by
+account, so that a fixed monthly charge among a payee's random purchases, or two subscriptions
+to one payee at different prices (or, at one price, in different accounts), are found by the one
+thing that tells them apart.
 
 A TRANSFER is a movement the provider calls internal or the pairing pass proved. A pair of legs
 is one series, reported under the account the money left, with the account it went to beside it;
@@ -46,7 +51,7 @@ from __future__ import annotations
 
 import calendar
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from itertools import pairwise
@@ -101,7 +106,11 @@ _GRACE_DAYS = {
 class Series:
     """One recurring thing: what it is, how often, how much, and what is the matter with it."""
 
+    #: The account most often paid from or into.
     account: str
+    #: Occurrences paid from some other account: the series did not stop or start again, it was
+    #: paid from elsewhere that time. Nonzero is the "account changed" mark.
+    off_account: int
     #: Where a transfer's money went; empty for anything else, and for a transfer seen as one leg.
     other_account: str
     #: The normalised payee the occurrences share; empty for a transfer found by its legs.
@@ -146,6 +155,14 @@ class _Fit:
     weekday: int | None
     missed: int
     next_expected: date
+
+
+@dataclass(frozen=True)
+class RecurringFindings:
+    """What the detector found, and the day it judged "stopped" against."""
+
+    series: list[Series]
+    today: date
 
 
 def _words_of(text: str) -> str:
@@ -259,10 +276,22 @@ def _series_of(
     )
     is_transfer = transfers * 2 >= len(legs)
     direction = "in" if newest.amount_minor > 0 else "out"
-    horizon = min(today, reach.get(newest.account_id, today))
+    paid_from = Counter(leg.row.account_id for leg in legs)
+    # The account most often paid from; of two as common, the one paid from most recently.
+    usual_account = max(
+        paid_from,
+        key=lambda ref: (
+            paid_from[ref],
+            max(leg.row.value_date for leg in legs if leg.row.account_id == ref),
+        ),
+    )
+    # Where a series was paid from more than one account, none has stopped while any account it
+    # uses still reaches a day past the expected one.
+    horizon = min(today, max(reach.get(ref, today) for ref in paid_from))
     stopped = horizon > fit.next_expected + timedelta(days=_GRACE_DAYS[fit.cadence])
     return Series(
-        account=newest.account_id,
+        account=usual_account,
+        off_account=len(legs) - paid_from[usual_account],
         other_account=legs[-1].other,
         shape=shape,
         label=newest.description,
@@ -294,22 +323,41 @@ def _series_in_group(
     legs: list[_Leg], shape: str, reach: dict[str, date], today: date
 ) -> list[Series]:
     """The series one group holds: the whole group if it fits, otherwise each exact amount."""
+    return _split(legs, shape, reach, today, _SPLITS)
+
+
+#: What a group that does not fit as a whole is divided by, in turn: exact amount, then account.
+#: A payee taking two payments a month is two things to tell apart by what differs; where the
+#: price is the same, the account is what is left.
+_SPLITS: tuple[Callable[[_Leg], object], ...] = (
+    lambda leg: leg.row.amount_minor,
+    lambda leg: leg.row.account_id,
+)
+
+
+def _split(
+    legs: list[_Leg],
+    shape: str,
+    reach: dict[str, date],
+    today: date,
+    splits: Sequence[Callable[[_Leg], object]],
+) -> list[Series]:
     legs.sort(key=lambda leg: (leg.row.value_date, leg.row.entity_id))
     if len(legs) < MIN_OCCURRENCES:
         return []
     fit = _fit([leg.row.value_date for leg in legs])
     if fit is not None:
         return [_series_of(legs, fit, shape=shape, reach=reach, today=today)]
-    by_amount: dict[int, list[_Leg]] = defaultdict(list)
+    if not splits:
+        return []
+    parts: dict[object, list[_Leg]] = defaultdict(list)
     for leg in legs:
-        by_amount[leg.row.amount_minor].append(leg)
+        parts[splits[0](leg)].append(leg)
+    if len(parts) == 1:
+        return _split(legs, shape, reach, today, splits[1:])
     found: list[Series] = []
-    for same in by_amount.values():
-        if len(same) < MIN_OCCURRENCES:
-            continue
-        fit = _fit([leg.row.value_date for leg in same])
-        if fit is not None:
-            found.append(_series_of(same, fit, shape=shape, reach=reach, today=today))
+    for part in parts.values():
+        found.extend(_split(part, shape, reach, today, splits[1:]))
     return found
 
 
@@ -356,7 +404,7 @@ def find_recurring(
         shape = _words_of(row.description)
         if not shape:
             continue
-        payee = ("payee", row.account_id, shape, row.currency, direction)
+        payee = ("payee", shape, row.currency, direction)
         shapes[payee] = shape
         groups[payee].append(_Leg(row, ""))
 

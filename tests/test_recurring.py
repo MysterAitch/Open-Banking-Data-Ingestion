@@ -338,7 +338,31 @@ class TestWhatMustNotJoinOrForm:
             ("BRIGHT ENERGY", 4, 5000),
         ]
 
-    def test_TheSamePayeeInTwoAccounts_IsOneSeriesPerAccount(self):
+    def test_MonthlySubscriptionPaidOnceFromAnotherAccount_IsOneSeriesWithOneAccountChanged(self):
+        # Eight months on the 8th: the seventh (August) paid from B, every other from A.
+        rows = [
+            tx(B if m == 8 else A, date(2026, m, 8), -999, "MUSIC STREAMING") for m in range(2, 10)
+        ]
+
+        (series,) = find_recurring(rows, pairs=(), today=TODAY)
+
+        assert (series.account, series.count, series.off_account) == (A, 8, 1)
+        assert series.cadence == "monthly"
+        assert series.missed == 0
+        assert not series.stopped
+        assert series.next_expected == date(2026, 10, 8)
+
+    def test_SubscriptionMovedForGoodToAnotherAccount_IsOneSeriesNotStopped(self):
+        rows = [
+            tx(A if m < 6 else B, date(2026, m, 8), -999, "MUSIC STREAMING") for m in range(2, 10)
+        ]
+
+        (series,) = find_recurring(rows, pairs=(), today=TODAY)
+
+        assert (series.account, series.count, series.off_account) == (B, 8, 4)
+        assert not series.stopped
+
+    def test_TheSamePayeeTakenTwiceAMonthFromTwoAccounts_IsOneSeriesPerAccount(self):
         months = [(2026, m) for m in range(5, 10)]
         rows = monthly(A, months, 8, -999, "MUSIC STREAMING") + monthly(
             B, months, 8, -999, "MUSIC STREAMING"

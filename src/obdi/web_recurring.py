@@ -1,0 +1,251 @@
+"""The page that shows what the detector finds recurring (`recurring`), masked unless asked.
+
+A MEASUREMENT PAGE: nothing here is declared or kept. It lists the series one line each, grouped
+by the account each is usually paid from, so the owner can set what is found against what he
+knows is there.
+
+A GET renders MASKED, as the ledger does: the payee is `masking.mask_text` of its shape, and
+every amount is the sealed total slot. Showing values is a POST answered directly with the
+unmasked page, sent `no-store`, or the sitting (`values_sitting`) does the same for a GET.
+
+WHAT IS SHOWN ON THE MASKED PAGE is counts, the cadence and the day, the span of the series,
+which marks it carries, and how far the latest amount sits from the usual as a PERCENTAGE. A
+percentage is not a figure: it says how much larger or smaller, never what either was, and
+without it "changed" would be a verdict with nothing to check it against.
+"""
+
+from __future__ import annotations
+
+import calendar
+import html
+from datetime import date
+from typing import TYPE_CHECKING
+
+from . import values_sitting
+from .account_names import AccountsShown
+from .callback import render_page
+from .ledger import Money
+from .logs import say
+from .masking import MASKED_TOTAL, mask_text
+from .navigation import page_name
+from .page_times import date_with_age, percent_text, span_words
+from .plural import plural
+from .recurring import RecurringFindings, Series
+from .web_accounts import submit_button
+
+if TYPE_CHECKING:  # pragma: no cover - imported for types alone
+    from .web import WebConfig
+
+_esc = html.escape
+
+ROUTE = "/recurring"
+
+_WEEKDAYS = ("Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays")
+
+#: How a cadence is said, for the ones counted in days; the others say a day of the month.
+_EVERY = {"weekly": "weekly", "fortnightly": "fortnightly", "four-weekly": "every four weeks"}
+
+#: Where a cadence sorts among the others in an account's list.
+_ORDER = ("weekly", "fortnightly", "four-weekly", "monthly", "quarterly", "yearly")
+
+
+def _ordinal(number: int) -> str:
+    teens = 10 <= number % 100 <= 20
+    suffix = "th" if teens else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    return f"{number}{suffix}"
+
+
+def cadence_words(series: Series) -> str:
+    """`monthly, about the 27th`; `yearly, October`; `weekly, Fridays`."""
+    if series.weekday is not None:
+        return f"{_EVERY[series.cadence]}, {_WEEKDAYS[series.weekday]}"
+    if series.cadence == "yearly":
+        return f"yearly, {calendar.month_name[series.usual_month]}"
+    return f"{series.cadence}, about the {_ordinal(series.usual_day)}"
+
+
+def _needs_a_look(series: Series) -> bool:
+    return series.stopped or series.changed
+
+
+def summary_line(findings: RecurringFindings) -> str:
+    """The page's count line: things and accounts, then payments, transfers, incomes, and marks.
+
+    Stopped and changed are marks a series carries beside its kind, so they overlap the first
+    three and the line does not add up to N.
+    """
+    found = findings.series
+    transfers = sum(s.is_transfer for s in found)
+    incomes = sum(s.is_income for s in found)
+    payments = len(found) - transfers - incomes
+    return (
+        f"{plural(len(found), 'recurring thing')} across "
+        f"{plural(len({s.account for s in found}), 'account')}: "
+        f"{plural(payments, 'payment')}, {plural(transfers, 'transfer')}, "
+        f"{plural(incomes, 'income')}, {sum(s.stopped for s in found)} stopped, "
+        f"{sum(s.changed for s in found)} changed"
+    )
+
+
+def _marks(series: Series, names: AccountsShown, today: date) -> str:
+    marks: list[str] = []
+    if series.stopped:
+        marks.append('<span class="pill pill-warn">stopped</span>')
+    if series.changed:
+        way = "up" if series.drift_percent > 0 else "down"
+        marks.append(
+            f'<span class="pill pill-warn">changed: {way} '
+            f"{_esc(percent_text(abs(series.drift_percent) / 100))}</span>"
+        )
+    if series.off_account:
+        marks.append(f'<span class="pill">{series.off_account}&times; other account</span>')
+    if series.is_transfer:
+        to = f" to {names.of(series.other_account).as_name()}" if series.other_account else ""
+        marks.append(f'<span class="pill">transfer{to}</span>')
+    if series.is_income:
+        marks.append('<span class="pill">income</span>')
+    if not series.steady:
+        marks.append('<span class="pill">varies</span>')
+    return "".join(marks)
+
+
+def _amount(series: Series, *, unmasked: bool) -> str:
+    if not unmasked:
+        return f'<span class="mono nowrap fig sealed">{_esc(MASKED_TOTAL)}</span>'
+    usual = Money(series.usual_minor, series.currency)
+    text = str(usual)
+    if series.changed:
+        text += f", now {Money(series.latest_minor, series.currency)}"
+    elif not series.steady:
+        low, high = (
+            Money(series.min_minor, series.currency),
+            Money(series.max_minor, series.currency),
+        )
+        text += f", {low} to {high}"
+    return f'<span class="mono nowrap fig">{_esc(text)}</span>'
+
+
+def _name(series: Series, *, unmasked: bool) -> str:
+    text = series.shape or series.label
+    if unmasked:
+        return f'<span class="txt">{_esc(text)}</span>'
+    return f'<span class="txt sealed">{_esc(mask_text(text))}</span>'
+
+
+def _row(series: Series, names: AccountsShown, today: date, *, unmasked: bool) -> str:
+    klass = "recur-row recur-attn" if _needs_a_look(series) else "recur-row"
+    span = span_words(series.first_seen, series.last_seen)
+    # A stopped series says when it was last seen, with its age, in place of how long it ran:
+    # that is the date its absence is measured from.
+    ending = (
+        f"last {_esc(date_with_age(series.last_seen, today))}"
+        if series.stopped
+        else f"over {_esc(span)}"
+    )
+    how = f"{_esc(cadence_words(series))} &middot; {plural(series.count, 'time')} {ending}"
+    return (
+        f'<li class="{klass}"><span class="recur-name">{_name(series, unmasked=unmasked)}</span>'
+        f'<span class="recur-fig">{_amount(series, unmasked=unmasked)}</span>'
+        f'<span class="recur-how">{how}{_marks(series, names, today)}</span></li>'
+    )
+
+
+def _mode(*, unmasked: bool) -> str:
+    if unmasked:
+        return values_sitting.unless_sitting(
+            '<p class="bad shown">'
+            "VALUES ARE SHOWN on this page. It was produced by your request to show "
+            "them, has no address of its own, and is not kept by the browser.</p>"
+            f'<p><a class="button secondary" href="{ROUTE}">Hide values</a></p>'
+        )
+    return (
+        f'<form method="post" action="{ROUTE}">'
+        + submit_button("Show values", secondary=True)
+        + "</form>"
+        + values_sitting.show_everywhere_press()
+    )
+
+
+def render_recurring(findings: RecurringFindings, names: AccountsShown, *, unmasked: bool) -> bytes:
+    found = findings.series
+    if not found:
+        listing = (
+            "<p>Nothing recurring was found. A recurring thing needs three regular "
+            "occurrences with the same payee.</p>"
+        )
+        lead = ""
+    else:
+        lead = f'<p class="recur-summary">{_esc(summary_line(findings))}</p>'
+        by_account: dict[str, list[Series]] = {}
+        for series in found:
+            by_account.setdefault(series.account, []).append(series)
+        sections = []
+        for ref in sorted(by_account, key=lambda r: names.of(r).label.casefold() or r.casefold()):
+            rows = sorted(
+                by_account[ref],
+                key=lambda s: (
+                    not _needs_a_look(s),
+                    _ORDER.index(s.cadence),
+                    s.usual_day,
+                    s.shape,
+                ),
+            )
+            items = "".join(_row(s, names, findings.today, unmasked=unmasked) for s in rows)
+            sections.append(
+                f'<section class="recur-account"><h2>{names.of(ref).as_name()}</h2>'
+                f'<ul class="recur-list">{items}</ul></section>'
+            )
+        listing = "".join(sections)
+    body = (
+        _mode(unmasked=unmasked)
+        + lead
+        + listing
+        + '<p class="muted">Found from the transactions alone; nothing is declared or kept. '
+        "Each is listed under the account it is usually paid from.</p>"
+    )
+    return render_page(page_name(ROUTE), body, body_class="recur-page")
+
+
+class RecurringPages:
+    """The recurring-things route, composed into the request handler."""
+
+    @property
+    def bound_config(self) -> WebConfig:
+        """Supplied by the handler this is composed into."""
+        raise NotImplementedError
+
+    def _respond(self, status: int, body: bytes, *, no_store: bool = False) -> None:
+        raise NotImplementedError
+
+    def _discard_small_body(self) -> None:
+        raise NotImplementedError
+
+    def _recurring_page(self, *, unmasked: bool) -> None:
+        config = self.bound_config
+        hook = config.recurring_data
+        if hook is None:
+            self._respond(
+                404, render_page("Not available", "<p>Recurring things are not wired.</p>")
+            )
+            return
+        try:
+            findings = hook()
+        except Exception as fault:
+            say("recurring.fault", kind=type(fault).__name__)
+            self._respond(
+                500,
+                render_page("Recurring failed", "<p>The transactions could not be read.</p>"),
+            )
+            return
+        try:
+            names = config.account_names() if config.account_names is not None else AccountsShown()
+        except Exception:
+            names = AccountsShown()
+        self._respond(200, render_recurring(findings, names, unmasked=unmasked), no_store=unmasked)
+
+    def _recurring_get(self) -> None:
+        self._recurring_page(unmasked=False)
+
+    def _recurring_post(self) -> None:
+        self._discard_small_body()
+        self._recurring_page(unmasked=True)
