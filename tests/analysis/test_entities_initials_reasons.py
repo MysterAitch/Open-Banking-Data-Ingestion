@@ -8,7 +8,8 @@ all, and true of few members.
 KNOWN ANSWERS, decided before the first run.
 
   - A proposal's `rules` holds exactly one rule, and that rule is true of every member: they all
-    begin with `opening`, or they all hold `shared`, or the bank names them all `bank_name`.
+    begin with `opening`, or they all hold `shared`. (A shared stated counterparty is not a
+    reason: rows that state one are one name already, `name_of`.)
   - A name in two reasons' sets is in ONE proposal: the reason with the most transactions, then
     the most names, then the longer key. The reason left with fewer names than it needs is not
     proposed and its remaining names stay free.
@@ -26,12 +27,12 @@ from __future__ import annotations
 import pytest
 
 from obdi.analysis.entities import (
-    BANK_NAMES,
     OPENING_WORDS,
     SAME_WORDS,
     count_shapes,
+    name_origins,
+    names_of,
     propose_groups,
-    shape_counterparties,
     shape_readings,
     view_of,
 )
@@ -61,8 +62,7 @@ def assert_rule_is_true_of_every_member(group, readings=None) -> None:
             words = read.get(shape, shape).split()
             assert set(group.shared.split()) <= {w.rstrip("s") for w in words} | set(words)
     else:
-        assert rule == BANK_NAMES
-        assert group.bank_name
+        raise AssertionError(f"a proposal rests on an opening or the same words, not {rule!r}")
 
 
 class TestTheOwnersMixedProposal:
@@ -162,19 +162,18 @@ class TestANameInTwoReasons:
         assert set(group.shapes) == {"kestrel foods leeds", "kestrel foods york"}
         assert group.opening == "kestrel foods"
 
-    def test_Proposal_WhenTheBankNamesOneMerchantForNamesWithNoWordInCommon_TheBankIsTheReason(
-        self,
-    ):
-        counts = count_shapes(["ZQX HOLDINGS LEEDS", "PAY BWK NORTH"])
-        said = shape_counterparties(
-            [("ZQX HOLDINGS LEEDS", "Bramblewick"), ("PAY BWK NORTH", "Bramblewick")]
-        )
+    def test_Names_WhenOneMerchantIsStatedForUnrelatedDescriptions_AreOneNameNotAProposal(self):
+        # The withdrawn "bank names" reason offered these two as a merge to tick; they are one
+        # name already, so nothing is left to propose and no page sentence says "the bank names".
+        rows = [("ZQX HOLDINGS LEEDS", "Bramblewick"), ("PAY BWK NORTH", "Bramblewick")]
 
-        (group,) = propose_groups(counts, counterparties=said).groups
+        origins = name_origins(names_of(rows))
 
-        assert group.rules == frozenset({BANK_NAMES})
-        page = render_entities(view_of(counts, [], counterparties=said), unmasked=True)
-        assert "the bank names both as “Bramblewick”" in page.decode("utf-8")
+        assert {name: origin.rows for name, origin in origins.items()} == {"bramblewick": 2}
+        counts = {name: origin.rows for name, origin in origins.items()}
+        assert propose_groups(counts).groups == ()
+        page = render_entities(view_of(counts, [], origins=origins), unmasked=True)
+        assert "the bank names" not in page.decode("utf-8")
 
 
 class TestEveryProposalSaysWhy:

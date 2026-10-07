@@ -14,6 +14,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
+from ..core.plural import plural
 from ..ingest.entity_records import (
     BEGINS,
     CONTAINS,
@@ -27,7 +28,6 @@ from ..ingest.identity import NORMALISATION_STEPS, normalise_description
 from .entity_tokens import (
     MIN_DISTINCTIVE_LETTERS,
     Token,
-    core_words,
     distinctive_words,
     fused_letters,
     is_method_only,
@@ -43,9 +43,6 @@ if TYPE_CHECKING:  # pragma: no cover - imported for types alone
 #: one-letter codes are set aside, they are made of the same words in whatever order.
 OPENING_WORDS = "opening words"
 SAME_WORDS = "same words"
-#: Also a rule: the bank states the same merchant for the shapes' rows (compared as names are, see
-#: `entity_tokens`). A shape whose rows state two different merchants joins none by it.
-BANK_NAMES = "bank names"
 
 #: Fewest words at the start that two shapes must share to be one proposed group. A single shared
 #: word is two retailers that begin alike far more often than one retailer, and a wrong merge is
@@ -117,7 +114,11 @@ def reading_of(text: str) -> str:
     has the shape "m s", two bare initials that meet every name beginning "m" and "s"; its
     reading is "m s bank". The reading is never a name's identity: rows are grouped by the
     shape, so the key does not move for the sake of comparison."""
-    for _sentence, step in SHAPE_STEPS:
+    return _read_by(text, SHAPE_STEPS)
+
+
+def _read_by(text: str, steps: Sequence[tuple[str, Callable[[str], str]]]) -> str:
+    for _sentence, step in steps:
         text = _keep_fused_letters(text) if step is _drop_digit_words else step(text)
     return text
 
@@ -156,30 +157,52 @@ class Derivation:
     #: The sentences of the steps that changed at least one printed text.
     steps: tuple[str, ...]
     name: str
+    #: The kinds (`LADDER`) of the rows the derivation was made from, strongest first.
+    kinds: tuple[str, ...] = ()
 
 
 DERIVATION_TEXTS_SHOWN = 3
 
 
+def _printed_text(row: Covered) -> str:
+    """The text a covered row's name was read from: the counterparty it states where that is
+    what named it (`STATED_NAME`), else its description."""
+    return row.counterparty if row.kind == STATED_NAME else row.description
+
+
 def derivation_of(
-    shape: str, covered: Sequence[Covered], *, source: str = DESCRIPTION_SOURCE
+    shape: str, covered: Sequence[Covered], *, source: str | None = None
 ) -> Derivation:
-    """The derivation of a name from the transactions the page holds for it (`covered`)."""
-    distinct = list(dict.fromkeys(c.description for c in covered))
-    shown = distinct[:DERIVATION_TEXTS_SHOWN]
-    changed: set[int] = set()
-    for text in shown:
-        for index, (_sentence, step) in enumerate(SHAPE_STEPS):
+    """The derivation of a name from the transactions the page holds for it (`covered`): each
+    shown row's text is reduced by the steps of the kind that named it (`COUNTERPARTY_STEPS` for
+    a stated name, `SHAPE_STEPS` otherwise). The source is said from `KIND_SENTENCES` for the
+    kinds of the rows shown unless one is given."""
+    distinct: dict[str, Covered] = {}
+    for row in covered:
+        distinct.setdefault(_printed_text(row), row)
+    shown = list(distinct.items())[:DERIVATION_TEXTS_SHOWN]
+    changed: set[str] = set()
+    for text, row in shown:
+        steps = COUNTERPARTY_STEPS if row.kind == STATED_NAME else SHAPE_STEPS
+        for sentence, step in steps:
             after = step(text)
             if after != text:
-                changed.add(index)
+                changed.add(sentence)
             text = after
+    in_order = dict.fromkeys(sentence for sentence, _step in (*SHAPE_STEPS, *COUNTERPARTY_STEPS))
+    kinds = [k for k in LADDER if any(row.kind == k for row in covered)]
+    if source is None:
+        support = sum({row.via: row.support for row in covered if row.kind == ALIAS}.values())
+        source = ", and from the ".join(
+            KIND_SENTENCES[kind].format(payments=plural(support, "payment")) for kind in kinds
+        )
     return Derivation(
-        source=source,
-        printed=tuple(shown),
+        source=source or DESCRIPTION_SOURCE,
+        printed=tuple(text for text, _row in shown),
         more=len(distinct) - len(shown),
-        steps=tuple(sentence for i, (sentence, _step) in enumerate(SHAPE_STEPS) if i in changed),
+        steps=tuple(sentence for sentence in in_order if sentence in changed),
         name=shape,
+        kinds=tuple(kinds),
     )
 
 
@@ -194,18 +217,6 @@ def shape_of(text: str) -> str:
     prefers the counterparty a source states, and uses this only where a row states none.
     """
     return _shape(text)
-
-
-def shape_counterparties(rows: Iterable[tuple[str, str]]) -> dict[str, dict[str, int]]:
-    """For each shape, the counterparties its (description, counterparty) rows state and how many
-    rows state each; rows stating none are not counted, and shapes with none are left out."""
-    found: dict[str, Counter[str]] = {}
-    for text, counterparty in rows:
-        stated = " ".join(counterparty.split())
-        shape = shape_of(text)
-        if stated and shape:
-            found.setdefault(shape, Counter())[stated] += 1
-    return {shape: dict(counted) for shape, counted in found.items()}
 
 
 #: The kinds of identifier a row can be named by, strongest first
@@ -231,7 +242,7 @@ KIND_SENTENCES: dict[str, str] = {
     ACCOUNT: "other party's account number",
     SOURCE_ID: "source's own identifier for the other party",
     STATED_NAME: "bank's merchant name",
-    ALIAS: "description, named by the bank's merchant name through payments seen by both",
+    ALIAS: "description, named by the bank's merchant name through {payments} seen by both",
     DESCRIPTION: "description",
     RULE: "rule",
 }
@@ -370,14 +381,86 @@ def count_shapes(descriptions: Iterable[str]) -> dict[str, int]:
 
 
 def count_row_legs(named: Iterable[tuple[str, bool]]) -> dict[str, int]:
-    """For each shape, how many of the (description, is a transfer leg) rows that have it are
-    legs; shapes with no leg are left out."""
+    """For each name, how many of the (name, is a transfer leg) rows that have it are legs;
+    names with no leg are left out."""
     counted: Counter[str] = Counter()
-    for text, leg in named:
+    for name, leg in named:
         if leg:
-            counted[shape_of(text)] += 1
+            counted[name] += 1
     counted.pop("", None)
     return dict(counted)
+
+
+@dataclass(frozen=True)
+class NameOrigin:
+    """How the rows of one name came to have it: how many state it themselves (`STATED_NAME`),
+    how many take it through a link (`ALIAS`), how many are its description's shape, and how many
+    rows of both kinds the links were learned from."""
+
+    stated: int = 0
+    linked: int = 0
+    described: int = 0
+    through: int = 0
+
+    @property
+    def rows(self) -> int:
+        return self.stated + self.linked + self.described
+
+    @property
+    def kind(self) -> str:
+        """The strongest kind any row of the name has (`LADDER`)."""
+        if self.stated:
+            return STATED_NAME
+        return ALIAS if self.linked else DESCRIPTION
+
+
+def name_origins(named: Iterable[Named]) -> dict[str, NameOrigin]:
+    """For each name, how its rows came to have it; rows with no name are not counted."""
+    stated: Counter[str] = Counter()
+    linked: Counter[str] = Counter()
+    described: Counter[str] = Counter()
+    supports: dict[str, dict[str, int]] = {}
+    for item in named:
+        if not item.name:
+            continue
+        if item.kind == ALIAS:
+            linked[item.name] += 1
+            supports.setdefault(item.name, {})[item.via] = item.support
+        elif item.kind == DESCRIPTION:
+            described[item.name] += 1
+        else:
+            stated[item.name] += 1
+    return {
+        name: NameOrigin(
+            stated[name],
+            linked[name],
+            described[name],
+            sum(supports.get(name, {}).values()),
+        )
+        for name in {*stated, *linked, *described}
+    }
+
+
+def name_readings(
+    rows: Sequence[tuple[str, str]], named: Sequence[Named]
+) -> dict[str, str]:
+    """For each name, the text it is COMPARED on (`reading_of`): the reading of the counterparty
+    or description it was read from, most common first, then of fewer words, then alphabetical,
+    so the answer does not depend on the order of the rows. A row named through a link adds
+    nothing: the name's own rows say how it is read."""
+    seen: dict[str, Counter[str]] = {}
+    for (description, counterparty), item in zip(rows, named, strict=True):
+        if not item.name or item.kind == ALIAS:
+            continue
+        if item.kind == DESCRIPTION:
+            read = reading_of(description)
+        else:
+            read = _read_by(counterparty, COUNTERPARTY_STEPS)
+        seen.setdefault(item.name, Counter())[read] += 1
+    return {
+        name: min(counted, key=lambda r: (-counted[r], len(r.split()), r))
+        for name, counted in seen.items()
+    }
 
 
 def clean_rule(kind: str, words: str) -> tuple[str, str]:
@@ -611,7 +694,7 @@ class Proposal:
     name: str
     #: Most-used first, then alphabetical.
     shapes: tuple[str, ...]
-    #: The one rule (`OPENING_WORDS`, `SAME_WORDS`, `BANK_NAMES`) that holds for every shape.
+    #: The one rule (`OPENING_WORDS`, `SAME_WORDS`) that holds for every shape.
     rules: frozenset[str]
     #: Transactions across the shapes.
     transactions: int
@@ -621,9 +704,6 @@ class Proposal:
     #: The distinctive words every shape in the group holds, in the order the commonest one prints
     #: them; what a "contains" rule is made of where the group has no opening.
     shared: str = ""
-    #: The merchant the bank names for the group where `BANK_NAMES` joined it, title-cased from
-    #: its commonest spelling; the group's name is this. Empty otherwise.
-    bank_name: str = ""
 
     def rule(self) -> tuple[str, str] | None:
         """The rule that joined the group, in the form the store keeps it, or None where the
@@ -642,11 +722,6 @@ class Proposal:
             except EntityRefused:
                 return None
         return None
-
-
-def _bank_key(counterparty: str) -> str:
-    """A stated counterparty reduced the way names are compared, or "" where nothing is left."""
-    return " ".join(token.norm for token in tokens_of(shape_of(counterparty)))
 
 
 def _words(named: Sequence[Token]) -> frozenset[str]:
@@ -757,6 +832,14 @@ class Covered:
     description: str
     #: The ledger's key for the row (`ledger.row_anchor`), which a link to it names.
     anchor: str
+    #: The counterparty the row states, "" where it states none.
+    counterparty: str = ""
+    #: The kind of identifier (`LADDER`) that named the row.
+    kind: str = DESCRIPTION
+    #: For a row named through a link: the description-shape it was linked for, and the rows
+    #: the link was learned from.
+    via: str = ""
+    support: int = 0
 
 
 @dataclass(frozen=True)
@@ -774,6 +857,9 @@ class EntitiesView:
     owner: OwnerGroup | None = None
     #: Free names that share a distinctive word with an entity, offered under it.
     suggestions: tuple[Suggestion, ...] = ()
+    #: How each name's rows came to have it (`name_origins`); empty where the view was made from
+    #: counts alone, and the page then says nothing about sources.
+    origins: Mapping[str, NameOrigin] = field(default_factory=dict)
 
     def free_shapes(self) -> list[str]:
         """The shapes under no entity, most-used first."""
@@ -840,6 +926,14 @@ class EntityPage:
     def transactions(self) -> int:
         return sum(self.view.counts.get(shape, 0) for shape in self.entity.shapes)
 
+    @property
+    def orphaned(self) -> tuple[str, ...]:
+        """The names under the entity that no transaction has now. A name attached by hand was
+        the description's shape before rows were named by what a source states, and a row that
+        states its counterparty no longer has that shape as its name; such an attachment is
+        listed, never dropped, so the owner sees what no longer attaches to anything."""
+        return tuple(s for s in self.entity.shapes if s not in self.view.counts)
+
 
 def entity_page_of(
     entity_id: int,
@@ -847,6 +941,7 @@ def entity_page_of(
     rules: Sequence[EntityRule],
     counts: Mapping[str, int],
     covers: Mapping[str, tuple[Covered, ...]],
+    origins: Mapping[str, NameOrigin] | None = None,
 ) -> EntityPage | None:
     """The page of one entity, or None where no entity not removed has that id. `entities` are
     resolved (`with_rules`) and `rules` are the live rules of all of them."""
@@ -868,6 +963,7 @@ def entity_page_of(
             entities=(found,),
             proposals=Proposals(groups=(), too_broad=()),
             covers=covers,
+            origins=origins or {},
         ),
     )
 
@@ -877,13 +973,13 @@ def view_of(
     entities: Iterable[Entity],
     legs: Mapping[str, int] | None = None,
     covers: Mapping[str, tuple[Covered, ...]] | None = None,
-    counterparties: Mapping[str, Mapping[str, int]] | None = None,
+    origins: Mapping[str, NameOrigin] | None = None,
     readings: Mapping[str, str] | None = None,
 ) -> EntitiesView:
-    """The page's view of the shapes held and the entities made from them.
+    """The page's view of the names held and the entities made from them.
 
-    `counterparties` is `shape_counterparties`: the merchants the bank states for each shape.
-    `readings` is `shape_readings`: the text each shape is compared on where that is not the shape.
+    `origins` is `name_origins`: how each name's rows came to have it.
+    `readings` is `name_readings`: the text each name is compared on where that is not the name.
 
     `legs` is, for each shape, how many of its transactions are legs of confirmed transfers
     between the owner's own accounts; the shapes it makes the owner's are set apart before the
@@ -893,15 +989,14 @@ def view_of(
     taken = {shape for entity in made for shape in entity.shapes}
     owner = owner_group(counts, legs or {}, taken)
     set_apart = taken | set(owner.shapes if owner else ())
-    proposals = propose_groups(
-        counts, taken=set_apart, counterparties=counterparties, readings=readings
-    )
+    proposals = propose_groups(counts, taken=set_apart, readings=readings)
     offered = {s for g in (*proposals.groups, *proposals.too_broad) for s in g.shapes}
     return EntitiesView(
         counts=counts,
         entities=made,
         proposals=proposals,
         covers=covers or {},
+        origins=origins or {},
         owner=owner,
         suggestions=suggest_for_entities(counts, made, set_apart | offered, readings),
     )
@@ -1046,23 +1141,21 @@ def propose_groups(
     counts: Mapping[str, int],
     *,
     taken: Collection[str] = frozenset(),
-    counterparties: Mapping[str, Mapping[str, int]] | None = None,
     readings: Mapping[str, str] | None = None,
 ) -> Proposals:
     """The groups of free shapes that plain text analysis says are one counterparty.
 
     A group is the shapes that share ONE reason: their first `MIN_OPENING_WORDS` words, or the
-    same words once one-letter codes are set aside, or (`BANK_NAMES`) the one merchant every row
-    of each states, `counterparties` being each shape's stated merchants and their row counts.
+    same words once one-letter codes are set aside. Rows that share a stated counterparty are
+    one name already (`name_of`), so there is no reason to propose them together.
     Reasons are never chained (`_one_rule_groups` says how a shape in two goes to one), so
     the sentence for a group is true of every member. Shapes in `taken` (already under an
     entity) are shown where they are and never proposed again. A group is at least two shapes
     and at most `MAX_SHAPES_PROPOSED`, largest first.
 
-    Shapes are compared on their reading (`readings`, from `shape_readings`) where one is given
-    and on the shape itself otherwise; the groups still hold shapes, the identity.
+    Shapes are compared on their reading (`readings`, from `name_readings`) where one is given
+    and on the name itself otherwise; the groups still hold names, the identity.
     """
-    stated_by = counterparties or {}
     read = readings or {}
     named = {shape: tokens_of(read.get(shape, shape)) for shape in counts}
     common = common_tokens(named)
@@ -1088,12 +1181,6 @@ def propose_groups(
         if _tells_apart(_words(tokens)):
             buckets.setdefault((SAME_WORDS, _words(tokens)), []).append(shape)
             needs[(SAME_WORDS, _words(tokens))] = 2
-        stated = {_bank_key(raw) for raw in stated_by.get(shape, {})}
-        if len(stated) == 1 and "" not in stated:
-            (said,) = stated
-            if not is_method_only(said):
-                buckets.setdefault((BANK_NAMES, said), []).append(shape)
-                needs[(BANK_NAMES, said)] = 2
     # The longer opening wins where it reaches its need: the one-word bucket keeps only the shapes
     # that no qualifying two-word opening holds.
     longer = {
@@ -1108,7 +1195,7 @@ def propose_groups(
 
     found: list[Proposal] = []
     broad: list[Proposal] = []
-    for (rule, bucket_key), members in _one_rule_groups(buckets, needs, counts):
+    for (rule, _bucket_key), members in _one_rule_groups(buckets, needs, counts):
         rules = frozenset({rule})
         ordered = tuple(sorted(members, key=lambda s: (-counts[s], s)))
         # The commonest shape, of those the shortest, since a longer one carries a town or a
@@ -1118,29 +1205,17 @@ def propose_groups(
         printed = [token.printed for token in named[best]]
         words = " ".join(printed[:shared] if shared else printed).split()
         held_by_all = frozenset.intersection(*(_words(named[s]) for s in members))
-        bank_name = ""
-        if rule == BANK_NAMES:
-            spellings: Counter[str] = Counter()
-            for shape in members:
-                for raw, rows in stated_by.get(shape, {}).items():
-                    if _bank_key(raw) == bucket_key:
-                        spelt = " ".join(w.capitalize() for w in core_words(shape_of(raw)))
-                        spellings[spelt] += rows
-            bank_name = min(spellings, key=lambda s: (-spellings[s], s))
         proposal = Proposal(
             shared=" ".join(token.printed for token in named[best] if token.norm in held_by_all),
-            name=bank_name or " ".join(word.capitalize() for word in words),
+            name=" ".join(word.capitalize() for word in words),
             shapes=ordered,
             rules=rules,
             transactions=sum(counts[s] for s in members),
             opening=" ".join(" ".join(printed[:shared]).split()),
-            bank_name=bank_name,
         )
         # A group held together by an opening word that says who (the brand of thirteen towns) is
         # as wide as the chain is; one held together by anything else is capped.
-        by_brand = (shared > 0 and is_distinctive(named[best][0].norm, common)) or bool(
-            bank_name
-        )
+        by_brand = shared > 0 and is_distinctive(named[best][0].norm, common)
         if len(members) <= MAX_SHAPES_PROPOSED or by_brand:
             found.append(proposal)
         else:

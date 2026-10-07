@@ -39,10 +39,9 @@ from typing import ClassVar
 import pytest
 
 from obdi.analysis import entities, payment_methods
-from obdi.analysis.entities import BANK_NAMES, count_shapes, propose_groups, shape_of, view_of
+from obdi.analysis.entities import count_shapes, propose_groups, shape_of
 from obdi.analysis.recurring import _TYPE_WORDS, find_recurring
 from obdi.core.models import SourceTier, Transaction
-from obdi.pages.web_entities import render_entities
 
 
 def groups(*descriptions: str, taken: frozenset[str] = frozenset()):
@@ -354,7 +353,7 @@ class TestTheDetectorKeysOnePayeeTheSameWhateverTheSource:
         (series,) = find_recurring(rows, [], self.TODAY)
 
         assert (series.count, series.cadence, series.stopped) == (12, "monthly", False)
-        assert series.shape == "bramblewick leeds"
+        assert series.shape == "bramblewick"
 
     def test_Detector_WhenAWeeklyHabitStatesTheCounterpartyOnAlternateRows_IsStillOneHabit(self):
         start = date(2026, 1, 5)
@@ -376,60 +375,62 @@ class TestTheDetectorKeysOnePayeeTheSameWhateverTheSource:
         )
 
 
-class TestTheBankNamingTwoShapesAsOneMerchant:
-    COUNTS: ClassVar[dict[str, int]] = {
-        "zqx holdings leeds": 5, "pay bwk north": 3, "arden foods": 2,
-    }
+class TestTheDetectorKeysTwoSourcesOfOnePayeeAsOneSeries:
+    """The mixed-source series, with the descriptions as different as two sources print them: the
+    statements' months carry only a description and the feed's months carry the counterparty, and
+    one payment seen by both says they are one payee."""
 
-    def test_Proposal_WhenTheBankNamesTwoShapesAsOneMerchant_AreOneGroupNamedForIt(self):
-        said = {"zqx holdings leeds": {"Bramblewick": 5}, "pay bwk north": {"BRAMBLEWICK": 3}}
+    TODAY = date(2026, 10, 7)
+    MONTHS: ClassVar[list[tuple[int, int]]] = [
+        (2025, 10), (2025, 11), (2025, 12), (2026, 1), (2026, 2), (2026, 3),
+        (2026, 4), (2026, 5), (2026, 6), (2026, 7), (2026, 8), (2026, 9),
+    ]
 
-        (group,) = propose_groups(self.COUNTS, counterparties=said).groups
+    def test_Detector_WhenAPaymentSeenByBothSourcesLinksTheDescriptions_IsOneLiveSeries(self):
+        rows = [
+            row(date(y, m, 15), -999, "ZQX HOLDINGS LEEDS 8841", "", i)
+            for i, (y, m) in enumerate(self.MONTHS[:6])
+        ] + [
+            row(date(y, m, 15), -999, "PAY BWK", "Bramblewick", i)
+            for i, (y, m) in enumerate(self.MONTHS[6:], start=6)
+        ]
+        rows[5] = row(date(2026, 3, 15), -999, "ZQX HOLDINGS LEEDS 8841", "Bramblewick", 5)
 
-        assert set(group.shapes) == {"zqx holdings leeds", "pay bwk north"}
-        assert group.rules == frozenset({BANK_NAMES})
-        assert group.name == "Bramblewick"
-        assert group.bank_name == "Bramblewick"
+        (series,) = find_recurring(rows, [], self.TODAY)
 
-    def test_Proposal_WhenTheBankNamesItSpeltWithAPluralOrCode_StillJoinsThem(self):
-        said = {"zqx holdings leeds": {"Bramblewicks Ltd": 5}, "pay bwk north": {"Bramblewick": 3}}
+        assert (series.count, series.cadence, series.stopped) == (12, "monthly", False)
+        assert series.shape == "bramblewick"
 
-        (group,) = propose_groups(self.COUNTS, counterparties=said).groups
+    def test_Detector_WhenNoPaymentLinksTheDescriptions_TheTwoNamesStandAndAreTwoSeries(self):
+        rows = [
+            row(date(y, m, 15), -999, "ZQX HOLDINGS LEEDS 8841", "", i)
+            for i, (y, m) in enumerate(self.MONTHS[:6])
+        ] + [
+            row(date(y, m, 15), -999, "PAY BWK", "Bramblewick", i)
+            for i, (y, m) in enumerate(self.MONTHS[6:], start=6)
+        ]
 
-        assert len(group.shapes) == 2
+        shapes = {series.shape for series in find_recurring(rows, [], self.TODAY)}
 
-    def test_Proposal_WhenOneShapesRowsCarryTwoCounterparties_ItJoinsNeitherByThisRule(self):
-        said = {
-            "zqx holdings leeds": {"Bramblewick": 3, "Other Merchant": 2},
-            "pay bwk north": {"Bramblewick": 3},
-            "arden foods": {"Other Merchant": 2},
-        }
+        assert shapes == {"zqx holdings leeds", "bramblewick"}
 
-        assert propose_groups(self.COUNTS, counterparties=said).groups == ()
+    def test_Detector_WhenTwoHousematesPayOneReference_AreTwoSeries(self):
+        rows = [
+            row(date(y, m, 1), -50000, "RENT", who, i * 2 + k)
+            for i, (y, m) in enumerate(self.MONTHS)
+            for k, who in enumerate(("Alex Rowan", "Sam Okafor"))
+        ]
 
-    def test_Proposal_WhenTheMixedShapeSitsBesideTwoThatAgree_OnlyThoseTwoJoin(self):
-        counts = {**self.COUNTS, "pay bwk south": 1}
-        said = {
-            "zqx holdings leeds": {"Bramblewick": 3, "Other Merchant": 2},
-            "pay bwk north": {"Bramblewick": 3},
-            "pay bwk south": {"Bramblewick": 1},
-        }
+        shapes = {series.shape for series in find_recurring(rows, [], self.TODAY)}
 
-        (group,) = propose_groups(counts, counterparties=said).groups
+        assert shapes == {"alex rowan", "sam okafor"}
 
-        assert set(group.shapes) == {"pay bwk north", "pay bwk south"}
+    def test_Detector_WhenOneHousematePaysTwelveReferences_IsOneSeries(self):
+        rows = [
+            row(date(y, m, 1), -50000, f"{date(y, m, 1):%b} RENT".upper(), "Alex Rowan", i)
+            for i, (y, m) in enumerate(self.MONTHS)
+        ]
 
-    def test_Proposal_WhenNoShapeStatesACounterparty_IsExactlyWhatItWas(self):
-        assert propose_groups(self.COUNTS, counterparties={}).groups == ()
-        assert propose_groups(self.COUNTS).groups == ()
+        (series,) = find_recurring(rows, [], self.TODAY)
 
-    def test_Proposal_WhenOnlyOneShapeIsNamed_NothingJoins(self):
-        assert propose_groups(self.COUNTS, counterparties={"arden foods": {"X": 2}}).groups == ()
-
-    def test_Page_WhenValuesAreShown_SaysWhyWithTheBanksName(self):
-        said = {"zqx holdings leeds": {"Bramblewick": 5}, "pay bwk north": {"Bramblewick": 3}}
-        view = view_of(self.COUNTS, [], counterparties=said)
-
-        page = render_entities(view, unmasked=True).decode("utf-8")
-
-        assert "the bank names both as “Bramblewick”" in page
+        assert (series.shape, series.count, series.cadence) == ("alex rowan", 12, "monthly")

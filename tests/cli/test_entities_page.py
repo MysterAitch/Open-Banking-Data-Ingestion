@@ -111,6 +111,7 @@ class TestTheMaskedPage:
         assert response.status_code == 200
         assert summary_of(response.text) == (
             "5 payee names across every account; 0 names gathered into 0 entities. "
+            "Names: 5 from the bank's merchant name. "
             "1 group could be one payee, covering 3 names."
         )
         for hidden in ("fernhollow", "marlowe", "grocers", "bakery", "11.11", "17.77"):
@@ -217,6 +218,7 @@ class TestMergingAGroup:
         assert outcome_of(response.text) == "Merged 3 names into Fernhollow Grocers."
         assert summary_of(response.text) == (
             "5 payee names across every account; 3 names gathered into 1 entity. "
+            "Names: 5 from the bank's merchant name. "
             "No group of names looks like one payee."
         )
 

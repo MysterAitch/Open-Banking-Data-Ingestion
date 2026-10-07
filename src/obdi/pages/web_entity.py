@@ -99,10 +99,12 @@ def _names(page: EntityPage, *, unmasked: bool) -> str:
             "<h3>Names</h3><p class=\"ent-why\">No name is under it yet. A name joins it when "
             "you gather one under it, or when a rule below matches one.</p>"
         )
+    orphaned = page.orphaned
+    live = [shape for shape in entity.shapes if shape not in orphaned]
     if not unmasked:
         return (
             f'<h3>Names</h3><p class="ent-why">{across}.</p>'
-            f"{_masked_days(entity.shapes, page.view)}"
+            f"{_masked_days(live, page.view)}{_orphans(orphaned, unmasked=False)}"
         )
     lines = "".join(
         f'<li><span class="txt">{_esc(shape)}</span>{_by_rule_tag(shape, entity)}'
@@ -110,9 +112,27 @@ def _names(page: EntityPage, *, unmasked: bool) -> str:
         f'<form method="post" action="{SPLIT_ROUTE}">'
         f'<input type="hidden" name="shape" value="{_esc(shape)}">{_hidden(entity.id)}'
         '<button class="tap" type="submit">Split apart</button></form></li>'
-        for shape in entity.shapes
+        for shape in live
     )
-    return f'<h3>Names</h3><p class="ent-why">{across}.</p><ul class="ent-names">{lines}</ul>'
+    return (
+        f'<h3>Names</h3><p class="ent-why">{across}.</p><ul class="ent-names">{lines}</ul>'
+        f"{_orphans(orphaned, unmasked=True)}"
+    )
+
+
+def _orphans(orphaned: tuple[str, ...], *, unmasked: bool) -> str:
+    """The names attached to the entity that no transaction has now, each as it was attached
+    (`EntityPage.orphaned` says why one can be left so); a count where the page is masked."""
+    if not orphaned:
+        return ""
+    heading = f"Attached to a name no row has now: {len(orphaned):,}"
+    if not unmasked:
+        return f'<p class="ent-why ent-orphans">{heading}.</p>'
+    items = "".join(f'<li><span class="txt">{_esc(shape)}</span></li>' for shape in orphaned)
+    return (
+        f'<p class="ent-why ent-orphans">{heading}: the transactions it was attached to now '
+        f'take their name from what their source states.</p><ul class="ent-names">{items}</ul>'
+    )
 
 
 def _rule_line(line: RuleLine, *, unmasked: bool) -> str:

@@ -70,7 +70,7 @@ from statistics import median_low
 
 from ..core.models import Transaction, TransactionStatus
 from ..ingest.stated_words import words_in
-from .entities import shape_of
+from .entities import Alias, learned_links, name_of
 from .payment_methods import METHODS
 
 #: Fewest occurrences that make a series. Two is a coincidence of a payee and a gap.
@@ -571,14 +571,19 @@ def find_recurring(
     today: date,
     closings: Closings | None = None,
     entities: Mapping[str, str] | None = None,
+    links: Mapping[str, Alias] | None = None,
 ) -> list[Series]:
     """Every series the transactions hold, by account and then by what they are called.
 
+    A row is called what `name_of` says: the counterparty it states, else the one learned for its
+    description from rows seen by two sources (`links`, from `learned_links` over these rows when
+    not given), else its description's shape. A payee seen through a feed in some months and
+    statements in others is therefore one series.
     `pairs` is the pairing pass's (leaving entity, arriving entity) for each proved transfer.
-    `entities` maps a payee shape to the name of the entity the owner gathered it under: the
-    shapes of one entity are one payee here, so a subscription that changed the name it prints
+    `entities` maps a payee name to the name of the entity the owner gathered it under: the
+    names of one entity are one payee here, so a subscription that changed the name it prints
     under, or alternates between two, is one series, named by the entity (`Series.shape`). A
-    shape under no entity is grouped exactly as it was. Money in and money out stay apart, and a
+    name under no entity is grouped as it is. Money in and money out stay apart, and a
     transfer is found by its legs, never by a name.
     `closings` is each account's held statement closings, which explain a pulled series' missed
     slot where the card it pays owed nothing.
@@ -586,6 +591,8 @@ def find_recurring(
     replaced by its settlement, and history is not money.
     """
     rows = [row for row in transactions if counts_as_occurrence(row)]
+    if links is None:
+        links = learned_links((row.description, row.counterparty) for row in rows)
     by_entity = {row.entity_id: row for row in rows}
     arriving: dict[str, Transaction] = {}
     for leaving_id, arriving_id in pairs:
@@ -610,7 +617,7 @@ def find_recurring(
             shapes[between] = ""
             groups[between].append(_Leg(row, opposite.account_id))
             continue
-        shape = shape_of(row.description)
+        shape = name_of(row.description, row.counterparty, links).name
         if not shape:
             continue
         gathered = (entities or {}).get(shape)

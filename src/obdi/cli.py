@@ -24,7 +24,17 @@ from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
-from .analysis.entities import EntitiesView, EntityPage, RuleTrial
+from .analysis.entities import (
+    Alias,
+    Covered,
+    EntitiesView,
+    EntityPage,
+    Named,
+    RuleTrial,
+    learned_links,
+    name_of,
+    name_origins,
+)
 from .analysis.recurring import RecurringFindings
 from .core.errors import DataError
 from .core.money import parse_amount
@@ -3874,12 +3884,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             transactions = store.all_transactions()
             pairs = store.confirmed_transfer_pairs()
             held, _unusable = statement_balances(store)
-            from .analysis.entities import count_shapes, shape_entities
+            from .analysis.entities import shape_entities
             from .analysis.recurring import counts_as_occurrence
 
-            held_names = count_shapes(
-                t.description for t in transactions if counts_as_occurrence(t)
-            )
+            links, named = _name_rows([t for t in transactions if counts_as_occurrence(t)])
+            held_names = {n: o.rows for n, o in name_origins(named).items()}
             gathered = {
                 shape: name for shape, (_id, name) in shape_entities(store, held_names).items()
             }
@@ -3888,15 +3897,38 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             owed = (closing.day, closing.balance_minor)
             closings.setdefault(closing.account_ref, []).append(owed)
         today = local_day(datetime.now(UTC))
-        found = find_recurring(transactions, pairs, today, closings, entities=gathered)
+        found = find_recurring(transactions, pairs, today, closings, entities=gathered, links=links)
         return RecurringFindings(found, today)
 
+    def _name_rows(rows: Sequence[Transaction]) -> tuple[dict[str, Alias], list[Named]]:
+        """The links learned from the rows and the name of each, from the one read of the rows
+        a page already makes: no query per name."""
+        links = learned_links((t.description, t.counterparty) for t in rows)
+        return links, [name_of(t.description, t.counterparty, links) for t in rows]
+
     def _shape_counts(store: Store) -> dict[str, int]:
-        from .analysis.entities import count_shapes
         from .analysis.recurring import counts_as_occurrence
 
-        return count_shapes(
-            t.description for t in store.all_transactions() if counts_as_occurrence(t)
+        _links, named = _name_rows(
+            [t for t in store.all_transactions() if counts_as_occurrence(t)]
+        )
+        return {n: o.rows for n, o in name_origins(named).items()}
+
+    def _covered(t: Transaction, item: Named, names: AccountsShown) -> Covered:
+        from .read.ledger import row_anchor
+
+        return Covered(
+            t.value_date,
+            t.account_id,
+            names.of(t.account_id).label,
+            t.amount_minor,
+            t.currency,
+            t.description,
+            row_anchor(t.entity_id),
+            counterparty=t.counterparty,
+            kind=item.kind,
+            via=item.via,
+            support=item.support,
         )
 
     def entities_data() -> EntitiesView:
@@ -3904,46 +3936,40 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         made from them - one whole-table read of the transactions, whatever the store's size."""
         from .analysis.entities import (
             COVERED_SHOWN,
-            Covered,
             count_row_legs,
-            count_shapes,
             entities_of,
-            shape_counterparties,
-            shape_of,
-            shape_readings,
+            name_readings,
             view_of,
         )
         from .analysis.recurring import counts_as_occurrence
-        from .read.ledger import row_anchor
 
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
             leg_ids = store.confirmed_transfer_entities()
             names = account_names(store)
+            _links, named = _name_rows(rows)
             listed: dict[str, list[Covered]] = {}
-            for t in sorted(rows, key=lambda r: (r.value_date, r.entity_id), reverse=True):
-                shape = shape_of(t.description)
+            order = sorted(
+                range(len(rows)),
+                key=lambda i: (rows[i].value_date, rows[i].entity_id),
+                reverse=True,
+            )
+            for i in order:
+                shape = named[i].name
                 shown = listed.setdefault(shape, [])
                 if shape and len(shown) < COVERED_SHOWN:
-                    shown.append(
-                        Covered(
-                            t.value_date,
-                            t.account_id,
-                            names.of(t.account_id).label,
-                            t.amount_minor,
-                            t.currency,
-                            t.description,
-                            row_anchor(t.entity_id),
-                        )
-                    )
-            counts = count_shapes(t.description for t in rows)
+                    shown.append(_covered(rows[i], named[i], names))
+            origins = name_origins(named)
+            counts = {n: o.rows for n, o in origins.items()}
             return view_of(
                 counts,
                 entities_of(store, counts),
-                count_row_legs((t.description, t.entity_id in leg_ids) for t in rows),
+                count_row_legs(
+                    (named[i].name, rows[i].entity_id in leg_ids) for i in range(len(rows))
+                ),
                 {shape: tuple(found) for shape, found in listed.items() if shape},
-                shape_counterparties((t.description, t.counterparty) for t in rows),
-                shape_readings(t.description for t in rows),
+                origins,
+                name_readings([(t.description, t.counterparty) for t in rows], named),
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
@@ -3956,20 +3982,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def entity_page(entity_id: int) -> EntityPage | None:
         """One entity with every name under it and the newest transactions of each: one
         whole-table read of the transactions, whatever the store's size."""
-        from .analysis.entities import (
-            COVERED_SHOWN,
-            Covered,
-            count_shapes,
-            entities_of,
-            entity_page_of,
-            shape_of,
-        )
+        from .analysis.entities import COVERED_SHOWN, entities_of, entity_page_of
         from .analysis.recurring import counts_as_occurrence
-        from .read.ledger import row_anchor
 
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
-            counts = count_shapes(t.description for t in rows)
+            _links, named = _name_rows(rows)
+            origins = name_origins(named)
+            counts = {n: o.rows for n, o in origins.items()}
             entities = entities_of(store, counts)
             found = next((e for e in entities if e.id == entity_id), None)
             if found is None:
@@ -3977,29 +3997,25 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             names = account_names(store)
             wanted = set(found.shapes)
             listed: dict[str, list[Covered]] = {}
-            for t in sorted(rows, key=lambda r: (r.value_date, r.entity_id), reverse=True):
-                shape = shape_of(t.description)
+            order = sorted(
+                range(len(rows)),
+                key=lambda i: (rows[i].value_date, rows[i].entity_id),
+                reverse=True,
+            )
+            for i in order:
+                shape = named[i].name
                 if shape not in wanted:
                     continue
                 shown = listed.setdefault(shape, [])
                 if len(shown) < COVERED_SHOWN:
-                    shown.append(
-                        Covered(
-                            t.value_date,
-                            t.account_id,
-                            names.of(t.account_id).label,
-                            t.amount_minor,
-                            t.currency,
-                            t.description,
-                            row_anchor(t.entity_id),
-                        )
-                    )
+                    shown.append(_covered(rows[i], named[i], names))
             return entity_page_of(
                 entity_id,
                 entities,
                 store.entity_rules(),
                 counts,
                 {shape: tuple(covered) for shape, covered in listed.items()},
+                origins,
             )
 
     def entity_trial(entity_id: int, kind: str, words: str) -> RuleTrial:

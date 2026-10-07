@@ -16,13 +16,17 @@ unmasked page, the outcome said above it.
 from __future__ import annotations
 
 import html
+from collections import Counter
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from ..analysis.entities import (
-    BANK_NAMES,
+    ALIAS,
+    COUNTERPARTY_STEPS,
     COVERED_SHOWN,
+    KIND_SENTENCES,
+    LADDER,
     OPENING_WORDS,
     SAME_WORDS,
     SHAPE_STEPS,
@@ -71,6 +75,24 @@ NAME_LENGTH = 120
 
 
 
+def _sources_sentence(view: EntitiesView) -> str:
+    """How many names came from each kind of identifier (`LADDER`), in the words of
+    `KIND_SENTENCES`, and how many transactions took a name through payments seen by two sources.
+    Empty where the view carries no origins, and counts only, so the masked page says it too."""
+    if not view.origins:
+        return ""
+    by_kind = Counter(origin.kind for origin in view.origins.values())
+    parts = [
+        f"{by_kind[kind]:,} from the {KIND_SENTENCES[kind]}"
+        for kind in LADDER
+        if by_kind[kind] and kind != ALIAS
+    ]
+    linked = sum(origin.linked for origin in view.origins.values())
+    if linked:
+        parts.append(f"{plural(linked, 'transaction')} named through payments seen by both")
+    return f" Names: {'; '.join(parts)}." if parts else ""
+
+
 def summary_line(view: EntitiesView) -> str:
     """Counts only: names held, how many are under an entity, and what the rules offer."""
     gathered = sum(len(entity.shapes) for entity in view.entities)
@@ -81,6 +103,7 @@ def summary_line(view: EntitiesView) -> str:
         f"{plural(gathered, 'name')} gathered into "
         f"{plural(len(view.entities), 'entity', 'entities')}."
     )
+    held += _sources_sentence(view)
     if not groups:
         offered = "No group of names looks like one payee"
     elif len(groups) == 1:
@@ -107,8 +130,6 @@ def _why(group: Proposal) -> str:
     rule to state is refused here, so a page never shows a proposal with no reason.
     """
     both = "both" if len(group.shapes) == 2 else "all"
-    if BANK_NAMES in group.rules and group.bank_name:
-        return f"the bank names {both} as “{group.bank_name}”"
     if OPENING_WORDS in group.rules and group.opening:
         return f"{both} begin with “{group.opening}”"
     if SAME_WORDS in group.rules and group.shared:
@@ -191,6 +212,20 @@ def _count_or_rows(shape: str, view: EntitiesView) -> str:
     )
 
 
+def _counterparty_sentence() -> str:
+    """How a name is made where a payment states its counterparty, and where it does not but its
+    description has been seen with one: said from `COUNTERPARTY_STEPS`, so it cannot drift."""
+    described = {sentence for sentence, _step in SHAPE_STEPS}
+    shared = sum(1 for sentence, _step in COUNTERPARTY_STEPS if sentence in described)
+    extra = [sentence for sentence, _step in COUNTERPARTY_STEPS if sentence not in described]
+    return (
+        "Where a payment states who it was to, the name is that counterparty instead, made by "
+        f"the first {shared} of those steps and then: {'; '.join(extra)}. Where it states none, "
+        "but other payments with the same description were seen by two sources and state one, "
+        "it takes that counterparty."
+    )
+
+
 def names_method_html(lead: str = "How names are made and compared") -> str:
     """The fold that says how a name is made from a printed description and how two are
     compared, from the constants the code runs on: the steps, the payment-method phrases, and
@@ -202,6 +237,7 @@ def names_method_html(lead: str = "How names are made and compared") -> str:
         f'<details class="ent-fold ent-method"><summary class="muted">{_esc(lead)}</summary>'
         '<p class="ent-why">A name is made from the description a bank prints, by these steps '
         f"in order:</p>{_steps_list([sentence for sentence, _step in SHAPE_STEPS])}"
+        f'<p class="ent-why">{_esc(_counterparty_sentence())}</p>'
         f'<p class="ent-why">{_esc(COMPARISON_SENTENCE)}</p>'
         f'<p class="ent-why">Payment methods set aside before a name: {_esc(methods)}.</p>'
         f'<p class="ent-why">Codes ignored at the end of a name: {_esc(ignored)}. '
