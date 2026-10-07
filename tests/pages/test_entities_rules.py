@@ -19,8 +19,9 @@ Payment-method words (rule 1):
 Spellings of one name (rule 2):
   - "WM MORRISON", "WM MORRISONS", and "W M MORRISON" are one group of three, named for whichever
     spelling is commonest (here "Wm Morrison", printed four times against two and one).
-  - "B&M" and "B M", "M&S" and "M S" and "MARKS AND SPENCER" and "MARKS SPENCER" are one group
-    each; the ampersand and "and" are not part of the name.
+  - "B&M HOMESTORE" and "B M HOMESTORE" are one group, and "MARKS AND SPENCER FOOD" and "MARKS
+    SPENCER FOOD" are one group, but initials are never joined to a spelled-out name; the
+    ampersand and "and" are not part of the name.
   - "TESCO STORES", "TESCO STORES UK", "TESCO STORES LTD", "TESCO STORES GB", and
     "TESCO STORES CO UK" are one group of five, named "Tesco Stores".
   - Two different firms are never joined by a code: "ARDEN LTD" and "BRAMLEY LTD" stay apart.
@@ -150,12 +151,14 @@ class TestOneNameSpeltSeveralWays:
         assert len(group.shapes) == 3
         assert group.name == "Marks Spencer"
 
-    def test_Proposal_WhenInitialsAndTheFullNameAreBothPrinted_AreOneGroup(self):
+    def test_Proposal_WhenInitialsAndTheFullNameAreBothPrinted_AreNotJoined(self):
+        # Initials match initials only (see `test_entities_initials`): spelling the name out
+        # cannot be told from any other pair of words with the same first letters.
         (group,) = groups(
             "M&S FOOD", "M S FOOD", "MARKS SPENCER FOOD", "MARKS AND SPENCER FOOD"
         )
 
-        assert len(group.shapes) == 3
+        assert set(group.shapes) == {"marks spencer food", "marks and spencer food"}
 
     def test_Proposal_WhenCountryAndCompanyCodesTrail_OneRetailerIsOneGroupNamedWithoutThem(self):
         (group,) = groups(

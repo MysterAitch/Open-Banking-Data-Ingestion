@@ -3,9 +3,10 @@
 A shape (`entities.shape_of`) is what a bank printed with its numbers left out. Two shapes are one
 payee's where their NAMES agree, and the name is less than the shape: a payment method opens it
 (`payment_methods`), a country or a company form trails it, a plural or an ampersand or spaced
-initials spell one word several ways. This module reduces a shape to tokens that compare equal
-wherever those differences are all that differ, and keeps the printed words beside them, since a
-name offered to the owner is what the bank printed (title-cased), never the reduced form.
+initials spell one word several ways. Initials match initials only, never a spelled-out name.
+This module reduces a shape to tokens that compare equal wherever those differences are all that
+differ, and keeps the printed words beside them, since a name offered to the owner is what the
+bank printed (title-cased), never the reduced form.
 """
 
 from __future__ import annotations
@@ -34,9 +35,11 @@ DROPPED = frozenset({"and"})
 #: words, not "bu" and "ga".
 _PLURAL_FLOOR = 3
 
-#: Longest run of initials ("m s", "b m", "h m v") taken as one brand and matched against the
-#: initials of the same number of whole words.
-_MAX_INITIALS = 3
+#: Fewest letters a compared word needs to tell one payee from another. Initials ("ms", "bm") and
+#: two-letter codes are matched against each other only: measured on a bank's "M&S BANK" printed
+#: with a number fused to it, bare initials were also made to match the initials of spelled-out
+#: names, and a software maker and a burger chain were proposed as one payee with the bank.
+MIN_DISTINCTIVE_LETTERS = 3
 
 
 @dataclass(frozen=True)
@@ -91,57 +94,13 @@ def tokens_of(shape: str) -> tuple[Token, ...]:
     return tuple(found)
 
 
-def is_joined_initials(token: Token) -> bool:
-    """Whether the token is spaced one-letter words run together ("w m")."""
-    return " " in token.printed and all(len(w) == 1 for w in token.printed.split())
-
-
-def align_initials(named: dict[str, tuple[Token, ...]]) -> dict[str, tuple[Token, ...]]:
-    """Make "marks spencer" the same name as "m s" wherever both are present.
-
-    A shape's opening whole words whose initials spell a joined-initials token that another shape
-    opens with are replaced by that token. Only initials some shape actually prints are used, so
-    no initials are guessed; the cost is that two unrelated names with the same initials ("mary
-    smith", "m s") meet, which the owner sees in the ticked group and unticks.
-    """
-    brands = {
-        shape_tokens[0].norm
-        for shape_tokens in named.values()
-        if shape_tokens
-        and is_joined_initials(shape_tokens[0])
-        and 2 <= len(shape_tokens[0].norm) <= _MAX_INITIALS
-    }
-    if not brands:
-        return named
-    aligned: dict[str, tuple[Token, ...]] = {}
-    for shape, shape_tokens in named.items():
-        aligned[shape] = _collapsed(shape_tokens, brands)
-    return aligned
-
-
-def _collapsed(shape_tokens: tuple[Token, ...], brands: set[str]) -> tuple[Token, ...]:
-    for size in range(_MAX_INITIALS, 1, -1):
-        opening = shape_tokens[:size]
-        if len(opening) < size or any(len(t.norm) < 2 or " " in t.printed for t in opening):
-            continue
-        if opening[0].norm in brands:
-            # Already opens with the brand written as one word ("wm morrison"): its first letters
-            # spelling the brand again is a coincidence, not the brand spelt out.
-            continue
-        initials = "".join(t.printed[0] for t in opening)
-        if initials in brands:
-            joined = Token(initials, " ".join(t.printed for t in opening))
-            return (joined, *shape_tokens[size:])
-    return shape_tokens
-
-
 def distinctive_words(shape_tokens: Sequence[Token]) -> frozenset[str]:
     """The comparable words of a name that can tell one payee from another: not a method word, not
-    an ignored code, not a single letter."""
+    an ignored code, not a word of `MIN_DISTINCTIVE_LETTERS` letters or fewer than that."""
     return frozenset(
         token.norm
         for token in shape_tokens
-        if len(token.norm) > 1
+        if len(token.norm) >= MIN_DISTINCTIVE_LETTERS
         and token.norm not in METHOD_WORDS
         and token.norm not in IGNORED_TRAILING
         and token.norm not in DROPPED

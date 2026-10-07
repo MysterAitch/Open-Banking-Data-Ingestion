@@ -24,8 +24,8 @@ from ..ingest.entity_records import (
 )
 from ..ingest.identity import normalise_description
 from .entity_tokens import (
+    MIN_DISTINCTIVE_LETTERS,
     Token,
-    align_initials,
     core_words,
     distinctive_words,
     is_method_only,
@@ -64,8 +64,31 @@ _DATE_WORDS = frozenset(
 )
 
 
+#: Fewest letters a word must open with for them to be kept when digits follow (`_shape`).
+MIN_FUSED_LETTERS = 3
+
+
+def _letters_before_digits(word: str) -> str:
+    """The word's own letters where it holds digits too, or "" where they are not a word.
+
+    A word that opens with `MIN_FUSED_LETTERS` letters or more and then runs into a number
+    ("bank0806249308", "tesco1234") is the name fused to its reference, and the name is kept; a
+    word with digits and fewer leading letters ("ab12cd", "a12") is a code and goes whole. A
+    bank printing "M&S BANK0806249308" lost the whole word, and the shape left was two bare
+    initials, which then met every name that begins "m" and "s".
+    """
+    if not any(c.isdigit() for c in word):
+        return word
+    run = 0
+    while run < len(word) and word[run].isalpha():
+        run += 1
+    return word[:run] if run >= MIN_FUSED_LETTERS else ""
+
+
 def _shape(text: str) -> str:
-    words = [w for w in normalise_description(text).split() if not any(c.isdigit() for c in w)]
+    words = [
+        w for w in map(_letters_before_digits, normalise_description(text).split()) if w
+    ]
     kept: list[str] = []
     index = 0
     while index < len(words):
@@ -83,8 +106,9 @@ def _shape(text: str) -> str:
 
 def shape_of(text: str) -> str:
     """The shape of a counterparty as printed: the normalised description without any word that
-    holds a digit, since a reference, a store number, a mandate, or a card tail is what changes
-    between two sightings of one payee, and without the date a card payment prints ("on 12 apr").
+    holds a digit (bar the letters a name is fused to, `_letters_before_digits`), since a
+    reference, a store number, a mandate, or a card tail is what changes between two sightings of
+    one payee, and without the date a card payment prints ("on 12 apr").
     Empty where nothing but codes is left.
 
     The one definition: the recurring detector and the Entities page both read it from here. It
@@ -386,6 +410,13 @@ def _words(named: Sequence[Token]) -> frozenset[str]:
     return frozenset(token.norm for token in named if len(token.norm) > 1)
 
 
+def _tells_apart(norms: Collection[str]) -> bool:
+    """Whether the compared words hold one of `MIN_DISTINCTIVE_LETTERS` letters or more. Two
+    shapes that share only initials and short codes ("m s", "ab cd") are not shown to be one
+    payee, since the same few letters open a great many unrelated names."""
+    return any(len(norm) >= MIN_DISTINCTIVE_LETTERS for norm in norms)
+
+
 def _common_opening(members: Collection[Sequence[Token]]) -> int:
     """How many leading tokens every member shares (compared, not printed)."""
     run: Sequence[str] | None = None
@@ -425,11 +456,7 @@ def common_tokens(named: Mapping[str, Sequence[Token]]) -> frozenset[str]:
 def is_distinctive(norm: str, common: Collection[str]) -> bool:
     """Whether a compared word can say who a payee is: not one letter, not a payment method, not
     a country or company code, and not one of the commonest words."""
-    return (
-        len(norm) > 1
-        and norm not in common
-        and norm in distinctive_words((Token(norm, norm),))
-    )
+    return norm not in common and norm in distinctive_words((Token(norm, norm),))
 
 
 #: Most shapes a proposed group may hold. Measured on the invented household's large store: the
@@ -649,9 +676,7 @@ def suggest_for_entities(
     targets = [e for e in entities if e.role != OWNER_ROLE and e.shapes]
     if not targets:
         return ()
-    common = common_tokens(
-        align_initials({shape: tokens_of(shape) for shape in counts})
-    )
+    common = common_tokens({shape: tokens_of(shape) for shape in counts})
     words = {e.id: _entity_words(e, common) for e in targets}
     held = {shape for e in entities for shape in e.shapes}
     found: dict[int, list[tuple[str, frozenset[str]]]] = {}
@@ -700,7 +725,7 @@ def propose_groups(
     group is at least two shapes and at most `MAX_SHAPES_PROPOSED`, largest first.
     """
     stated_by = counterparties or {}
-    named = align_initials({shape: tokens_of(shape) for shape in counts})
+    named = {shape: tokens_of(shape) for shape in counts}
     common = common_tokens(named)
     free = sorted(
         shape
@@ -722,14 +747,16 @@ def propose_groups(
         tokens = named[shape]
         if len(tokens) >= MIN_OPENING_WORDS:
             opening = tuple(t.norm for t in tokens[:MIN_OPENING_WORDS])
-            buckets.setdefault((OPENING_WORDS, opening), []).append(shape)
-            needs[(OPENING_WORDS, opening)] = 2
+            if _tells_apart(opening):
+                buckets.setdefault((OPENING_WORDS, opening), []).append(shape)
+                needs[(OPENING_WORDS, opening)] = 2
         first = tokens[0].norm
         if is_distinctive(first, common):
             buckets.setdefault((OPENING_WORDS, (first,)), []).append(shape)
             needs[(OPENING_WORDS, (first,))] = MIN_ONE_WORD_VARIANTS
-        buckets.setdefault((SAME_WORDS, _words(tokens)), []).append(shape)
-        needs[(SAME_WORDS, _words(tokens))] = 2
+        if _tells_apart(_words(tokens)):
+            buckets.setdefault((SAME_WORDS, _words(tokens)), []).append(shape)
+            needs[(SAME_WORDS, _words(tokens))] = 2
         stated = {_bank_key(raw) for raw in stated_by.get(shape, {})}
         if len(stated) == 1 and "" not in stated:
             (said,) = stated
