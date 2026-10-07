@@ -42,6 +42,7 @@ import httpx
 from ...core.jsontypes import JsonObject, as_object, nested, rows, text, whole_number
 from ...core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from ..identity import artefact_digest, content_key
+from ..party_fields import source_party_id, uk_account
 
 API_HOST = "https://api.starlingbank.com"
 
@@ -413,6 +414,11 @@ def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:
         booking_date=settled,
         description=description,
         counterparty=counterparty,
+        party_account=uk_account(
+            text(item, "counterPartySubEntityIdentifier"),
+            text(item, "counterPartySubEntitySubIdentifier"),
+        ),
+        party_source_id=source_party_id("starling", text(item, "counterPartyUid")),
         status=status,
         source="starling",
         source_id=text(item, "feedItemUid") or None,

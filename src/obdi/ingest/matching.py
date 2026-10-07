@@ -1766,6 +1766,10 @@ def supersede(previous: Transaction, observation: Transaction) -> Transaction:
         # A later observation may not carry a counterparty the earlier one did.
         # Losing it would degrade the payee on every replay.
         counterparty=observation.counterparty or previous.counterparty,
+        # Kept first for the same reason, and each on its own: a statement sighting states
+        # neither, and the feed's stay.
+        party_account=observation.party_account or previous.party_account,
+        party_source_id=observation.party_source_id or previous.party_source_id,
     )
 
 

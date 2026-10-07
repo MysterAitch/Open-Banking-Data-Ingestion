@@ -193,6 +193,8 @@ JUSTIFIED = {
     ("test_schema_migrations.py", "transaction_sources"): "a store predating artefact "
     "links",
     ("test_schema_migrations.py", "valuations"): "a store predating income entitlements",
+    ("test_party_fields.py", "transactions"): "a row of a store predating the party columns, "
+    "which the current writer cannot make: it always writes both",
     # Deletes and updates, added once the scanner covered them too. Every one
     # constructs a state the application prevents, which is the state under test:
     # rewinding a migration marker so the upgrade runs again, corrupting a copy so

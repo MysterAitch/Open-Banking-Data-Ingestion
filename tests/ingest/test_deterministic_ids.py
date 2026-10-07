@@ -154,3 +154,32 @@ class TestReplaysReproduceIdentity:
         first = entity_id_for(**common, first_artefact_digest="digest-a")
         second = entity_id_for(**common, first_artefact_digest="digest-b")
         assert first != second
+
+
+class TestThePartyFieldsAreNotIdentity:
+    def test_ATransferWithAndWithoutItsPartyFields_HasTheSameContentKeyAndEntityId(
+        self, tmp_path
+    ):
+        """The party's account and the source's id for it are evidence about WHO, not part of
+        WHAT the payment is: adding them to a row must not move the key an export dedupes on,
+        the id Actual's replay keys on, or the id a rebuild reproduces."""
+        from obdi.ingest.pipeline import reconcile_batch
+
+        bare = _item("u-1", 1500)
+        stated = {
+            **bare,
+            "counterPartyUid": "aaaa1111-0000-4000-8000-000000000001",
+            "counterPartySubEntityIdentifier": "112233",
+            "counterPartySubEntitySubIdentifier": "12345678",
+        }
+        seen = []
+        for name, item in (("bare", bare), ("stated", stated)):
+            row = starling.to_transaction(item, account_id="a1")
+            assert row is not None
+            with Store(tmp_path / f"{name}.sqlite3") as store:
+                reconcile_batch(store, [row], digest="same-evidence")
+                stored = store.all_transactions()[0]
+            seen.append((stored.content_key, stored.entity_id, stored.party_account))
+
+        assert seen[0][:2] == seen[1][:2]
+        assert (seen[0][2], seen[1][2]) == ("", "112233-12345678")

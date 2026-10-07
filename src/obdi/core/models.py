@@ -213,6 +213,12 @@ class Transaction:
     # transaction never persists it.
     transfer_confirmed: bool = False
     counterparty: str = ""
+    # The other party's account as the source states it, in the one form a second source can
+    # equal (`ingest.party_fields`), and the source's own id for the party, prefixed by the
+    # source. Empty where the source states none. Derived from the raw record, kept by matching
+    # as the counterparty is, and NOT part of identity: neither reaches the content key or the id.
+    party_account: str = ""
+    party_source_id: str = ""
     # The provider's own record, kept verbatim for provenance. Typed as
     # unnarrowed on purpose: nothing here should read a field out of it
     # without narrowing first, and the raw layer is the place for that.

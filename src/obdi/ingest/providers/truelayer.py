@@ -30,6 +30,7 @@ from ...core.jsontypes import JsonObject, as_object, rows, text
 from ...core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from ...core.money import parse_amount
 from ..identity import artefact_digest, content_key
+from ..party_fields import iban_account
 
 AUTH_HOST = "https://auth.truelayer.com"
 API_HOST = "https://api.truelayer.com"
@@ -398,6 +399,15 @@ def fetch_transactions(
     raise _refusal("Transaction fetch failed", last_response)
 
 
+def _party_account(record: JsonObject) -> str:
+    """The other party's account where the provider states an IBAN for it (`meta`), else empty."""
+    meta = record.get("meta")
+    if not isinstance(meta, dict):
+        return ""
+    iban = meta.get("counter_party_iban")
+    return iban_account(iban) if isinstance(iban, str) else ""
+
+
 def to_transaction(
     record: JsonObject, *, account_id: str, pending: bool = False
 ) -> Transaction:
@@ -455,6 +465,7 @@ def to_transaction(
         booking_date=when,
         description=description,
         counterparty=merchant,
+        party_account=_party_account(record),
         status=TransactionStatus.PENDING if pending else TransactionStatus.BOOKED,
         source="truelayer",
         # Pending records carry a different id from the settled version of the
@@ -539,6 +550,7 @@ def to_card_transaction(record: JsonObject, *, account_id: str) -> Transaction:
         booking_date=when,
         description=description,
         counterparty=merchant,
+        party_account=_party_account(record),
         status=TransactionStatus.BOOKED,
         source="truelayer",
         source_id=durable_id,

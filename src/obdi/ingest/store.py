@@ -148,7 +148,13 @@ from .stated_words import recorded_words
 #: (a stated name, a description-shape, an account number, a source's id) instead of bare shapes,
 #: so an attachment can say what it was attached as. Every `entity_shapes` row moves across as a
 #: description-kind identifier (`_migrate_entity_identifiers`) and the old table is dropped.
-SCHEMA_VERSION = 26
+#:
+#: 26 -> 27: the `party_account` and `party_source_id` columns on `transactions`: the other party's
+#: account and the source's own id for the party, derived from the raw record. A table that already
+#: exists is not altered by `CREATE TABLE IF NOT EXISTS`, so a store stamped 26 would refuse the
+#: first write and read of a row. The columns are filled by the rebuild from raw every deploy runs;
+#: until then an old row holds '' and is named as it was.
+SCHEMA_VERSION = 27
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -290,6 +296,11 @@ CREATE TABLE IF NOT EXISTS transactions (
     booking_date        TEXT NOT NULL,
     description         TEXT NOT NULL,
     counterparty        TEXT NOT NULL DEFAULT '',
+    -- The other party's account and the source's own id for the party, as the source stated them
+    -- (`party_fields`); '' where it stated none. Derived from the raw record at derive time and
+    -- filled again by a rebuild; not part of the row's identity.
+    party_account       TEXT NOT NULL DEFAULT '',
+    party_source_id     TEXT NOT NULL DEFAULT '',
     status              TEXT NOT NULL,
     source              TEXT NOT NULL,
     -- How far the source's own notion of identity can be trusted.
@@ -1011,8 +1022,8 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'account_id', 'amount_minor', 'artefact_digest', 'booking_date',
         'content_key', 'counterparty', 'currency', 'description', 'entity_id',
         'first_seen_at', 'is_internal_transfer', 'last_seen_at', 'match_tier',
-        'matched_entity_id', 'occurrence', 'raw', 'source', 'source_id', 'status',
-        'tier', 'value_date',
+        'matched_entity_id', 'occurrence', 'party_account', 'party_source_id', 'raw',
+        'source', 'source_id', 'status', 'tier', 'value_date',
     ],
     'transfer_pairs': ['credit_entity_id', 'debit_entity_id'],
     'valuations': [
@@ -1195,16 +1206,18 @@ def _read_date(value: object) -> date | None:
 _UPSERT_TRANSACTION_SQL = """
     INSERT INTO transactions (
         entity_id, account_id, amount_minor, currency, value_date, booking_date,
-        description, counterparty, status, source, tier, source_id, content_key,
-        occurrence, artefact_digest, is_internal_transfer, match_tier,
+        description, counterparty, party_account, party_source_id, status, source, tier,
+        source_id, content_key, occurrence, artefact_digest, is_internal_transfer, match_tier,
         matched_entity_id, raw, first_seen_at, last_seen_at
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(entity_id) DO UPDATE SET
         amount_minor = excluded.amount_minor,
         value_date = excluded.value_date,
         booking_date = excluded.booking_date,
         description = excluded.description,
         counterparty = excluded.counterparty,
+        party_account = excluded.party_account,
+        party_source_id = excluded.party_source_id,
         currency = excluded.currency,
         status = excluded.status,
         -- source and source_id MUST move together. Updating the id
@@ -1283,6 +1296,8 @@ def _upsert_params(
         transaction.booking_date.isoformat(),
         transaction.description,
         transaction.counterparty,
+        transaction.party_account,
+        transaction.party_source_id,
         transaction.status.value,
         transaction.source,
         transaction.tier.value,
@@ -1397,6 +1412,7 @@ class Store:
         self._migrate_declared_accounts_from_file()
         self._migrate_entity_role()
         self._migrate_entity_identifiers()
+        self._migrate_transaction_party_columns()
         self.connection.executescript(_epoch_triggers())
         self.connection.execute(
             "INSERT INTO obdi_meta (key, value) VALUES ('schema_version', ?) "
@@ -1485,6 +1501,23 @@ class Store:
             COMMIT;
             """
         )
+
+    def _migrate_transaction_party_columns(self) -> None:
+        """Add the other party's account and source id to a store whose rows were made without.
+
+        Existing rows hold '' until the rebuild from raw fills them, which is honest: the
+        columns are derived, and the raw record that states them is still held.
+        """
+        columns = self._table_columns("transactions")
+        added = False
+        for column in ("party_account", "party_source_id"):
+            if column not in columns:
+                self.connection.execute(
+                    f"ALTER TABLE transactions ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+                )
+                added = True
+        if added:
+            self.connection.commit()
 
     def _migrate_transaction_tier_and_occurrence(self) -> None:
         """Add the identity-trust and repeat-within-batch columns.
@@ -5564,6 +5597,8 @@ def _row_to_transaction(row: sqlite3.Row) -> Transaction:
         booking_date=date.fromisoformat(row["booking_date"]),
         description=row["description"],
         counterparty=row["counterparty"],
+        party_account=row["party_account"],
+        party_source_id=row["party_source_id"],
         status=TransactionStatus(row["status"]),
         source=row["source"],
         tier=SourceTier(row["tier"]),
