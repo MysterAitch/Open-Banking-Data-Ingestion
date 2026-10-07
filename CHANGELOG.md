@@ -26,6 +26,77 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.366] - 2026-10-07
+
+### Fixed
+- **M&S Bank is no longer proposed with Microsoft and McDonald's.** The
+  owner, on the live page: "Some are outright confusing - m&s bank and
+  McDonald's grouped under Microsoft? I don't see a rationale/explanation
+  given." Two faults together. The bank prints the word fused to the account
+  number (`BANK0806…`), and a name dropped every word holding a digit whole,
+  so M&S Bank's name was two bare initials; and the comparison let bare
+  initials stand for any word opening with those letters, so `m s` reached
+  `microsoft` and `mcdonalds`, and the chain carried their towns in. A word
+  fused to a number now keeps its letters where they form a word of three or
+  more; initials match initials only (`m s`, `ms`, `m&s`, `m and s` are one
+  token); and a word of fewer than three letters is never distinctive on its
+  own - it opens no group, is no rule, and joins nothing. One existing test
+  asserted the join this forbids and was changed. A two-letter brand printed
+  alone (`EE`, `BT`) can no longer open a group or be a rule by itself, which
+  is the cost.
+- **A proposal is the names that share one reason, and says that reason.**
+  The explanation the owner found read "some begin with the same words; some
+  are the same words in another order or without a code; the bank names all
+  as Microsoft" - the union of rules that held for some pair somewhere in a
+  transitive chain, rendered as if each held for all. Chaining is gone: a
+  proposal is the members of one rule's bucket (all begin with these words;
+  the same words in another order; the bank names them all as X), so its
+  sentence is exactly true of every member; a name qualifying for two
+  buckets goes to the one with more transactions and is not repeated; the
+  longer opening beats the one-word one where it has enough members, which
+  is what turns one 24-name Uber group into trip, eats, and membership. A
+  proposal with no stated reason cannot be rendered. The "could belong to"
+  rule, after the first merge, is how a legitimate chain is recovered one
+  press at a time.
+- **0.4.364's deploy gate fault has its contract fix:** `obdi version`
+  prints what the footer says, so the deploy role can ask the command line
+  and not a module path (the role was fixed to the moved path the same
+  evening; it moves to the command once this version is live).
+
+### Added
+- **Each name says what it was made from and how.** The owner: "these are
+  not merchant / payee names ... it doesn't scream trustworthy and traceable
+  if fields/values are being conflated AND THEN ALSO transformed ... What is
+  being matched? In what fields? Following which normalisation/sanitisation
+  steps?" and "even if you explain it here, it doesn't help the next web UI
+  user to understand/follow along." Each name's fold now opens with its
+  derivation - the field it was read from, up to three of the printed texts
+  that produced it, the steps that changed them in order, and the name - and
+  the steps shown are one tuple the code itself applies, with a test that
+  the page lists every step once. A rule reads as what it does: "any
+  transaction whose description, reduced to a name as above, begins with …".
+  The page's foot paragraph becomes a "how names are made and compared" fold
+  listing the steps, the comparison, the method phrases, and the ignored
+  codes, read from the constants. The source field is a stated record,
+  "description" today, because the owner has decided the next build makes
+  the stated counterparty the primary identifier and the description the
+  elaboration (roadmap R2c), and the page must then change its record, not
+  its words. Recorded as NF-TRACE-01: an explanation given elsewhere does
+  not satisfy it.
+- **An existing entity can be put under another** from its own page ("Put
+  under …", by name; an empty name clears it), so three products merged
+  separately can sit under one firm made with nothing attached. One level,
+  as the pages show it. And merging two of five proposed names is now pinned
+  to re-propose the other three.
+
+### Changed
+- **The store no longer imports the analysis.** The one upward import added
+  since the split's plan was measured - the store deciding which names a
+  rule puts under an entity - is removed by the plan's own cure: the records
+  live beside the store, the store hands back rows, and the analysis decides.
+  Twenty allowances remain on the direction test's shrink-only list, as the
+  plan counted; pages byte-identical (604 over 41 routes).
+
 ## [0.4.365] - 2026-10-07
 
 ### Fixed
