@@ -249,6 +249,7 @@ A split whose parts do not sum to the amount is refused where it is made.
 | 0.4.366 (fused word keeps its letters IN THE KEY - a fault; one rule per proposal) | 70 | 61 / 8 / 1 | 58 / 7 / 5 | 36 (20) | 5 | 1,326 / 186 / 699 / 6 groups of 89 |
 | 0.4.367 (key reverted; common by position; function words) | 63 | 54 / 8 / 1 | 51 / 7 / 5 | 31 (19) | 5 | 1,297 / 185 / 776 / 2 groups of 20 |
 | 0.4.369 (R2c: the stated party names a row; the learned link joins) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 867 (777 stated, 90 description, 34 rows linked) / 99 / 298 / 0 |
+| 0.4.371 (exact-match rung; both dates; per-kind fit) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 866 (777 stated, 89 description, 34 linked, 17 exact) / 99 / 297 / 0 |
 
 What the rows say: the four-slot rule removed sixteen fragments, thirteen of them stopped
 (0.4.357); keying the shape on a source-dependent field split one payee by source and cost the
@@ -271,7 +272,13 @@ narrative rarely reduces to a feed's description. A party's feed months and stat
 stayed two names; the habit went to none and stopped rose by five (0.4.361's signature). The
 rung added in 0.4.370: a description-only row whose description, compared as names are
 compared, equals a stated party's name exactly is that party, said so; exact only, never a
-prefix, ambiguity links to neither.
+prefix, ambiguity links to neither. 0.4.371's row answered that prediction: the exact rung
+named 17 transactions and the habit and stopped lines did not move, so most description-only
+rows print the party in some other form - a statement column's fixed-width truncation being
+the likeliest - and 0.4.373 adds the truncation rung (an opening of exactly one stated party's
+form, at least two words or eight letters, three or more letters of the cut word). If that
+does not bring the habit back, the party is printed in a form neither exact nor a truncation,
+and the owner's confirmation is the only honest next step.
 The Entities page serves in 0.9 s masked at this size (0.65 s before the drill-down folds).
 The owner's read of 0.4.367 (2026-10-07, with screenshots of a dozen groups, each with a true
 reason and its rule tick): "Seems to be substantially better. The remaining oddities/mismatches
