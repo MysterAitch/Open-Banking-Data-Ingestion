@@ -21,17 +21,14 @@ from pathlib import Path
 import pytest
 
 from obdi.analysis.entities import (
-    BEGINS,
-    CONTAINS,
     Covered,
-    Entity,
     EntityPage,
-    EntityRule,
     RuleLine,
     RuleTrial,
     entity_page_of,
 )
 from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.entity_records import BEGINS, CONTAINS, Entity, EntityRule
 from obdi.pages.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 sync_api = pytest.importorskip("playwright.sync_api")

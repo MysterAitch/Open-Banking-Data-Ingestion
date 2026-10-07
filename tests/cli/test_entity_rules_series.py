@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.analysis.entities import BEGINS
+from obdi.analysis.entities import exclude_shape
 from obdi.cli import build_web_config
+from obdi.ingest.entity_records import BEGINS
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from section_harness import environment
@@ -69,7 +70,7 @@ class TestTheDetectorReadsRuleMatchedNames:
         read, db, entity = world
         with Store(db) as store:
             store.add_entity_rule(entity, BEGINS, "fernhollow plus")
-            store.exclude_shape(entity, SECOND)
+            exclude_shape(store, entity, SECOND)
 
         assert series_of(read) == sorted([(ENTITY, 5), (SECOND, 4)])
 

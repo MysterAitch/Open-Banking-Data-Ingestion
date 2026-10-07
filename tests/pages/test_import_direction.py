@@ -63,11 +63,6 @@ ALLOWED_UPWARD: frozenset[tuple[str, str]] = frozenset(
         ("ingest.typed_transactions", "verify.protection"),
         ("ingest.typed_transactions", "verify.review_settlement"),
         ("verify.protection", "read.ledger"),
-        # Added after the plan's twenty were measured (the Entities page, 0.4.359 to 0.4.361):
-        # the store's entity methods return the `Entity` record and raise `EntityRefused`, both
-        # defined beside the grouping rules. Removed by moving the record, the refusal, and
-        # `OWNER_ROLE` down to ingest beside the store; the rules then import them from there.
-        ("ingest.store", "analysis.entities"),
     }
 )
 
@@ -436,10 +431,11 @@ class TestTheAllowedListCanOnlyShrink:
         for importer, target in ALLOWED_UPWARD:
             assert RANK[importer.split(".")[0]] < RANK[target.split(".")[0]], (importer, target)
 
-    def test_AllowedList_Itself_IsTheTwentyTheSplitStartedWithAndTheOneAddedBeforeIt(self):
-        # The plan measured twenty; the Entities page added one (the store importing the entity
-        # record) between the measurement and the move. The number only goes down from here.
-        assert len(ALLOWED_UPWARD) == 21
+    def test_AllowedList_Itself_IsTheTwentyTheSplitStartedWith(self):
+        # The plan measured twenty; the Entities page added a twenty-first (the store importing
+        # the entity record) before the move, and the record moved below the store to remove it.
+        # The number only goes down from here.
+        assert len(ALLOWED_UPWARD) == 20
 
 
 class TestOverTheRealTree:

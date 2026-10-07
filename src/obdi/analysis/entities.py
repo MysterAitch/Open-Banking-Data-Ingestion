@@ -10,9 +10,18 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import date
+from datetime import date, datetime
+from typing import TYPE_CHECKING
 
-from ..core.errors import DataError
+from ..ingest.entity_records import (
+    BEGINS,
+    CONTAINS,
+    OWNER_ROLE,
+    RULE_KINDS,
+    Entity,
+    EntityRefused,
+    EntityRule,
+)
 from ..ingest.identity import normalise_description
 from .entity_tokens import (
     Token,
@@ -22,6 +31,9 @@ from .entity_tokens import (
     is_method_only,
     tokens_of,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - imported for types alone
+    from ..ingest.store import Store
 
 #: The rules that can join two shapes into one proposed group, said once here and by name
 #: everywhere else. OPENING_WORDS: they begin with the same two or more words. SAME_WORDS: once
@@ -36,53 +48,6 @@ BANK_NAMES = "bank names"
 #: word is two retailers that begin alike far more often than one retailer, and a wrong merge is
 #: the owner's to find, so the rule leaves it unproposed.
 MIN_OPENING_WORDS = 2
-
-
-#: The role of the entity that stands for the owner: the payee of every payment between his own
-#: accounts. No instance declares the owner's name anywhere, so the entity is made as `OWNER_NAME`
-#: unless the owner has typed another, and renamed like any entity.
-OWNER_ROLE = "owner"
-OWNER_NAME = "Me"
-
-
-class EntityRefused(DataError):
-    """A change to the entities that was not made, said in the words the page shows."""
-
-
-@dataclass(frozen=True)
-class Entity:
-    """One entity the owner named, and the shapes attached to it now."""
-
-    id: int
-    name: str
-    #: The entity this one sits under, or None; kept, and read by nothing yet.
-    parent_id: int | None
-    shapes: tuple[str, ...]
-    #: What the entity is to the household (`OWNER_ROLE`), or None for a payee like any other.
-    role: str | None = None
-    #: The names in `shapes` that are there only because a live rule of the entity matches them
-    #: (`with_rules`); the rest were attached by hand. Empty where rules were not applied.
-    by_rule: tuple[str, ...] = ()
-
-
-#: The two kinds of rule an entity keeps, said once here and everywhere else by name. BEGINS: the
-#: name begins with these words. CONTAINS: the name holds these words, in any order. A third kind
-#: or a side effect of a rule (a label, a category) is added by the work that needs it.
-BEGINS = "begins"
-CONTAINS = "contains"
-RULE_KINDS = (BEGINS, CONTAINS)
-
-
-@dataclass(frozen=True)
-class EntityRule:
-    """One rule an entity keeps: a name that matches it is under the entity without being
-    attached by hand, so a new variant of a payee attaches on sight."""
-
-    id: int
-    entity_id: int
-    kind: str
-    #: The words as kept: the rule's text in the form a name is held in (`_shape`).
-    words: str
 
 
 #: The words a bank prints for the date a card payment was made ("ON 12 APR"), which change with
@@ -254,6 +219,74 @@ def with_rules(
         )
         for entity in made
     ]
+
+
+def entities_of(store: Store, known: Iterable[str] = ()) -> list[Entity]:
+    """Every entity not removed, by name, each with the names under it now: those attached by
+    hand, and every name among `known` (the names the transactions hold) that one of its rules
+    matches, less those split apart from it (`with_rules`).
+
+    Asked with no `known`, no rule has a name to match and the answer is the hand-attached names
+    alone. Everything that asks what is under an entity asks here; the store holds the three row
+    sets this reads (the entities with their hand-attached names, the live rules, and the
+    exclusions) and decides nothing about them. The rules and exclusions are not read where there
+    is nothing for them to act on.
+    """
+    made = store.entities_with_shapes()
+    names = tuple(known)
+    if not names or not made:
+        return made
+    rules = store.entity_rules()
+    if not rules:
+        return made
+    return with_rules(made, rules, store.entity_exclusions(), names)
+
+
+def shape_entities(store: Store, known: Iterable[str] = ()) -> dict[str, tuple[int, str]]:
+    """Each name under an entity now (`entities_of`), to the id and name of its entity."""
+    return {
+        shape: (entity.id, entity.name)
+        for entity in entities_of(store, known)
+        for shape in entity.shapes
+    }
+
+
+def _rule_matches_for(store: Store, entity: int, shape: str) -> bool:
+    return any(
+        rule_matches(rule.kind, rule.words, shape)
+        for rule in store.entity_rules()
+        if rule.entity_id == entity
+    )
+
+
+def detach_shape(store: Store, shape: str, *, now: datetime | None = None) -> bool:
+    """Split `shape` apart from the entity it was attached to by hand, and commit; False where it
+    belonged to none (`Store.detach_shape` says what else is kept).
+
+    A name a rule of its entity also matches would be attached again by that rule on the next
+    read, so the store is told to record the exclusion as well: whether a rule matches is the
+    analysis's to say, and the store does what it is told in the one commit.
+    """
+    held = store.shape_entities().get(shape)
+    if held is None:
+        return False
+    return store.detach_shape(shape, exclude=_rule_matches_for(store, held[0], shape), now=now)
+
+
+def exclude_shape(
+    store: Store, entity: int, shape: str, *, now: datetime | None = None
+) -> None:
+    """Stop the rules of an entity attaching `shape`, and commit; the name was under it by rule
+    and is under no entity afterwards (unless another entity's rule matches it).
+
+    Refused, with nothing written, for a name none of the entity's rules matches: there is
+    nothing to exclude it from, and a name attached by hand is split apart with `detach_shape`.
+    An entity that is missing or removed is refused by the store.
+    """
+    store.refuse_missing_entity(entity)
+    if not _rule_matches_for(store, entity, shape):
+        raise EntityRefused("No rule of this entity matches that name; the page may have changed.")
+    store.exclude_shape(entity, shape, now=now)
 
 
 @dataclass(frozen=True)

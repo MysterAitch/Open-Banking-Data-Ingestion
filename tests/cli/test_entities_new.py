@@ -16,8 +16,9 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from obdi.analysis.entities import BEGINS, EntityRefused
+from obdi.analysis.entities import detach_shape
 from obdi.cli import build_web_config
+from obdi.ingest.entity_records import BEGINS, EntityRefused
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
@@ -200,7 +201,7 @@ class TestRefusals:
     def test_New_UnderAnEntityThatWasRemoved_IsRefused(self, world):
         base, db, marlowe, _tmp = world
         with Store(db) as store:
-            store.detach_shape("marlowe bakery", now=NOW)
+            detach_shape(store, "marlowe bakery", now=NOW)
 
         response = make(base, name="Late", parent=str(marlowe))
 

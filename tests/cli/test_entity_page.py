@@ -23,8 +23,9 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from obdi.analysis.entities import BEGINS, CONTAINS
+from obdi.analysis.entities import detach_shape
 from obdi.cli import build_web_config
+from obdi.ingest.entity_records import BEGINS, CONTAINS
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from obdi.pages import values_sitting
@@ -172,7 +173,7 @@ class TestTheMaskedPage:
     def test_EntityPage_ForAnEntityThatWasRemoved_IsA404(self, world):
         base, db, entity = world
         with Store(db) as store:
-            store.detach_shape(HAND, now=NOW)
+            detach_shape(store, HAND, now=NOW)
 
         assert httpx.get(f"{base}{address(entity)}", timeout=60).status_code == 404
 
@@ -367,7 +368,7 @@ class TestKeepingARule:
     def test_Keep_OnAnEntityThatWasRemoved_IsRefusedAndKeepsNothing(self, world):
         base, db, entity = world
         with Store(db) as store:
-            store.detach_shape(HAND, now=NOW)
+            detach_shape(store, HAND, now=NOW)
 
         response = press(base, "/entity-rule", entity=entity, kind=BEGINS, words="sainsburys")
 

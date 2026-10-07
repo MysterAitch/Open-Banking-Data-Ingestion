@@ -15,7 +15,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from obdi.analysis.entities import EntityRefused
+from obdi.analysis.entities import detach_shape
+from obdi.ingest.entity_records import EntityRefused
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import SCHEMA_VERSION, Store
 
@@ -97,7 +98,7 @@ class TestAttachingLaterShapes:
 
     def test_Shape_WhenAttachedToARemovedEntity_IsRefused(self, store):
         entity = store.create_entity("Fernhollow", GROCER[:1], now=NOW)
-        store.detach_shape(GROCER[0], now=NOW)
+        detach_shape(store, GROCER[0], now=NOW)
 
         with pytest.raises(EntityRefused, match="no such entity"):
             store.attach_shapes(entity, GROCER[1:2], now=NOW)
@@ -113,7 +114,7 @@ class TestSplittingApart:
     def test_Shape_WhenSplitApart_LeavesTheEntityAndCanJoinAnother(self, store):
         store.create_entity("Fernhollow", GROCER, now=NOW)
 
-        assert store.detach_shape(GROCER[2], now=NOW + timedelta(minutes=1)) is True
+        assert detach_shape(store, GROCER[2], now=NOW + timedelta(minutes=1)) is True
 
         assert names_and_shapes(store) == {"Fernhollow": tuple(sorted(GROCER[:2]))}
         other = store.create_entity("Metro", GROCER[2:], now=NOW + timedelta(minutes=2))
@@ -121,7 +122,7 @@ class TestSplittingApart:
 
     def test_Shape_WhenSplitApart_IsStampedNotDeletedSoTheHistoryIsKept(self, store):
         store.create_entity("Fernhollow", GROCER, now=NOW)
-        store.detach_shape(GROCER[2], now=NOW + timedelta(minutes=1))
+        detach_shape(store, GROCER[2], now=NOW + timedelta(minutes=1))
 
         rows = store.connection.execute(
             "SELECT detached_at FROM entity_shapes WHERE shape = ?", (GROCER[2],)
@@ -132,13 +133,13 @@ class TestSplittingApart:
     def test_Shape_WhenItBelongsToNoEntity_SaysSoAndChangesNothing(self, store):
         store.create_entity("Fernhollow", GROCER[:1], now=NOW)
 
-        assert store.detach_shape("never seen", now=NOW) is False
+        assert detach_shape(store, "never seen", now=NOW) is False
         assert names_and_shapes(store) == {"Fernhollow": (GROCER[0],)}
 
     def test_Entity_WhenItsLastShapeIsSplitApart_IsRemovedAndItsNameIsFreeAgain(self, store):
         store.create_entity("Fernhollow", GROCER[:1], now=NOW)
 
-        store.detach_shape(GROCER[0], now=NOW)
+        detach_shape(store, GROCER[0], now=NOW)
 
         assert names_and_shapes(store) == {}
         store.create_entity("Fernhollow", GROCER[1:2], now=NOW)
@@ -205,7 +206,7 @@ class TestGatheringIntoAnEntityAlreadyNamed:
 
     def test_Gather_WhenTheNameIsOnlyARemovedEntitys_MakesANewOne(self, store):
         store.create_entity("Fernhollow", GROCER[:1], now=NOW)
-        store.detach_shape(GROCER[0], now=NOW)
+        detach_shape(store, GROCER[0], now=NOW)
 
         _entity, _name, made = store.gather_into("Fernhollow", GROCER[1:2], now=NOW)
 
@@ -271,7 +272,7 @@ class TestFoldingOneEntityIntoAnother:
         _first, second = self.two(store)
         store.fold_entity(second, "Fernhollow", now=NOW)
 
-        store.detach_shape(GROCER[2], now=NOW)
+        detach_shape(store, GROCER[2], now=NOW)
 
         assert names_and_shapes(store) == {"Fernhollow": tuple(sorted(GROCER[:2]))}
 
@@ -337,7 +338,7 @@ class TestAChildEntity:
         parent = self.parent(store)
         store.make_child_entity(parent, GROCER[2], "Fernhollow Express", now=NOW)
 
-        store.detach_shape(GROCER[2], now=NOW)
+        detach_shape(store, GROCER[2], now=NOW)
 
         assert names_and_shapes(store) == {"Fernhollow": tuple(sorted(GROCER[:2]))}
         store.create_entity("Fernhollow Express", GROCER[2:], now=NOW)
@@ -354,7 +355,7 @@ class TestAChildEntity:
     def test_Child_WhenTheParentWasRemoved_IsRefused(self, store):
         parent = self.parent(store)
         for shape in GROCER:
-            store.detach_shape(shape, now=NOW)
+            detach_shape(store, shape, now=NOW)
 
         with pytest.raises(EntityRefused, match="no such entity"):
             store.make_child_entity(parent, GROCER[2], "Express", now=NOW)
@@ -421,7 +422,7 @@ class TestAStoreFromBeforeTheEntityRole:
 class TestSurvivingTheRebuildFromRaw:
     def test_Entities_WhenTheStoreIsRebuiltFromRaw_AreStillThere(self, store):
         entity = store.create_entity("Fernhollow", GROCER, now=NOW)
-        store.detach_shape(GROCER[2], now=NOW)
+        detach_shape(store, GROCER[2], now=NOW)
         store.rename_entity(entity, "Fernhollow Grocers")
 
         rebuild_from_raw(store)

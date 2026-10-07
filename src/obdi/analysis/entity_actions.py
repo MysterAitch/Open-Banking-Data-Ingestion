@@ -11,7 +11,15 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from ..core.plural import plural
-from .entities import OWNER_NAME, EntityRefused, clean_rule, rule_phrase
+from ..ingest.entity_records import OWNER_NAME, EntityRefused
+from .entities import (
+    clean_rule,
+    detach_shape,
+    entities_of,
+    exclude_shape,
+    rule_phrase,
+    shape_entities,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from ..ingest.store import Store
@@ -47,13 +55,13 @@ def apply_action(
         _refuse_unknown(shapes, known)
         rule = None
         if _one(form, "keep_rule"):
-            rule = (_one(form, "rule_kind"), _one(form, "rule_words"))
+            rule = clean_rule(_one(form, "rule_kind"), _one(form, "rule_words"))
         _entity, kept, made = store.gather_into(_one(form, "name"), shapes, rule=rule)
         count = plural(len(set(shapes)), "name")
         said = f"Merged {count} into {kept}" if made else f"{count} added to {kept}"
         if rule is None:
             return f"{said}."
-        return f"{said}; {rule_phrase(*clean_rule(*rule))} will join it."
+        return f"{said}; {rule_phrase(*rule)} will join it."
     if action == OWN:
         shapes = [shape.strip() for shape in form.get("shape", []) if shape.strip()]
         _refuse_unknown(shapes, known)
@@ -64,7 +72,7 @@ def apply_action(
         return f"{count} added to {kept}."
     if action == SPLIT:
         shape = _one(form, "shape")
-        held = store.shape_entities(known).get(shape)
+        held = shape_entities(store, known).get(shape)
         if held is None:
             raise EntityRefused("That name is not under an entity; the page may have changed.")
         by_hand = any(
@@ -72,9 +80,9 @@ def apply_action(
             for entity in store.entities_with_shapes()
         )
         if by_hand:
-            store.detach_shape(shape)
+            detach_shape(store, shape)
         else:
-            store.exclude_shape(held[0], shape)
+            exclude_shape(store, held[0], shape)
         if not any(entity.id == held[0] for entity in store.entities_with_shapes()):
             return (
                 f"Split a name apart from {held[1]}. {held[1]} had no other names, so it is gone."
@@ -92,14 +100,14 @@ def apply_action(
         entity = _one(form, "entity")
         if not entity.isdigit():
             raise EntityRefused("There is no such entity; it may have been removed.")
-        parent = next((e.name for e in store.entities_with_shapes() if e.id == int(entity)), "")
+        parent = next((e.name for e in entities_of(store) if e.id == int(entity)), "")
         store.make_child_entity(int(entity), _one(form, "shape"), _one(form, "name"))
         return f"Made {' '.join(_one(form, 'name').split())} its own entity under {parent}."
     if action == FOLD:
         entity = _one(form, "entity")
         if not entity.isdigit():
             raise EntityRefused("There is no such entity; it may have been removed.")
-        folded = next((e.name for e in store.entities_with_shapes() if e.id == int(entity)), "")
+        folded = next((e.name for e in entities_of(store) if e.id == int(entity)), "")
         moved, into = store.fold_entity(int(entity), _one(form, "name"))
         return f"Folded {folded} into {into}; {plural(moved, 'name')} moved."
     if action == KEEP_RULE:
@@ -108,7 +116,7 @@ def apply_action(
             raise EntityRefused("There is no such entity; it may have been removed.")
         kind, words = clean_rule(_one(form, "kind"), _one(form, "words"))
         store.add_entity_rule(int(entity), kind, words)
-        owner = next((e.name for e in store.entities_with_shapes() if e.id == int(entity)), "")
+        owner = next((e.name for e in entities_of(store) if e.id == int(entity)), "")
         return f"Kept a rule: {rule_phrase(kind, words)} will join {owner}."
     if action == DROP_RULE:
         rule_id = _one(form, "rule")

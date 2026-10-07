@@ -3874,14 +3874,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             transactions = store.all_transactions()
             pairs = store.confirmed_transfer_pairs()
             held, _unusable = statement_balances(store)
-            from .analysis.entities import count_shapes
+            from .analysis.entities import count_shapes, shape_entities
             from .analysis.recurring import counts_as_occurrence
 
             held_names = count_shapes(
                 t.description for t in transactions if counts_as_occurrence(t)
             )
             gathered = {
-                shape: name for shape, (_id, name) in store.shape_entities(held_names).items()
+                shape: name for shape, (_id, name) in shape_entities(store, held_names).items()
             }
         closings: dict[str, list[tuple[date, int]]] = {}
         for closing in held:
@@ -3907,6 +3907,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             Covered,
             count_row_legs,
             count_shapes,
+            entities_of,
             shape_counterparties,
             shape_of,
             view_of,
@@ -3937,7 +3938,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             counts = count_shapes(t.description for t in rows)
             return view_of(
                 counts,
-                store.entities_with_shapes(counts),
+                entities_of(store, counts),
                 count_row_legs((t.description, t.entity_id in leg_ids) for t in rows),
                 {shape: tuple(found) for shape, found in listed.items() if shape},
                 shape_counterparties((t.description, t.counterparty) for t in rows),
@@ -3957,6 +3958,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             COVERED_SHOWN,
             Covered,
             count_shapes,
+            entities_of,
             entity_page_of,
             shape_of,
         )
@@ -3966,7 +3968,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
             counts = count_shapes(t.description for t in rows)
-            entities = store.entities_with_shapes(counts)
+            entities = entities_of(store, counts)
             found = next((e for e in entities if e.id == entity_id), None)
             if found is None:
                 return None

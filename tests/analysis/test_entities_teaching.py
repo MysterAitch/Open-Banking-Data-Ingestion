@@ -18,7 +18,8 @@ from __future__ import annotations
 import pytest
 
 from obdi.analysis import entities
-from obdi.analysis.entities import OWNER_ROLE, Entity, view_of
+from obdi.analysis.entities import view_of
+from obdi.ingest.entity_records import OWNER_ROLE, Entity
 
 
 @pytest.fixture(autouse=True)

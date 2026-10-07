@@ -22,9 +22,10 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from obdi.analysis.entities import OWNER_NAME, OWNER_ROLE, Entity, EntityRefused, view_of
+from obdi.analysis.entities import detach_shape, view_of
 from obdi.analysis.recurring import Series, find_recurring
 from obdi.core.models import SourceTier, Transaction
+from obdi.ingest.entity_records import OWNER_NAME, OWNER_ROLE, Entity, EntityRefused
 from obdi.ingest.store import Store
 
 NOW = datetime(2026, 10, 7, 9, 0, tzinfo=UTC)
@@ -207,7 +208,7 @@ class TestTheOwnerEntityInTheStore:
 
     def test_Owner_WhenItsLastShapeIsSplitApart_IsGoneAndTheNextPressMakesItAgain(self, store):
         store.gather_into_owner(["a"], "Me", now=NOW)
-        store.detach_shape("a", now=NOW)
+        detach_shape(store, "a", now=NOW)
 
         assert store.owner_entity() is None
         _entity, _name, made = store.gather_into_owner(["b"], "Me", now=NOW)

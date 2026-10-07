@@ -29,15 +29,6 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import ClassVar
 
-from ..analysis.entities import (
-    OWNER_ROLE,
-    Entity,
-    EntityRefused,
-    EntityRule,
-    clean_rule,
-    rule_matches,
-    with_rules,
-)
 from ..core.errors import DataError
 from ..core.models import (
     BASIS_FOLD,
@@ -66,6 +57,7 @@ from .accounts import (
     mint_account_id,
     read_registry_file,
 )
+from .entity_records import OWNER_ROLE, RULE_KINDS, Entity, EntityRefused, EntityRule
 from .payment_links import stated_link_of
 from .stated_times import recorded_for
 from .stated_words import recorded_words
@@ -740,9 +732,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_entity_shapes_live
     ON entity_shapes(shape) WHERE detached_at IS NULL;
 
 -- DECLARED: a rule an entity keeps, so a name it matches is under the entity without being
--- attached by hand (`entities.with_rules` decides the names). `kind` is `begins` or `contains`
--- (`entities.RULE_KINDS`); `words` are held the way a shape is. Removing a rule is a stamp. A new
--- kind of rule or a side effect of one is a value or a column here, not another table.
+-- attached by hand (`analysis.entities.with_rules` decides the names). `kind` is `begins` or
+-- `contains` (`entity_records.RULE_KINDS`); `words` are held the way a shape is. Removing a rule
+-- is a stamp. A new kind of rule or a side effect of one is a value or a column here, not another
+-- table.
 CREATE TABLE IF NOT EXISTS entity_rules (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     of_entity  INTEGER NOT NULL,
@@ -4547,24 +4540,13 @@ class Store:
         )
         self.connection.commit()
 
-    def entities_with_shapes(self, known: Iterable[str] = ()) -> list[Entity]:
-        """Every entity not removed, by name, each with the names under it now: those attached by
-        hand, and every name among `known` (the names the transactions hold) that one of its
-        rules matches, less those split apart from it (`entities.with_rules`).
+    def entities_with_shapes(self) -> list[Entity]:
+        """Every entity not removed, by name, each with the names attached to it by hand.
 
-        Asked with no `known`, no rule has a name to match and the answer is the hand-attached
-        names alone. Everything that asks what is under an entity asks here.
+        The rows alone: the names a rule of an entity attaches on sight are not here, since what
+        a rule matches is for the analysis to say (`analysis.entities.entities_of` reads this,
+        `entity_rules`, and `entity_exclusions`, and is what a page or a hook asks).
         """
-        made = self._hand_attached_entities()
-        names = tuple(known)
-        if not names or not made:
-            return made
-        rules = self.entity_rules()
-        if not rules:
-            return made
-        return with_rules(made, rules, self.entity_exclusions(), names)
-
-    def _hand_attached_entities(self) -> list[Entity]:
         shapes: dict[int, list[str]] = {}
         for row in self.connection.execute(
             "SELECT of_entity, shape FROM entity_shapes WHERE detached_at IS NULL ORDER BY shape"
@@ -4584,12 +4566,12 @@ class Store:
             )
         ]
 
-    def shape_entities(self, known: Iterable[str] = ()) -> dict[str, tuple[int, str]]:
-        """Each name under an entity now (`entities_with_shapes`), to the id and name of its
-        entity."""
+    def shape_entities(self) -> dict[str, tuple[int, str]]:
+        """Each name attached by hand (`entities_with_shapes`), to the id and name of its entity.
+        With the names rules attach, it is `analysis.entities.shape_entities`."""
         return {
             shape: (entity.id, entity.name)
-            for entity in self.entities_with_shapes(known)
+            for entity in self.entities_with_shapes()
             for shape in entity.shapes
         }
 
@@ -4617,8 +4599,10 @@ class Store:
         """Keep a rule on an entity that is not removed, and commit; returns its id.
 
         Refused, with nothing written, for an entity that is missing or removed, a kind that is
-        not one of `entities.RULE_KINDS`, words with nothing in them that tells a payee apart,
-        and a rule of the same kind and words the entity already keeps.
+        not one of `entity_records.RULE_KINDS`, and a rule of the same kind and words the entity
+        already keeps. The kind and words are kept as given: that the words hold something that
+        tells a payee apart, and are spelt the way a name is, is for the caller to have made so
+        (`analysis.entities.clean_rule`).
         """
         self._refuse_missing_entity(entity)
         stamp = (now or datetime.now(UTC)).isoformat()
@@ -4651,16 +4635,17 @@ class Store:
 
     def _insert_rule(self, entity: int, kind: str, words: str, stamp: str) -> int | None:
         """Write a rule; None where the entity keeps the same one already."""
-        clean_kind, clean_words = clean_rule(kind, words)
+        if kind not in RULE_KINDS:
+            raise EntityRefused("A rule either begins with some words or contains them.")
         for row in self.connection.execute(
             "SELECT kind, words FROM entity_rules WHERE of_entity = ? AND removed_at IS NULL",
             (entity,),
         ):
-            if (str(row["kind"]), str(row["words"])) == (clean_kind, clean_words):
+            if (str(row["kind"]), str(row["words"])) == (kind, words):
                 return None
         cursor = self.connection.execute(
             "INSERT INTO entity_rules (of_entity, kind, words, created_at) VALUES (?, ?, ?, ?)",
-            (entity, clean_kind, clean_words, stamp),
+            (entity, kind, words, stamp),
         )
         return int(cursor.lastrowid or 0)
 
@@ -4953,13 +4938,16 @@ class Store:
                 return int(row["id"]), str(row["name"])
         return None
 
-    def detach_shape(self, shape: str, *, now: datetime | None = None) -> bool:
+    def detach_shape(self, shape: str, *, exclude: bool, now: datetime | None = None) -> bool:
         """Split `shape` apart from its entity, and commit; False where it belonged to none.
 
         An entity left with no shape and no rule is removed in the same commit: it names nothing a
         page or the detector could read, and its name is free for the owner to use again. A name
         a rule of its entity also matches would be attached again by that rule on the next read,
-        so splitting it apart records the exclusion as well (`exclude_shape`).
+        so the caller who knows that sets `exclude`, and the exclusion is recorded in the same
+        commit. Whether a rule matches is the analysis's to say (`analysis.entities.detach_shape`
+        asks it); `exclude` has no default, since leaving it off for a matched name would let the
+        rule attach the name again.
         """
         stamp = (now or datetime.now(UTC)).isoformat()
         row = self.connection.execute(
@@ -4972,7 +4960,7 @@ class Store:
         self.connection.execute(
             "UPDATE entity_shapes SET detached_at = ? WHERE id = ?", (stamp, row["id"])
         )
-        if self._rule_matches_for(entity, shape):
+        if exclude:
             self._insert_exclusion(entity, shape, stamp)
         left = self.connection.execute(
             "SELECT 1 FROM entity_shapes WHERE of_entity = ? AND detached_at IS NULL", (entity,)
@@ -4989,15 +4977,11 @@ class Store:
         """Stop the rules of an entity attaching `shape`, and commit; the name was under it by
         rule and is under no entity afterwards (unless another entity's rule matches it).
 
-        Refused, with nothing written, for an entity that is missing or removed, and for a name
-        none of the entity's rules matches: there is nothing to exclude it from, and a name
-        attached by hand is split apart with `detach_shape`.
+        Refused, with nothing written, for an entity that is missing or removed. That a rule of
+        the entity matches the name is for the caller to have shown
+        (`analysis.entities.exclude_shape` does, and refuses where none does).
         """
         self._refuse_missing_entity(entity)
-        if not self._rule_matches_for(entity, shape):
-            raise EntityRefused(
-                "No rule of this entity matches that name; the page may have changed."
-            )
         self._insert_exclusion(entity, shape, (now or datetime.now(UTC)).isoformat())
         self.connection.commit()
 
@@ -5008,13 +4992,6 @@ class Store:
             (entity, shape, stamp),
         )
 
-    def _rule_matches_for(self, entity: int, shape: str) -> bool:
-        return any(
-            rule_matches(rule.kind, rule.words, shape)
-            for rule in self.entity_rules()
-            if rule.entity_id == entity
-        )
-
     def rename_entity(self, entity: int, name: str) -> None:
         """Rename an entity not removed, and commit; refused for no name or a name in use."""
         clean = _entity_name(name)
@@ -5022,6 +4999,11 @@ class Store:
         self._refuse_name_in_use(clean, except_id=entity)
         self.connection.execute("UPDATE entities SET name = ? WHERE id = ?", (clean, entity))
         self.connection.commit()
+
+    def refuse_missing_entity(self, entity: int) -> None:
+        """Raise `EntityRefused` where `entity` is missing or removed. For a caller that has a
+        check of its own to make and wants this one said first, as the store's writes say it."""
+        self._refuse_missing_entity(entity)
 
     def _refuse_missing_entity(self, entity: int) -> None:
         found = self.connection.execute(

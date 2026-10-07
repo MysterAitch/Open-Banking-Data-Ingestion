@@ -21,8 +21,9 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from obdi.analysis.entities import BEGINS, CONTAINS, Proposal, clean_rule, propose_groups
+from obdi.analysis.entities import Proposal, clean_rule, detach_shape, propose_groups
 from obdi.cli import build_web_config
+from obdi.ingest.entity_records import BEGINS, CONTAINS
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from page_dom import elements, parse
@@ -222,7 +223,7 @@ class TestPressingMerge:
         form = form_about(shown(base), LONDON)
         httpx.post(f"{base}/entities-merge", data=sent_by_browser(form), timeout=60)
         with Store(db) as store:
-            store.detach_shape(READING)
+            detach_shape(store, READING)
 
         httpx.post(
             f"{base}/entities-merge",

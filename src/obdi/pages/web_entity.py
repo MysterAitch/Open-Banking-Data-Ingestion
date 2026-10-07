@@ -6,7 +6,7 @@ those a rule matches ("by rule") - each opening to its transactions as the Entit
 and the rules it keeps. A rule is added by hand with a dry run beside it: "Try" answers with the
 names the rule would attach and writes nothing (the pattern of the Bring in dry run), "Keep" saves
 it. A name a rule attached is split apart from the entity by an exclusion
-(`Store.exclude_shape`).
+(`analysis.entities.exclude_shape`).
 
 A GET renders MASKED as the Entities page does: counts, sealed names and rule words, and the days
 the names were used, with no form that carries a name. The unmasked page is a POST's answer
@@ -18,11 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..analysis.entities import (
-    BEGINS,
-    CONTAINS,
-    OWNER_ROLE,
     EntityPage,
-    EntityRefused,
     RuleLine,
     RuleTrial,
     clean_rule,
@@ -30,6 +26,7 @@ from ..analysis.entities import (
 )
 from ..core.logs import say
 from ..core.plural import agree, plural
+from ..ingest.entity_records import BEGINS, CONTAINS, OWNER_ROLE, EntityRefused
 from .callback import render_page
 from .navigation import page_name
 from .web_entities import (

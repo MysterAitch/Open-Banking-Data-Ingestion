@@ -24,15 +24,16 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from obdi.analysis.entities import (
-    BEGINS,
-    CONTAINS,
-    EntityRefused,
-    EntityRule,
+    clean_rule,
+    detach_shape,
+    entities_of,
+    exclude_shape,
     rule_matches,
     trial_rule,
     with_rules,
 )
 from obdi.analysis.entity_actions import SPLIT, apply_action
+from obdi.ingest.entity_records import BEGINS, CONTAINS, EntityRefused, EntityRule
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 
@@ -59,7 +60,7 @@ def sainsburys(store: Store) -> int:
 
 
 def names(store: Store, entity: int, known=KNOWN) -> tuple[str, ...]:
-    (found,) = [e for e in store.entities_with_shapes(known) if e.id == entity]
+    (found,) = [e for e in entities_of(store, known) if e.id == entity]
     return found.shapes
 
 
@@ -74,7 +75,7 @@ class TestAnEntityHoldsTheNamesItsRulesMatch:
     ):
         entity = sainsburys(store)
 
-        (found,) = [e for e in store.entities_with_shapes(KNOWN) if e.id == entity]
+        (found,) = [e for e in entities_of(store, KNOWN) if e.id == entity]
 
         assert set(found.by_rule) == {SCOTLAND, EDINBURGH, SINGULAR}
         assert HAND not in found.by_rule
@@ -179,7 +180,7 @@ class TestSplittingANameApart:
         entity = sainsburys(store)
 
         with pytest.raises(EntityRefused, match="No rule of this entity matches"):
-            store.exclude_shape(entity, TESCO, now=NOW)
+            exclude_shape(store, entity, TESCO, now=NOW)
 
         assert store.entity_exclusions() == set()
 
@@ -190,7 +191,7 @@ class TestSplittingANameApart:
 
         apply_action(store, known, SPLIT, {"shape": ["seed pod"]})
 
-        assert [e.name for e in store.entities_with_shapes(known)] == ["Seed"]
+        assert [e.name for e in entities_of(store, known)] == ["Seed"]
 
     def test_Split_OfTheLastHandAttachedNameOfAnEntityWithNoRule_RemovesTheEntity(self, store):
         store.create_entity("Fernhollow", ["fernhollow grocers"], now=NOW)
@@ -207,7 +208,7 @@ class TestARuleIsRefusedWhenItCouldMatchEveryone:
         entity = store.create_entity("Fernhollow", ["fernhollow grocers"], now=NOW)
 
         with pytest.raises(EntityRefused, match="at least one word"):
-            store.add_entity_rule(entity, BEGINS, words, now=NOW)
+            store.add_entity_rule(entity, *clean_rule(BEGINS, words), now=NOW)
 
         assert store.entity_rules() == []
 
@@ -215,11 +216,11 @@ class TestARuleIsRefusedWhenItCouldMatchEveryone:
         entity = store.create_entity("Fernhollow", ["fernhollow grocers"], now=NOW)
 
         with pytest.raises(EntityRefused, match="begins with some words or contains them"):
-            store.add_entity_rule(entity, "ends", "fernhollow", now=NOW)
+            store.add_entity_rule(entity, *clean_rule("ends", "fernhollow"), now=NOW)
 
     def test_Rule_OnAnEntityThatWasRemoved_IsRefused(self, store):
         entity = store.create_entity("Fernhollow", ["fernhollow grocers"], now=NOW)
-        store.detach_shape("fernhollow grocers", now=NOW)
+        detach_shape(store, "fernhollow grocers", now=NOW)
 
         with pytest.raises(EntityRefused, match="no such entity"):
             store.add_entity_rule(entity, BEGINS, "fernhollow", now=NOW)
@@ -228,14 +229,14 @@ class TestARuleIsRefusedWhenItCouldMatchEveryone:
         entity = sainsburys(store)
 
         with pytest.raises(EntityRefused, match="already has that rule"):
-            store.add_entity_rule(entity, BEGINS, "Sainsburys", now=NOW)
+            store.add_entity_rule(entity, *clean_rule(BEGINS, "Sainsburys"), now=NOW)
 
         assert len(store.entity_rules()) == 1
 
     def test_Rule_WordsWithANumberAndADate_AreKeptAsANameIs(self, store):
         entity = store.create_entity("Fernhollow", ["fernhollow grocers"], now=NOW)
 
-        store.add_entity_rule(entity, BEGINS, "FERNHOLLOW 1041 on 12 apr", now=NOW)
+        store.add_entity_rule(entity, *clean_rule(BEGINS, "FERNHOLLOW 1041 on 12 apr"), now=NOW)
 
         assert [r.words for r in store.entity_rules()] == ["fernhollow"]
 
@@ -295,7 +296,7 @@ class TestFoldingAnEntityKeepsItsRules:
 class TestTheDecisionsSurviveTheRebuildFromRaw:
     def test_RulesAndExclusions_WhenTheStoreIsRebuiltFromRaw_AreStillThere(self, store):
         entity = sainsburys(store)
-        store.exclude_shape(entity, SCOTLAND, now=NOW)
+        exclude_shape(store, entity, SCOTLAND, now=NOW)
 
         rebuild_from_raw(store)
 
@@ -304,7 +305,7 @@ class TestTheDecisionsSurviveTheRebuildFromRaw:
 
     def test_Irreplaceable_CountsARuleAndAnExclusionAsHandWork(self, store):
         entity = sainsburys(store)
-        store.exclude_shape(entity, SCOTLAND, now=NOW)
+        exclude_shape(store, entity, SCOTLAND, now=NOW)
 
         assert store.irreplaceable()["entity rules and names split from them"] == 2
 

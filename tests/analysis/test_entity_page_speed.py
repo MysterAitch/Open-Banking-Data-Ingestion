@@ -13,7 +13,8 @@ import pytest
 
 from large_store_corpus import LargeStore, cached_large_store
 from large_store_pages import copy_of, serving
-from obdi.analysis.entities import BEGINS, EntityRefused, clean_rule, count_shapes
+from obdi.analysis.entities import clean_rule, count_shapes
+from obdi.ingest.entity_records import BEGINS, EntityRefused
 from obdi.ingest.store import Store
 
 #: MEASURED 2026-10-07 on the large store (6,969 transactions, 79 payee names, one entity with one
