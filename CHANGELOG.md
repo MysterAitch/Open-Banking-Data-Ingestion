@@ -26,6 +26,36 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.357] - 2026-10-07
+
+### Changed
+- **Every recurring series says who starts its payments.** The owner, after
+  the first reading on the real store: "frequent and recurring/scheduled
+  payments are distinct ... I am actively pushing those payments out [most
+  Sundays' climbing and the clean air zone charge]. This is different to
+  utilities and software subscriptions where the payments are pulled ...
+  the absence of a Sunday payment doesn't mean this is a missed subscription
+  payment." Each series is now pulled (a Direct Debit, a card-on-file
+  charge, a card provider collecting), scheduled (a standing order, a
+  transfer the owner set to run), or a habit, decided first by the type the
+  source keeps against the row and else by the series' shape, with the
+  signal said on the row; stopped and missed are judged only for the first
+  two, and a habit is a pattern ("most Sundays - 38 of 52 weeks"), never a
+  thing to do. And a missed pulled payment is a question answered from what
+  obdi holds before it is reported: a card provider's collection absent in
+  a cycle whose statement closed at nil is "not taken; nothing was due",
+  not missed - which is what happened to the owner's card earlier this year.
+- **A series must span four slots of its cadence**, not merely have three
+  occurrences: three payments in a fortnight are no longer a weekly rhythm.
+  A yearly thing seen three times is, by this rule, not yet reported.
+- **The Recurring page leads with what is live.** The first reading found 77
+  series, 44 of them stopped, most years ago, because the store holds seven
+  years and subscriptions end: correct, and the wrong thing to lead with.
+  Series stopped over a year ago fold, closed, at the foot of each account,
+  and the summary says how many. The page at phone width now runs to four
+  screens over thirty series with the kind on every row; that is the cost of
+  saying it, to be judged on the real store.
+
 ## [0.4.356] - 2026-10-07
 
 ### Added
