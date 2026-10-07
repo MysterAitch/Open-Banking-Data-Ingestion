@@ -41,6 +41,10 @@ _PLURAL_FLOOR = 3
 #: names, and a software maker and a burger chain were proposed as one payee with the bank.
 MIN_DISTINCTIVE_LETTERS = 3
 
+#: Fewest letters a word must open with for them to be compared when digits follow
+#: (`fused_letters`).
+MIN_FUSED_LETTERS = 3
+
 
 #: How two names are compared, said once for the page that states it. The lists it refers to
 #: (`METHOD_WORDS`' phrases in `payment_methods.METHODS`, `IGNORED_TRAILING`) are shown from the
@@ -50,8 +54,32 @@ COMPARISON_SENTENCE = (
     "or company code after it are set aside; a plural “s” on a word of "
     f"{_PLURAL_FLOOR + 1} letters or more, an ampersand or “and”, and spaced initials (“b m”, "
     "“bm”, “b&m”) make no difference. Initials match initials only, never a spelled-out name, "
-    f"and a word of fewer than {MIN_DISTINCTIVE_LETTERS} letters never tells two names apart."
+    f"and a word of fewer than {MIN_DISTINCTIVE_LETTERS} letters never tells two names apart. "
+    f"A word that opens with {MIN_FUSED_LETTERS} letters or more and runs into a number "
+    "(“bank0806249308”) is compared as its letters (“bank”), though the name itself is made "
+    "without the whole word."
 )
+
+
+def fused_letters(word: str) -> str:
+    """The word's own letters where it holds digits too, or "" where they are not a word.
+
+    A word that opens with `MIN_FUSED_LETTERS` letters or more and then runs into a number
+    ("bank0806249308", "tesco1234") is a name fused to its reference, and its letters are the
+    name; a word with digits and fewer leading letters ("ab12cd", "a12") is a code and has no
+    letters to compare. A word without digits is returned as it is.
+
+    This is for COMPARING names only. A name's identity (`entities.shape_of`) drops such a word
+    whole: keeping the letters there gave one payee two names where a reference printed as
+    "REF0042" on some rows and not on others, and split a recurring series into a stopped half
+    and a new half (measured on the first real store: 63 -> 70 series, 31 -> 36 stopped).
+    """
+    if not any(c.isdigit() for c in word):
+        return word
+    run = 0
+    while run < len(word) and word[run].isalpha():
+        run += 1
+    return word[:run] if run >= MIN_FUSED_LETTERS else ""
 
 
 @dataclass(frozen=True)

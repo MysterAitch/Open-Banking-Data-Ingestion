@@ -29,6 +29,7 @@ from .entity_tokens import (
     Token,
     core_words,
     distinctive_words,
+    fused_letters,
     is_method_only,
     tokens_of,
 )
@@ -65,29 +66,12 @@ _DATE_WORDS = frozenset(
 )
 
 
-#: Fewest letters a word must open with for them to be kept when digits follow (`_shape`).
-MIN_FUSED_LETTERS = 3
-
-
-def _letters_before_digits(word: str) -> str:
-    """The word's own letters where it holds digits too, or "" where they are not a word.
-
-    A word that opens with `MIN_FUSED_LETTERS` letters or more and then runs into a number
-    ("bank0806249308", "tesco1234") is the name fused to its reference, and the name is kept; a
-    word with digits and fewer leading letters ("ab12cd", "a12") is a code and goes whole. A
-    bank printing "M&S BANK0806249308" lost the whole word, and the shape left was two bare
-    initials, which then met every name that begins "m" and "s".
-    """
-    if not any(c.isdigit() for c in word):
-        return word
-    run = 0
-    while run < len(word) and word[run].isalpha():
-        run += 1
-    return word[:run] if run >= MIN_FUSED_LETTERS else ""
-
-
 def _drop_digit_words(text: str) -> str:
-    return " ".join(w for w in map(_letters_before_digits, text.split()) if w)
+    return " ".join(w for w in text.split() if not any(c.isdigit() for c in w))
+
+
+def _keep_fused_letters(text: str) -> str:
+    return " ".join(w for w in map(fused_letters, text.split()) if w)
 
 
 def _drop_printed_dates(text: str) -> str:
@@ -112,11 +96,7 @@ def _drop_printed_dates(text: str) -> str:
 #: exactly these, so the page's account of how a name is made cannot drift from the code.
 SHAPE_STEPS: tuple[tuple[str, Callable[[str], str]], ...] = (
     *NORMALISATION_STEPS,
-    (
-        "words holding a digit are dropped, or cut back to their leading letters where those "
-        f"are at least {MIN_FUSED_LETTERS} letters",
-        _drop_digit_words,
-    ),
+    ("words holding a digit are dropped", _drop_digit_words),
     (
         "a printed date such as “on 12 apr”, and a month or weekday left at the end, are dropped",
         _drop_printed_dates,
@@ -128,6 +108,32 @@ def _shape(text: str) -> str:
     for _sentence, step in SHAPE_STEPS:
         text = step(text)
     return text
+
+
+def reading_of(text: str) -> str:
+    """What names are COMPARED on for a printed description: its shape, except that a word
+    fused to a number keeps its letters (`fused_letters`). A bank printing "M&S BANK0806249308"
+    has the shape "m s", two bare initials that meet every name beginning "m" and "s"; its
+    reading is "m s bank". The reading is never a name's identity: rows are grouped by the
+    shape, so the key does not move for the sake of comparison."""
+    for _sentence, step in SHAPE_STEPS:
+        text = _keep_fused_letters(text) if step is _drop_digit_words else step(text)
+    return text
+
+
+def shape_readings(descriptions: Iterable[str]) -> dict[str, str]:
+    """For each shape, the reading its rows most often have (`reading_of`); of equally common
+    readings the one of fewer words, then the first alphabetically, so the answer does not
+    depend on the order of the rows. Shapes whose reading is their own are included."""
+    seen: dict[str, Counter[str]] = {}
+    for text in descriptions:
+        shape = _shape(text)
+        if shape:
+            seen.setdefault(shape, Counter())[reading_of(text)] += 1
+    return {
+        shape: min(counted, key=lambda r: (-counted[r], len(r.split()), r))
+        for shape, counted in seen.items()
+    }
 
 
 #: Where a name comes from, as the noun the page puts after "the" ("from the description",
@@ -178,9 +184,8 @@ def derivation_of(
 
 def shape_of(text: str) -> str:
     """The shape of a counterparty as printed: the normalised description without any word that
-    holds a digit (bar the letters a name is fused to, `_letters_before_digits`), since a
-    reference, a store number, a mandate, or a card tail is what changes between two sightings of
-    one payee, and without the date a card payment prints ("on 12 apr").
+    holds a digit, since a reference, a store number, a mandate, or a card tail is what changes
+    between two sightings of one payee, and without the date a card payment prints ("on 12 apr").
     Empty where nothing but codes is left. `SHAPE_STEPS` lists the steps in the order applied,
     each with the sentence the page states it in.
 
@@ -703,10 +708,12 @@ def view_of(
     legs: Mapping[str, int] | None = None,
     covers: Mapping[str, tuple[Covered, ...]] | None = None,
     counterparties: Mapping[str, Mapping[str, int]] | None = None,
+    readings: Mapping[str, str] | None = None,
 ) -> EntitiesView:
     """The page's view of the shapes held and the entities made from them.
 
     `counterparties` is `shape_counterparties`: the merchants the bank states for each shape.
+    `readings` is `shape_readings`: the text each shape is compared on where that is not the shape.
 
     `legs` is, for each shape, how many of its transactions are legs of confirmed transfers
     between the owner's own accounts; the shapes it makes the owner's are set apart before the
@@ -716,7 +723,9 @@ def view_of(
     taken = {shape for entity in made for shape in entity.shapes}
     owner = owner_group(counts, legs or {}, taken)
     set_apart = taken | set(owner.shapes if owner else ())
-    proposals = propose_groups(counts, taken=set_apart, counterparties=counterparties)
+    proposals = propose_groups(
+        counts, taken=set_apart, counterparties=counterparties, readings=readings
+    )
     offered = {s for g in (*proposals.groups, *proposals.too_broad) for s in g.shapes}
     return EntitiesView(
         counts=counts,
@@ -724,7 +733,7 @@ def view_of(
         proposals=proposals,
         covers=covers or {},
         owner=owner,
-        suggestions=suggest_for_entities(counts, made, set_apart | offered),
+        suggestions=suggest_for_entities(counts, made, set_apart | offered, readings),
     )
 
 
@@ -751,7 +760,10 @@ def _entity_words(entity: Entity, common: Collection[str]) -> frozenset[str]:
 
 
 def suggest_for_entities(
-    counts: Mapping[str, int], entities: Sequence[Entity], set_apart: Collection[str]
+    counts: Mapping[str, int],
+    entities: Sequence[Entity],
+    set_apart: Collection[str],
+    readings: Mapping[str, str] | None = None,
 ) -> tuple[Suggestion, ...]:
     """A free name goes under the entity whose name or shapes it shares the most distinctive
     words with (the first by name where two share as many); names the owner has already placed,
@@ -764,16 +776,16 @@ def suggest_for_entities(
     targets = [e for e in entities if e.role != OWNER_ROLE and e.shapes]
     if not targets:
         return ()
-    common = common_tokens({shape: tokens_of(shape) for shape in counts})
+    read = readings or {}
+    named = {shape: tokens_of(read.get(shape, shape)) for shape in counts}
+    common = common_tokens(named)
     words = {e.id: _entity_words(e, common) for e in targets}
     held = {shape for e in entities for shape in e.shapes}
     found: dict[int, list[tuple[str, frozenset[str]]]] = {}
     for shape in sorted(counts, key=lambda s: (-counts[s], s)):
         if shape in held or shape in set_apart or is_method_only(shape):
             continue
-        mine = frozenset(
-            w for w in distinctive_words(tokens_of(shape)) if is_distinctive(w, common)
-        )
+        mine = frozenset(w for w in distinctive_words(named[shape]) if is_distinctive(w, common))
         best: tuple[int, str, int] | None = None
         for target in targets:
             shared = mine & words[target.id]
@@ -864,6 +876,7 @@ def propose_groups(
     *,
     taken: Collection[str] = frozenset(),
     counterparties: Mapping[str, Mapping[str, int]] | None = None,
+    readings: Mapping[str, str] | None = None,
 ) -> Proposals:
     """The groups of free shapes that plain text analysis says are one counterparty.
 
@@ -874,9 +887,13 @@ def propose_groups(
     the sentence for a group is true of every member. Shapes in `taken` (already under an
     entity) are shown where they are and never proposed again. A group is at least two shapes
     and at most `MAX_SHAPES_PROPOSED`, largest first.
+
+    Shapes are compared on their reading (`readings`, from `shape_readings`) where one is given
+    and on the shape itself otherwise; the groups still hold shapes, the identity.
     """
     stated_by = counterparties or {}
-    named = {shape: tokens_of(shape) for shape in counts}
+    read = readings or {}
+    named = {shape: tokens_of(read.get(shape, shape)) for shape in counts}
     common = common_tokens(named)
     free = sorted(
         shape

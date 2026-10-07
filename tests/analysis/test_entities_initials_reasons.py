@@ -32,30 +32,34 @@ from obdi.analysis.entities import (
     count_shapes,
     propose_groups,
     shape_counterparties,
+    shape_readings,
     view_of,
 )
 from obdi.pages.web_entities import render_entities
 
 
 def proposals(*descriptions: str):
-    return list(propose_groups(count_shapes(descriptions)).groups)
+    return list(
+        propose_groups(count_shapes(descriptions), readings=shape_readings(descriptions)).groups
+    )
 
 
-def assert_rule_is_true_of_every_member(group) -> None:
+def assert_rule_is_true_of_every_member(group, readings=None) -> None:
+    """The rule holds of each member as it is COMPARED: its reading where it has one."""
     (rule,) = group.rules
+    read = readings or {}
     if rule == OPENING_WORDS:
         assert group.opening
         # "and" is the ampersand written out and is no part of the name compared.
         assert all(
-            " ".join(w for w in s.split() if w != "and").startswith(group.opening)
+            " ".join(w for w in read.get(s, s).split() if w != "and").startswith(group.opening)
             for s in group.shapes
         )
     elif rule == SAME_WORDS:
         assert group.shared
         for shape in group.shapes:
-            assert set(group.shared.split()) <= {w.rstrip("s") for w in shape.split()} | set(
-                shape.split()
-            )
+            words = read.get(shape, shape).split()
+            assert set(group.shared.split()) <= {w.rstrip("s") for w in words} | set(words)
     else:
         assert rule == BANK_NAMES
         assert group.bank_name
@@ -83,14 +87,14 @@ class TestTheOwnersMixedProposal:
             }
             assert len(brands) == 1, group.shapes
             assert len(group.rules) == 1
-            assert_rule_is_true_of_every_member(group)
+            assert_rule_is_true_of_every_member(group, shape_readings(self.DESCRIPTIONS))
 
     def test_Proposals_WhenThreeBrandsShareInitials_EachBrandIsItsOwnProposal(self):
         found = proposals(*self.DESCRIPTIONS)
 
         assert sorted(sorted(g.shapes) for g in found) == [
             ["m b online", "m b online direct"],
-            ["m s bank", "m s bank leeds", "m s bank york"],
+            ["m s", "m s bank leeds", "m s bank york"],
             ["marks and spencer", "marks spencer london"],
         ]
 
@@ -104,7 +108,12 @@ class TestTheOwnersMixedProposal:
 
     def test_Page_WhenValuesAreShown_EachReasonNamesTheWordsOfItsOneRule(self):
         page = render_entities(
-            view_of(count_shapes(self.DESCRIPTIONS), []), unmasked=True
+            view_of(
+                count_shapes(self.DESCRIPTIONS),
+                [],
+                readings=shape_readings(self.DESCRIPTIONS),
+            ),
+            unmasked=True,
         ).decode("utf-8")
 
         assert "all begin with “m s bank”" in page

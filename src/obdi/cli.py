@@ -3910,6 +3910,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             entities_of,
             shape_counterparties,
             shape_of,
+            shape_readings,
             view_of,
         )
         from .analysis.recurring import counts_as_occurrence
@@ -3942,6 +3943,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 count_row_legs((t.description, t.entity_id in leg_ids) for t in rows),
                 {shape: tuple(found) for shape, found in listed.items() if shape},
                 shape_counterparties((t.description, t.counterparty) for t in rows),
+                shape_readings(t.description for t in rows),
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
