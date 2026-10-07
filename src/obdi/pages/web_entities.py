@@ -250,6 +250,14 @@ def _kind_of(name: str, view: EntitiesView) -> str:
     return origin.kind if origin is not None else DESCRIPTION
 
 
+def printed_name(shape: str, view: EntitiesView, kind: str | None = None) -> str:
+    """What a page prints for a name: its label where it is an identifier (`EntitiesView.label`),
+    and a number only by its ending (`name_shown`) - never an account number or the key made of
+    one. `kind` is the kind the caller holds the name as where that is not the strongest kind its
+    rows carry (an identifier of an entity)."""
+    return name_shown(view.label(shape), _kind_of(shape, view) if kind is None else kind)
+
+
 def _count_or_rows(shape: str, view: EntitiesView) -> str:
     """The number of transactions a name has; where the page holds them, that number opens how the
     name was made and the newest of them (`COVERED_SHOWN`), so what a merge would capture can be
@@ -262,7 +270,7 @@ def _count_or_rows(shape: str, view: EntitiesView) -> str:
     tail = f'<li class="muted">and {more:,} more</li>' if more > 0 else ""
     return (
         f'<details class="ent-rows"><summary class="ent-count">{total:,}</summary>'
-        f"{derivation_html(derivation_of(shape, found), _kind_of(shape, view))}"
+        f"{derivation_html(derivation_of(view.label(shape), found), _kind_of(shape, view))}"
         f'<ol class="ent-tx">{"".join(_covered_row(c) for c in found)}{tail}</ol></details>'
     )
 
@@ -333,7 +341,7 @@ def _ticks(
         )
         items.append(
             f'<li><label class="tick">{box}'
-            f'<span class="txt">{_esc(name_shown(shape, kind))}</span></label>{count}</li>'
+            f'<span class="txt">{_esc(printed_name(shape, view))}</span></label>{count}</li>'
         )
     return f'<ul class="ent-names">{"".join(items)}</ul>'
 
@@ -525,7 +533,7 @@ def _entity(
             f"{could}{inside}</section>"
         )
     lines = "".join(
-        f'<li><span class="txt">{_esc(name_shown(shape, _kind_of(shape, view)))}</span>'
+        f'<li><span class="txt">{_esc(printed_name(shape, view))}</span>'
         f"{_by_rule_tag(shape, entity)}{_count_or_rows(shape, view)}"
         f"{split_form(shape, entity, view, SPLIT_ROUTE)}</li>"
         for shape in entity.shapes
@@ -552,7 +560,7 @@ def _child_form(entity: Entity, view: EntitiesView, *, nested: bool) -> str:
         return ""
     options = "".join(
         f'<option value="{_esc(form_value(shape, _kind_of(shape, view)))}">'
-        f"{_esc(name_shown(shape, _kind_of(shape, view)))}</option>"
+        f"{_esc(printed_name(shape, view))}</option>"
         for shape in by_hand
     )
     return (

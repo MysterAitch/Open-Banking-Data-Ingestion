@@ -148,7 +148,9 @@ class TestTheLadderNamesARowByTheStrongestRungItCarries:
     def test_Name_WhenARowCarriesTheOtherPartysAccount_ThatNamesItWhateverIsStated(self):
         named = name_of("JAN RENT", "Alex R", account="20-12-34 55667788")
 
-        assert (named.name, named.kind) == ("20123455667788", ACCOUNT)
+        assert named.kind == ACCOUNT
+        assert named.name != "alex r"
+        assert "55667788" not in named.name
 
     def test_Name_WhenTwoSpellingsOfOneAccountAreStated_AreOneName(self):
         first = name_of("JAN RENT", "Alex Rowan", account="20-12-34 55667788")

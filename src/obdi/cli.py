@@ -32,11 +32,12 @@ from .analysis.entities import (
     Named,
     NameOrigin,
     RuleTrial,
+    display_names,
     learned_links,
     name_of,
     name_origins,
 )
-from .analysis.recurring import RecurringFindings
+from .analysis.recurring import RecurringFindings, row_fields
 from .core.errors import DataError
 from .core.money import parse_amount
 from .core.namespaces import UNASSIGNED_ACCOUNT
@@ -3920,8 +3921,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def _name_rows(rows: Sequence[Transaction]) -> tuple[dict[str, Alias], list[Named]]:
         """The links learned from the rows and the name of each, from the one read of the rows
         a page already makes: no query per name."""
-        links = learned_links((t.description, t.counterparty) for t in rows)
-        return links, [name_of(t.description, t.counterparty, links) for t in rows]
+        fields = [row_fields(t) for t in rows]
+        links = learned_links(fields)
+        return links, [
+            name_of(f.description, f.counterparty, links, account=f.account, source_id=f.source_id)
+            for f in fields
+        ]
+
+    def _labels(rows: Sequence[Transaction], named: Sequence[Named]) -> dict[str, str]:
+        """The readable name of each name that is an identifier (`display_names`)."""
+        return display_names([row_fields(t) for t in rows], named)
 
     def _held_origins(store: Store) -> dict[str, NameOrigin]:
         """How each name the store holds came to have it, with the source of a stated one."""
@@ -3949,6 +3958,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             kind=item.kind,
             via=item.via,
             support=item.support,
+            linked_by=item.linked_by,
         )
 
     def entities_data() -> EntitiesView:
@@ -3990,6 +4000,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 {shape: tuple(found) for shape, found in listed.items() if shape},
                 origins,
                 name_readings([(t.description, t.counterparty) for t in rows], named),
+                _labels(rows, named),
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
@@ -4037,6 +4048,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 counts,
                 {shape: tuple(covered) for shape, covered in listed.items()},
                 origins,
+                _labels(rows, named),
             )
 
     def entity_trial(entity_id: int, kind: str, words: str) -> RuleTrial:

@@ -70,7 +70,7 @@ from statistics import median_low
 
 from ..core.models import Transaction, TransactionStatus
 from ..ingest.stated_words import words_in
-from .entities import Alias, entity_of, learned_links, name_of
+from .entities import Alias, Fields, display_names, entity_of, learned_links, name_of
 from .payment_methods import METHODS
 
 #: Fewest occurrences that make a series. Two is a coincidence of a payee and a gap.
@@ -634,6 +634,11 @@ def _split(
     return found
 
 
+def row_fields(row: Transaction) -> Fields:
+    """What a held row states about its other party, for `name_of` and `learned_links`."""
+    return Fields(row.description, row.counterparty, row.party_account, row.party_source_id)
+
+
 def counts_as_occurrence(row: Transaction) -> bool:
     """Whether the row is an occurrence of anything: not history, and not yet pending."""
     return not row.status.is_history and row.status is not TransactionStatus.PENDING
@@ -666,8 +671,14 @@ def find_recurring(
     replaced by its settlement, and history is not money.
     """
     rows = [row for row in transactions if counts_as_occurrence(row)]
+    fields = [row_fields(row) for row in rows]
     if links is None:
-        links = learned_links((row.description, row.counterparty) for row in rows)
+        links = learned_links(fields)
+    named = [
+        name_of(f.description, f.counterparty, links, account=f.account, source_id=f.source_id)
+        for f in fields
+    ]
+    labels = display_names(fields, named)
     by_entity = {row.entity_id: row for row in rows}
     arriving: dict[str, Transaction] = {}
     for leaving_id, arriving_id in pairs:
@@ -685,7 +696,7 @@ def find_recurring(
 
     groups: dict[tuple[str, ...], list[_Leg]] = defaultdict(list)
     shapes: dict[tuple[str, ...], str] = {}
-    for row in rows:
+    for row, item in zip(rows, named, strict=True):
         if row.entity_id in arrivals:
             continue
         direction = "in" if row.amount_minor > 0 else "out"
@@ -695,18 +706,18 @@ def find_recurring(
             shapes[between] = ""
             groups[between].append(_Leg(row, opposite.account_id))
             continue
-        named = name_of(row.description, row.counterparty, links)
-        shape = named.name
+        shape = item.name
         if not shape:
             continue
-        linked = entity_of(entities or {}, named.kind, shape)
+        linked = entity_of(entities or {}, item.kind, shape)
         gathered = None if linked is None else linked[1]
         if gathered is not None:
             payee = ("entity", gathered.casefold(), row.currency, direction)
             shapes[payee] = gathered
         else:
             payee = ("payee", shape, row.currency, direction)
-            shapes[payee] = shape
+            # An identifier groups the rows and is never shown (`display_names`).
+            shapes[payee] = labels.get(shape, shape)
         groups[payee].append(_Leg(row, ""))
 
     found: list[Series] = []

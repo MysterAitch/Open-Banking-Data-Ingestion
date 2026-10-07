@@ -40,6 +40,7 @@ from obdi.analysis.entities import (
     form_value,
     identifier_for,
     identifier_kind,
+    is_identifier_key,
     learned_links,
     name_of,
     name_origins,
@@ -263,11 +264,13 @@ class TestARowLinksThroughTheStrongestKindItCarries:
 
     def test_RowsCarryingAnAccount_AreNamedByItAndLinkToTheEntityHoldingIt(self, store):
         number = "20000012345678"
-        store.create_entity("Housemate", [Identifier(ACCOUNT, number)], now=NOW)
+        key = name_of("jan rent", "", account=number).name
+        store.create_entity("Housemate", [Identifier(ACCOUNT, key)], now=NOW)
 
         named = name_of("jan rent", "", account="20-00-00 12345678")
 
-        assert (named.kind, named.name) == (ACCOUNT, number)
+        assert (named.kind, named.name) == (ACCOUNT, key)
+        assert is_identifier_key(key) and number not in key, "the key is a digest, not the number"
         assert entity_of(shape_entities(store), named.kind, named.name) == (
             ACCOUNT,
             (1, "Housemate"),
@@ -281,7 +284,8 @@ class TestARowLinksThroughTheStrongestKindItCarries:
             for account in ("20000011111111", "20000022222222")
         }
 
-        assert names == {"20000011111111", "20000022222222"}
+        assert len(names) == 2
+        assert all(is_identifier_key(name) for name in names)
 
     def test_RowsCarryingASourceId_LinkToTheEntityHoldingIt(self, store):
         store.create_entity("Cafe", [Identifier(SOURCE_ID, "party-7", FEED)], now=NOW)

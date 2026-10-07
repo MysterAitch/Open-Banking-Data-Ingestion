@@ -54,6 +54,7 @@ from .web_entities import (
     _masked_days,
     _name_field,
     _sealed,
+    printed_name,
     split_form,
 )
 from .web_entities import ROUTE as ENTITIES_ROUTE
@@ -152,7 +153,7 @@ def _names(page: EntityPage, *, unmasked: bool) -> str:
     sections = []
     for kind, values in _by_kind(live):
         lines = "".join(
-            f'<li><span class="txt">{_esc(name_shown(value, kind))}</span>'
+            f'<li><span class="txt">{_esc(printed_name(value, view, kind))}</span>'
             f"{_by_rule_tag(value, entity)}{_basis_tag(by_identifier.get((kind, value)))}"
             f"{_count_or_rows(value, view)}"
             f"{split_form(value, entity, view, SPLIT_ROUTE, extra=_hidden(entity.id), kind=kind)}"

@@ -13,7 +13,7 @@ from collections import Counter
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, NamedTuple, TypeVar
 
 from ..core.plural import plural
 from ..ingest.entity_records import (
@@ -174,8 +174,14 @@ DERIVATION_TEXTS_SHOWN = 3
 
 def _printed_text(row: Covered) -> str:
     """The text a covered row's name was read from: the counterparty it states where that is
-    what named it (`STATED_NAME`), else its description."""
-    return row.counterparty if row.kind == STATED_NAME else row.description
+    what named it (`STATED_NAME`), else its description. A row named by an identifier is SHOWN
+    under the counterparty it states, else its description (`display_names`), and that is the
+    text listed for it; the identifier itself is never listed."""
+    return row.counterparty if _reads_counterparty(row) else row.description
+
+
+def _reads_counterparty(row: Covered) -> bool:
+    return row.kind == STATED_NAME or (row.kind in (ACCOUNT, SOURCE_ID) and bool(row.counterparty))
 
 
 def derivation_of(
@@ -191,7 +197,7 @@ def derivation_of(
     shown = list(distinct.items())[:DERIVATION_TEXTS_SHOWN]
     changed: set[str] = set()
     for text, row in shown:
-        steps = COUNTERPARTY_STEPS if row.kind == STATED_NAME else SHAPE_STEPS
+        steps = COUNTERPARTY_STEPS if _reads_counterparty(row) else SHAPE_STEPS
         for sentence, step in steps:
             after = step(text)
             if after != text:
@@ -201,10 +207,17 @@ def derivation_of(
     kinds = [k for k in LADDER if any(row.kind == k for row in covered)]
     if source is None:
         support = sum({row.via: row.support for row in covered if row.kind == ALIAS}.values())
-        source = ", and from the ".join(
-            KIND_SENTENCES[kind].format(payments=plural(support, "payment"), name=shape)
-            for kind in kinds
+        linked_by = next(
+            (r.linked_by for r in covered if r.kind == ALIAS and r.linked_by in _STRONG), ""
         )
+
+        def said(kind: str) -> str:
+            sentence = KIND_SENTENCES[kind].format(payments=plural(support, "payment"), name=shape)
+            if kind == ALIAS and linked_by:
+                return sentence.replace(KIND_SENTENCES[STATED_NAME], KIND_SENTENCES[linked_by])
+            return sentence
+
+        source = ", and from the ".join(said(kind) for kind in kinds)
     return Derivation(
         source=source or DESCRIPTION_SOURCE,
         printed=tuple(text for text, _row in shown),
@@ -231,12 +244,12 @@ def shape_of(text: str) -> str:
 #: The kinds of identifier a row can be named by, strongest first
 #: (`docs/design/2026-10-commitments/entities.md` section 2 is the reasoning). `LADDER` is the
 #: order `name_of` walks: the first rung a row carries names it, and `Named.kind` says which.
-#: ACCOUNT and SOURCE_ID are on the ladder so that a row carrying them is named by them first; no
-#: derived row carries either yet, so they never match, and giving the rows those columns is a
-#: read added to `name_of` and nothing more. ALIAS is a weaker identifier (a description-shape)
-#: linked to a stronger one by rows seen by two sources (`learned_links`). RULE is an entity's
-#: rule matching a name, which acts on names and not on rows, so it is a kind of link and not a
-#: rung.
+#: ACCOUNT and SOURCE_ID are the columns `Transaction.party_account` and `.party_source_id`. A
+#: party named by either is IDENTIFIED by it but never SHOWN by it (`Named.display`, `labels`): an
+#: account number or a source's id is a key, and no page prints one as a name. ALIAS is a weaker
+#: identifier (a description-shape) linked to a stronger one by rows seen by two sources
+#: (`learned_links`). RULE is an entity's rule matching a name, which acts on names and not on
+#: rows, so it is a kind of link and not a rung.
 #: ACCOUNT, SOURCE_ID, STATED_NAME and DESCRIPTION are also the kinds of identifier an entity holds
 #: (`entity_records.IDENTIFIER_KINDS`, where they are defined once and imported here).
 ALIAS = "alias"
@@ -250,12 +263,14 @@ MATCHED_NAME = "matched name"
 TRUNCATED_NAME = "truncated name"
 RULE = "rule"
 LADDER = (ACCOUNT, SOURCE_ID, STATED_NAME, ALIAS, MATCHED_NAME, TRUNCATED_NAME, DESCRIPTION)
+#: The kinds whose name is an identifier, not text: shown by a label (`display_names`).
+_STRONG = (ACCOUNT, SOURCE_ID)
 
 #: What each kind is said to be on a page, as the noun phrase after "from the" ("from the bank's
 #: merchant name"): the one table every page reads, so no page words a kind itself.
 KIND_SENTENCES: dict[str, str] = {
     ACCOUNT: "other party's account number",
-    SOURCE_ID: "source's own identifier for the other party",
+    SOURCE_ID: "bank's own id for the party",
     STATED_NAME: "bank's merchant name",
     ALIAS: "description, named by the bank's merchant name through {payments} seen by both",
     MATCHED_NAME: (
@@ -340,10 +355,22 @@ def held_kind(entity: Entity, shape: str) -> str:
 
 def name_shown(name: str, kind: str) -> str:
     """A name as a page prints it: an account number only by its ending, whatever the page's
-    mode, since the digits of the other party's account are never the page's to print."""
-    if identifier_kind(kind) == ACCOUNT:
+    mode, since the digits of the other party's account are never the page's to print.
+
+    A name that is an identifier KEY (`is_identifier_key`: what `name_of` makes of the account or
+    source-id column) is never printed either, and this has no label to print in its place, so it
+    says `UNNAMED_PARTY`; a page that holds the labels (`display_names`) prints the label instead
+    of calling this. A name of an ACCOUNT kind that is not a number is a label already and is
+    printed as it is."""
+    if is_identifier_key(name):
+        return UNNAMED_PARTY
+    if identifier_kind(kind) == ACCOUNT and _is_account_number(name):
         return f"ending {name[-ACCOUNT_ENDING:]}"
     return name
+
+
+def _is_account_number(name: str) -> bool:
+    return "".join(c for c in name if c not in "- ").isdigit()
 
 
 #: How many digits of an account number a page prints.
@@ -357,8 +384,9 @@ ACCOUNT_REFERENCE = "account-ref:"
 
 def form_value(name: str, kind: str) -> str:
     """The value a form carries for a name: the name itself, except an account number, which is
-    carried as a reference to it (`ACCOUNT_REFERENCE`)."""
-    if identifier_kind(kind) != ACCOUNT:
+    carried as a reference to it (`ACCOUNT_REFERENCE`). The key `name_of` makes of an account is
+    already a digest, never the number, and is carried as it is."""
+    if identifier_kind(kind) != ACCOUNT or is_identifier_key(name):
         return name
     return ACCOUNT_REFERENCE + hashlib.sha256(name.encode()).hexdigest()[:16]
 
@@ -430,12 +458,48 @@ class Named:
     support: int = 0
     linked_by: str = ""
 
+    @property
+    def is_key(self) -> bool:
+        """Whether `name` is an identifier (an account, a source's id) and not a name: such a
+        name groups rows and is never printed, its readable form being `display_names`'."""
+        return is_identifier_key(self.name)
+
+
+#: What a page says in place of an identifier key it holds no readable name for.
+UNNAMED_PARTY = "a party no name is held for"
+
+
+def is_identifier_key(name: str) -> bool:
+    """Whether a name is an identifier `name_of` made from the account or source-id column.
+
+    A description-shape or a stated name drops every word holding a digit and is stripped of
+    punctuation (`SHAPE_STEPS`), so a name that opens with the account prefix and a digest, or
+    with a source's prefix and a colon, was never made from text. Said once here so a page asked to
+    print a name it has no label for can refuse to print a key."""
+    if name.startswith(ACCOUNT_KEY_PREFIX):
+        digest = name[len(ACCOUNT_KEY_PREFIX) :]
+        hexadecimal = all(c in "0123456789abcdef" for c in digest)
+        return len(digest) == _ACCOUNT_DIGEST_LENGTH and hexadecimal
+    return ":" in name and name.split(":", 1)[0].isalpha()
+
+
+#: An account's key is a digest of its canonical form, never the number: an account is a permanent
+#: identifier (`core.classification.PERMANENT_ID`), and the key is what a form posts back and an
+#: entity keeps, so it must be neither shown nor stored in the clear. A pseudonym, not a secret:
+#: the number space is small enough that someone holding a key could try every number.
+ACCOUNT_KEY_PREFIX = "acct-"
+_ACCOUNT_DIGEST_LENGTH = 24
+
 
 def _identifier_name(kind: str, text: str) -> str:
     if kind == STATED_NAME:
         return counterparty_name(text)
     if kind == ACCOUNT:
-        return "".join(text.split()).replace("-", "").casefold()
+        canonical = "".join(text.split()).replace("-", "").casefold()
+        if not canonical:
+            return ""
+        digest = hashlib.sha256(f"obdi.party-account|{canonical}".encode()).hexdigest()
+        return ACCOUNT_KEY_PREFIX + digest[:_ACCOUNT_DIGEST_LENGTH]
     return text.strip()
 
 
@@ -474,9 +538,34 @@ def name_of(
     return Named(shape, DESCRIPTION)
 
 
-def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
+class Fields(NamedTuple):
+    """What a row states about its other party, as `name_of` reads it: the printed description,
+    the counterparty name, the party's account, and the source's id for the party."""
+
+    description: str
+    counterparty: str = ""
+    account: str = ""
+    source_id: str = ""
+
+
+def _strong_name(row: Fields) -> Named | None:
+    """The row named by its account or source id, or None where it states neither."""
+    for kind, text in ((ACCOUNT, row.account), (SOURCE_ID, row.source_id)):
+        stated = _identifier_name(kind, text)
+        if stated:
+            return Named(stated, kind)
+    return None
+
+
+def learned_links(rows: Iterable[Fields | tuple[str, str]]) -> dict[str, Alias]:
     """For each description-shape, the one stronger identifier the rows that carry both say it
-    stands for, with how many rows say so; from (description, counterparty) rows.
+    stands for, with how many rows say so; from `Fields` rows (a bare (description,
+    counterparty) pair is read as one that states no account or id).
+
+    The stronger identifier is the row's account, else its source's id, else its stated name
+    (`name_of`'s own order): a transfer seen by a feed (which states the account) and by a
+    statement (which states only a description) maps the statement's description-shape to the
+    account-named party, exactly as a stated name is mapped.
 
     A payment seen by a feed and a statement is ONE held row carrying the feed's counterparty
     (`ingest.matching`), so each row with a stated counterparty AND a description is evidence
@@ -503,19 +592,26 @@ def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
     rung refused it for being ambiguous.
     """
     seen: dict[str, Counter[str]] = {}
+    kind_of: dict[str, str] = {}
     stated_forms: dict[tuple[str, ...], set[str]] = {}
     form_cache: dict[str, tuple[str, ...]] = {}
     bare: dict[str, Counter[tuple[str, ...]]] = {}
-    for description, counterparty in rows:
+    for row in rows:
+        fields = Fields(*row)
+        description, counterparty = fields.description, fields.counterparty
         stated = counterparty_name(counterparty)
+        strong = _strong_name(fields)
+        party = strong.name if strong is not None else stated
+        if strong is not None:
+            kind_of[strong.name] = strong.kind
         shape = _shape(description)
-        if stated and shape:
-            seen.setdefault(shape, Counter())[stated] += 1
+        if party and shape:
+            seen.setdefault(shape, Counter())[party] += 1
         if stated:
             form = _comparison_form(_read_by(counterparty, COUNTERPARTY_STEPS), form_cache)
             if form:
-                stated_forms.setdefault(form, set()).add(stated)
-        elif shape:
+                stated_forms.setdefault(form, set()).add(party)
+        elif shape and strong is None:
             form = _comparison_form(reading_of(description), form_cache)
             if form:
                 bare.setdefault(shape, Counter())[form] += 1
@@ -525,7 +621,7 @@ def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
     # on the account's "Party stated" bar, and asked for an export file that would say nothing
     # new. The link is the one case where the answer is certain.
     links = {
-        shape: Alias(name, counted[name], STATED_NAME)
+        shape: Alias(name, counted[name], kind_of.get(name, STATED_NAME))
         for shape, counted in seen.items()
         if len(counted) == 1
         for name in counted
@@ -543,7 +639,7 @@ def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
             by = TRUNCATED_NAME
         if len(parties) == 1:
             (party,) = parties
-            links[shape] = Alias(party, 0, STATED_NAME, by)
+            links[shape] = Alias(party, 0, kind_of.get(party, STATED_NAME), by)
     return links
 
 
@@ -618,11 +714,50 @@ def _comparison_form(
     return found
 
 
-def names_of(rows: Sequence[tuple[str, str]]) -> list[Named]:
-    """The name of each (description, counterparty) row, the links learned from all of them
-    (`learned_links`) used for the rows that state none."""
+def names_of(rows: Sequence[Fields | tuple[str, str]]) -> list[Named]:
+    """The name of each row (a `Fields`, or a bare (description, counterparty) pair), the links
+    learned from all of them (`learned_links`) used for the rows that state none."""
     links = learned_links(rows)
-    return [name_of(description, counterparty, links) for description, counterparty in rows]
+    fields = [Fields(*row) for row in rows]
+    return [
+        name_of(
+            f.description, f.counterparty, links, account=f.account, source_id=f.source_id
+        )
+        for f in fields
+    ]
+
+
+def display_names(rows: Sequence[Fields], named: Sequence[Named]) -> dict[str, str]:
+    """For each name that is an identifier (an account, a source's id), the readable name its
+    rows are SHOWN under: the counterparty name most of them state, else the shape of the
+    description most of them print, else `UNNAMED_PARTY`. Never the identifier itself.
+
+    Most common first, then alphabetical, so the answer does not depend on the order of the rows.
+    A party's identity is its identifier; this is only what it is called to a reader, and two
+    parties may be called alike (two people who share a stated name), which is why identity does
+    not rest on it."""
+    stated: dict[str, Counter[str]] = {}
+    described: dict[str, Counter[str]] = {}
+    for row, item in zip(rows, named, strict=True):
+        if item.kind not in (ACCOUNT, SOURCE_ID) or not item.name:
+            continue
+        stated.setdefault(item.name, Counter())
+        described.setdefault(item.name, Counter())
+        name = counterparty_name(row.counterparty)
+        if name:
+            stated[item.name][name] += 1
+        shape = _shape(row.description)
+        if shape:
+            described[item.name][shape] += 1
+
+    def best(counted: Counter[str]) -> str:
+        return min(counted, key=lambda text: (-counted[text], text))
+
+    return {
+        key: best(stated[key]) if stated[key] else best(described[key]) if described[key]
+        else UNNAMED_PARTY
+        for key in stated
+    }
 
 
 def count_shapes(descriptions: Iterable[str]) -> dict[str, int]:
@@ -657,8 +792,8 @@ class NameOrigin:
     matched: int = 0
     #: Rows named by the description being a cut-off opening of this name (`TRUNCATED_NAME`).
     truncated: int = 0
-    #: Rows named by the other party's account number or a source's id for it, which a row
-    #: carries only once the derived rows have those columns.
+    #: Rows named by the other party's account (`ACCOUNT`) or the source's own id for the party
+    #: (`SOURCE_ID`), which name them before anything they print.
     account: int = 0
     source_id: int = 0
     #: The first source (alphabetically) that stated this name or the source's id, "" where none
@@ -709,7 +844,9 @@ def name_origins(
     for item, source in zip(rows, each, strict=True):
         if not item.name:
             continue
-        if item.kind == MATCHED_NAME:
+        if item.kind == ACCOUNT:
+            accounts[item.name] += 1
+        elif item.kind == MATCHED_NAME:
             matched[item.name] += 1
         elif item.kind == TRUNCATED_NAME:
             truncated[item.name] += 1
@@ -718,8 +855,6 @@ def name_origins(
             supports.setdefault(item.name, {})[item.via] = item.support
         elif item.kind == DESCRIPTION:
             described[item.name] += 1
-        elif item.kind == ACCOUNT:
-            accounts[item.name] += 1
         else:
             if item.kind == SOURCE_ID:
                 source_ids[item.name] += 1
@@ -787,15 +922,16 @@ def _origin_has(origin: NameOrigin, kind: str) -> bool:
 
 
 def name_readings(
-    rows: Sequence[tuple[str, str]], named: Sequence[Named]
+    rows: Sequence[Fields | tuple[str, str]], named: Sequence[Named]
 ) -> dict[str, str]:
     """For each name, the text it is COMPARED on (`reading_of`): the reading of the counterparty
     or description it was read from, most common first, then of fewer words, then alphabetical,
     so the answer does not depend on the order of the rows. A row named through a link adds
     nothing: the name's own rows say how it is read."""
     seen: dict[str, Counter[str]] = {}
-    for (description, counterparty), item in zip(rows, named, strict=True):
-        if not item.name or item.kind in (ALIAS, MATCHED_NAME, TRUNCATED_NAME):
+    for row, item in zip(rows, named, strict=True):
+        description, counterparty = row[0], row[1]
+        if not item.name or item.kind in (ALIAS, MATCHED_NAME, TRUNCATED_NAME, ACCOUNT, SOURCE_ID):
             continue
         if item.kind == DESCRIPTION:
             read = reading_of(description)
@@ -1212,6 +1348,8 @@ class Covered:
     #: the link was learned from.
     via: str = ""
     support: int = 0
+    #: For a row named through a link: the kind of identifier (`LADDER`) the link leads to.
+    linked_by: str = ""
 
 
 @dataclass(frozen=True)
@@ -1232,6 +1370,18 @@ class EntitiesView:
     #: How each name's rows came to have it (`name_origins`); empty where the view was made from
     #: counts alone, and the page then says nothing about sources.
     origins: Mapping[str, NameOrigin] = field(default_factory=dict)
+    #: The readable name of each name that is an identifier (`display_names`). Such a name groups
+    #: rows and is never printed: a page asks `label`.
+    labels: Mapping[str, str] = field(default_factory=dict)
+
+    def label(self, name: str) -> str:
+        """What a page prints for a name: its label where it is an identifier, the name itself
+        otherwise, and `UNNAMED_PARTY` for an identifier no row holds a label for now (an entity
+        still holding a party whose payments have gone) - never the identifier."""
+        found = self.labels.get(name)
+        if found is not None:
+            return found
+        return UNNAMED_PARTY if is_identifier_key(name) else name
 
     def free_shapes(self) -> list[str]:
         """The shapes under no entity, most-used first."""
@@ -1328,6 +1478,7 @@ def entity_page_of(
     counts: Mapping[str, int],
     covers: Mapping[str, tuple[Covered, ...]],
     origins: Mapping[str, NameOrigin] | None = None,
+    labels: Mapping[str, str] | None = None,
 ) -> EntityPage | None:
     """The page of one entity, or None where no entity not removed has that id. `entities` are
     resolved (`with_rules`) and `rules` are the live rules of all of them."""
@@ -1350,6 +1501,7 @@ def entity_page_of(
             proposals=Proposals(groups=(), too_broad=()),
             covers=covers,
             origins=origins or {},
+            labels=labels or {},
         ),
     )
 
@@ -1361,11 +1513,15 @@ def view_of(
     covers: Mapping[str, tuple[Covered, ...]] | None = None,
     origins: Mapping[str, NameOrigin] | None = None,
     readings: Mapping[str, str] | None = None,
+    labels: Mapping[str, str] | None = None,
 ) -> EntitiesView:
     """The page's view of the names held and the entities made from them.
 
     `origins` is `name_origins`: how each name's rows came to have it.
     `readings` is `name_readings`: the text each name is compared on where that is not the name.
+    `labels` is `display_names`. A name that is an identifier is an exact link and not text, so
+    it is never proposed for a merge by what its label looks like: nothing is asked of the owner
+    about a party the account or the bank's own id already settled.
 
     `legs` is, for each shape, how many of its transactions are legs of confirmed transfers
     between the owner's own accounts; the shapes it makes the owner's are set apart before the
@@ -1375,7 +1531,8 @@ def view_of(
     taken = {shape for entity in made for shape in entity.shapes}
     owner = owner_group(counts, legs or {}, taken)
     set_apart = taken | set(owner.shapes if owner else ())
-    proposals = propose_groups(counts, taken=set_apart, readings=readings)
+    text_names = {name: n for name, n in counts.items() if not is_identifier_key(name)}
+    proposals = propose_groups(text_names, taken=set_apart, readings=readings)
     offered = {s for g in (*proposals.groups, *proposals.too_broad) for s in g.shapes}
     return EntitiesView(
         counts=counts,
@@ -1383,8 +1540,9 @@ def view_of(
         proposals=proposals,
         covers=covers or {},
         origins=origins or {},
+        labels=labels or {},
         owner=owner,
-        suggestions=suggest_for_entities(counts, made, set_apart | offered, readings),
+        suggestions=suggest_for_entities(text_names, made, set_apart | offered, readings),
     )
 
 
