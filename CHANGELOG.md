@@ -26,6 +26,37 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.370] - 2026-10-07
+
+### Fixed
+- **A description that matches a stated party's name exactly, compared as
+  names are compared, takes that party.** 0.4.369's real-store reading:
+  867 names, 777 from a stated party and 90 from the description, but only
+  34 transactions joined by a payment seen by both sources - and the
+  Recurring page showed 0.4.361's signature again (the habit to none,
+  stopped 31 to 36), because a party's feed months were named by the bank's
+  merchant name and its statement-only months by the printed description,
+  and the learned link could bridge them only where a statement's narrative
+  reduced to exactly the same shape as a feed's description, which a country
+  code or a town defeats. One more rung on the ladder, below the learned
+  link and above the bare description: a description-only row whose
+  description, compared the way the proposals compare names (method words
+  set aside, trailing codes ignored, plural, initials, possessive s), equals
+  a stated party's name exactly is that party, and says "from the
+  description, which matches the bank's merchant name “X” exactly". Exact
+  only - a truncation is not matched, a shared opening is not matched, and a
+  description that compares equal to two different parties links to
+  neither - so it is a link with a kind, not the description pretending.
+  Pinned by constructed cases, including a venue's 39-of-52-week habit that
+  is one weekly series when matched and two when the statement truncates
+  the name. On the large invented store it names 192 of 6,164
+  description-only rows (3%: the rest have no stated row of that form at
+  all, 208 have no distinctive word) and moves no series. Predicted for the
+  real store, counts only: the habit back to one, stopped near 31, "from the
+  description" well under 90. If the habit stays at none, the statements
+  print the party in some other form and the next step is the owner's
+  confirmation of a shared-opening proposal, not a looser rule.
+
 ## [0.4.369] - 2026-10-07
 
 ### Changed
