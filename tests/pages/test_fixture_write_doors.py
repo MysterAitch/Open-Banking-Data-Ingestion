@@ -236,9 +236,17 @@ JUSTIFIED = {
     "disregarded_balances table existed, and with a version NEWER than the code knows: the "
     "application stamps only the current version, so neither an old store growing the table "
     "nor a newer store being refused can be reached through it",
+    ("test_entity_identifiers_store.py", "entity_shapes"): "writes the attachments in the "
+    "shape schema 25 shipped (tests/schema_history/22-entity-rules.sql), which no current "
+    "writer produces, to prove the migration moves them as description-kind identifiers",
+    ("test_entity_identifiers_store.py", "entities"): "gives those old attachments the entity "
+    "they were attached to; the migration reads the old table and never writes this one",
+    ("test_entity_identifiers_store.py", "obdi_meta"): "stamps a store with the version BEFORE "
+    "kinds, so only a rewound marker shows the open that migrates it",
     ("test_entity_store.py", "obdi_meta"): "stamps a store with the version BEFORE the entities "
-    "and entity_shapes tables existed, for the same reason as the entries above: only a rewound "
-    "marker shows that opening an old store grows the tables the first entity needs",
+    "and entity tables existed, and (in the migration tests) with the version that still held "
+    "entity_shapes, for the same reason as the entries above: only a rewound marker shows that "
+    "opening an old store grows the tables the first entity needs, and moves its attachments",
     ("test_disregarded_balances.py", "obdi_meta"): "stamps a store with the version BEFORE "
     "the disregarded_balances table existed, for the same reason as the entry above",
     ("test_serving_over_a_newer_store.py", "obdi_meta"): "stamps a store with a version NEWER "

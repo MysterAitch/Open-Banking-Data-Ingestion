@@ -125,7 +125,7 @@ class TestSplittingApart:
         detach_shape(store, GROCER[2], now=NOW + timedelta(minutes=1))
 
         rows = store.connection.execute(
-            "SELECT detached_at FROM entity_shapes WHERE shape = ?", (GROCER[2],)
+            "SELECT detached_at FROM entity_identifiers WHERE value = ?", (GROCER[2],)
         ).fetchall()
 
         assert [r["detached_at"] for r in rows] == [(NOW + timedelta(minutes=1)).isoformat()]
@@ -257,7 +257,7 @@ class TestFoldingOneEntityIntoAnother:
         store.fold_entity(second, "Fernhollow", now=NOW)
 
         rows = store.connection.execute(
-            "SELECT of_entity, detached_at FROM entity_shapes WHERE shape = ?", (GROCER[2],)
+            "SELECT of_entity, detached_at FROM entity_identifiers WHERE value = ?", (GROCER[2],)
         ).fetchall()
         assert sorted((r["of_entity"] == second, r["detached_at"] is None) for r in rows) == [
             (False, True),
@@ -403,7 +403,7 @@ class TestAStoreFromBeforeTheEntityRole:
         path = tmp_path / "old.sqlite3"
         with Store(path) as old:
             old.connection.executescript(
-                "DROP TABLE entity_shapes; DROP TABLE entities;"
+                "DROP TABLE entity_identifiers; DROP TABLE entities;"
                 "CREATE TABLE entities (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,"
                 " parent_id INTEGER, created_at TEXT NOT NULL, removed_at TEXT);"
                 "CREATE TABLE entity_shapes (id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -429,7 +429,7 @@ class TestSurvivingTheRebuildFromRaw:
 
         assert names_and_shapes(store) == {"Fernhollow Grocers": tuple(sorted(GROCER[:2]))}
         assert (
-            store.connection.execute("SELECT COUNT(*) FROM entity_shapes").fetchone()[0] == 3
+            store.connection.execute("SELECT COUNT(*) FROM entity_identifiers").fetchone()[0] == 3
         ), "the detached shape's history was lost"
 
 
@@ -437,7 +437,7 @@ class TestAStoreFromBeforeTheEntityTables:
     def test_Store_StampedVersion22WithoutTheTables_GrowsThemOnOpenAndTakesAnEntity(self, tmp_path):
         path = tmp_path / "old.sqlite3"
         with Store(path) as old:
-            old.connection.execute("DROP TABLE entity_shapes")
+            old.connection.execute("DROP TABLE entity_identifiers")
             old.connection.execute("DROP TABLE entities")
             old.connection.execute(
                 "UPDATE obdi_meta SET value = '22' WHERE key = 'schema_version'"
