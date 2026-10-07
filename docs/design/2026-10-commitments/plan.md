@@ -157,7 +157,13 @@ Target / accrual (what a category must hold by when; what a prepaid period costs
   leg: my account to the provider. A shared bill has two or three; a bills-space stash has a leg
   into the space before the leg out of it; a card payment has the leg to the provider from the
   card and a later leg from a current account to the card. Each held leg is matchable to the
-  transactions obdi holds; an external leg is a fact declared, never checked.
+  transactions obdi holds; an external leg is a fact declared, never checked. A leg has a
+  direction, and an INCOMING leg is a receivable: where I pay the provider in full and others
+  owe me their portions (the owner, 2026-10-07: "scenarios where I have paid the full amount of
+  something, but I'm waiting on other people to pay me their portion"), each partner's share is
+  an incoming leg with its own due day, "waiting on X for Y" until a transfer matches it and
+  closed when one does. The overview and Today can sum what is owed to the owner, and a
+  receivable past its day is a thing to do - the mirror of an outgoing leg that did not happen.
 - **Occurrence.** One instance of a commitment happening: the transaction (or transactions, one
   per held leg) obdi matched to it, with the day, the amount, the account, and which window it
   fell in. The detector's occurrences are these without the declaration.
@@ -284,10 +290,11 @@ the month needs is shown as surplus on the account page, so a standing order tha
 visible - open question 8 asks what the numbers are.
 
 What obdi checks: each held leg against the transactions, by entity, amount within its window,
-and day within its tolerance. Leg 2 missing by the 30th: "the partner's half for October has not
-arrived (expected by the 30th)". Leg 3 missing on the 2nd: "October's rent did not go out on the
-1st" - the same stopped rule the detector has, per leg. An external leg is never checked and
-never reported.
+and day within its tolerance. Leg 2 is the receivable: missing by the 30th, "the partner's half
+for October has not arrived (expected by the 30th)", and the overview's "owed to you" carries
+£450 until it does. Leg 3 missing on the 2nd: "October's rent did not go out on the 1st" - the
+same stopped rule the detector has, per leg. An external leg is never checked and never
+reported.
 
 ### Worked example D - a subscription on a credit card that carries a balance
 
