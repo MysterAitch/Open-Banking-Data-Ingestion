@@ -77,9 +77,38 @@ commit.
   run it twice yourself, and never two suites at once. Do not edit the tree while the whole
   suite runs on it: several tests read a source file as text (the dispatcher's route list, the
   stylesheet), and an edit landing mid-run fails them with an empty set that is not a fault.
+- Which tests to run is in the next section; the paragraph above says how often.
 - `ruff check .` over the whole repository (the release lints everything, not only `src` and
   `tests`) and `mypy` strict over `src`, both clean; no `# type: ignore`, no null-forgiving
   shortcuts.
+
+## Which tests to run
+
+The suite is over ten thousand tests and takes a quarter of an hour, so a builder runs the layer
+the change touched plus the guards, and the whole suite runs once, at the CI gate. A test file
+belongs to the layer of the module it tests; the one table that places every file, and names the
+guards and the slow tests, is at the top of `tests/conftest.py`. A new test file must be added
+there or collection refuses it.
+
+- Layers: `ingest` (providers, parsers, store, rebuild, extraction, matching), `verify`
+  (agreement, standing, trust, coverage, statements, spans, protection, balances), `analysis`
+  (recurring), `pages` (the web modules, navigation, stylesheet, layout, page wording), `export`
+  (Actual, push, audit).
+- `guards` are the cross-cutting tests that enforce a house rule across the tree (no stored value
+  on a GET, navigation, hardening, page wording, speed budgets, account names, fixture write
+  doors, the parser contract, the stylesheet as served). Every change passes them whatever layer
+  it touched.
+- `slow` marks the tests that build the large stores.
+- A change in one layer runs that layer plus guards:
+  `python -m pytest -n 4 -m "ingest or guards"` (likewise `"verify or guards"`,
+  `"analysis or guards"`, `"pages or guards"`, `"export or guards"`). A change across layers
+  names each: `-m "ingest or pages or guards"`.
+- `-m "not slow"` is the quick local pass over everything; `-m "guards and not slow"` is the
+  quickest check that nothing across the tree broke.
+- The whole suite (no `-m`) is for the CI gate and for whoever merges.
+- A marker is a promise about a file's place, not a substitute for running what a change
+  obviously reaches: when a change touches a module another layer's tests exercise, run those
+  files by name as well.
 
 ## Working
 

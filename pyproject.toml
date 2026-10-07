@@ -57,6 +57,18 @@ packages = ["src/obdi"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# A misspelt marker is an error, not a test that nobody selects. Which file gets which marker is
+# decided once, in tests/conftest.py; docs/BUILDING.md says how to select them.
+addopts = "--strict-markers"
+markers = [
+    "ingest: providers, parsers, store, rebuild, extraction, matching, ingest",
+    "verify: agreement, standing, trust, coverage, statements, spans, protection, balances",
+    "analysis: recurring series and what the commitments phase will add",
+    "pages: every web module's tests, navigation, stylesheet, layout and scale, page wording",
+    "export: Actual, YNAB, push, audit",
+    "guards: cross-cutting tests every change must pass, whatever layer it touched",
+    "slow: builds the large stores; leave out of a quick pass with -m 'not slow'",
+]
 
 [tool.ruff]
 line-length = 100

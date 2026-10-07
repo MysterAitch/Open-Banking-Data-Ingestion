@@ -25,11 +25,184 @@ the suite honest today, which is the part that cannot wait.
 
 from __future__ import annotations
 
+import fnmatch
 import functools
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
+
+#: WHICH TESTS A CHANGE RUNS. A test file belongs to the LAYER of the module it tests (`ingest`,
+#: `verify`, `analysis`, `pages`, `export`), and is marked with exactly one. A GUARD is a test that
+#: enforces a house rule across the tree rather than testing one feature; it is marked `guards`
+#: as well as with its layer. `slow` marks the tests that build the large stores. A builder runs
+#: `-m "<layer> or guards"` for the layer touched and the CI gate runs everything; docs/BUILDING.md
+#: ("Which tests to run") states the routine. The markers are applied here, by file, so that 400
+#: test files are not each edited; `pytest_collection_modifyitems` below refuses a test file this
+#: table does not place, so a new file must be added here. `--strict-markers` is set in
+#: pyproject.toml, so a misspelt marker is an error rather than a test nobody selects.
+#:
+#: Entries are file names without `test_` and `.py`, and may use `*`. The FIRST layer whose
+#: patterns match wins, so an exception is listed in a layer that comes before the general
+#: pattern it departs from.
+LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "pages",
+        (
+            "account_about_*", "account_names", "account_names_on_every_page",
+            "account_next_statement_due", "account_page*", "account_pickers",
+            "accounts_page_*", "accounts_phone_layout", "actual_audit_wording",
+            "actual_history_page", "actual_not_configured", "actual_page*",
+            "actual_sync_surface", "agreements_page", "answer_pages", "archive_account",
+            "archived_strip", "artefact_page_after_a_move", "attempts_page", "balance_chart_*",
+            "breakdown_cost", "bring_in_links", "bring_in_page", "bring_in_scale", "checks_index",
+            "connections_page", "connections_position_scale", "coverage_page*",
+            "coverage_timeline_collapsed*", "coverage_timeline_page",
+            "coverage_timeline_phone_layout", "dangling_annotations_surface", "date_window*",
+            "deep_links", "destinations", "dev_harness", "every_page_is_reachable",
+            "family_pages", "fetch_timeline*", "gaps_cost", "gaps_marks_page",
+            "good_results_are_said_quietly", "handler_faults", "home_*",
+            "identifiers_are_set_as_code", "import_masking", "instance_identity",
+            "irreplaceable_work", "kept_statements_page", "ledger_opening_page", "ledger_page",
+            "ledger_row_folds", "ledger_sighting_lines", "ledger_window*", "london_clock",
+            "masking", "measurement_wording", "movement_pages", "no_row_items", "overview",
+            "overview_*", "page_*", "period_reconciliation_scale", "phone_layout", "plural",
+            "position_chart_*", "position_page", "position_window_*", "proof_rail",
+            "protection_page", "range_length_on_pages", "recurring_page",
+            "recurring_phone_layout", "report_page_wording", "review_flags_balance_lines",
+            "review_flags_page", "review_page", "same_money_outcomes", "scheduler_*",
+            "section_pages", "standing_pages", "statement_extraction_pages",
+            "statement_extraction_scale", "statement_listing_rule_pages",
+            "statement_reader_findings", "statement_shape_page", "statements_move",
+            "statements_page_scale", "stylesheet", "stylesheet_as_served",
+            "times_on_the_owners_clock", "timings", "today_*", "typed_phone_layout",
+            "upload_script", "values_sitting", "verification_phone_layout", "web", "web_*",
+            "window_control", "disclosure_gate", "action_names",
+            "get_routes_hold_no_stored_values", "ledger_speed", "navigation",
+        ),
+    ),
+    (
+        "export",
+        (
+            "actual_*", "align_actual", "balance_only_disregard_reaches_the_push", "cleared_push",
+            "empty_actual", "opening_payload", "sync_marker", "transfer_categorisation",
+            "transfer_pairs_payload", "transfer_skip_reasons",
+        ),
+    ),
+    ("analysis", ("recurring", "recurring_series", "recurring_speed")),
+    (
+        "verify",
+        (
+            "agreement*", "aggregator_day_anchors", "asked_coverage", "balance_anchors",
+            "balance_meaning", "balance_only_accounts", "balance_reconciliation", "bank_balances",
+            "card_row_fault_measured", "coverage", "coverage_timeline*", "disregard*",
+            "export_cuts", "export_dating", "family_*", "fault_structure", "fetch_gaps*",
+            "fetch_marks*", "ledger", "ledger_running_balance", "movement_*",
+            "period_reconciliation", "position", "position_trust", "protection",
+            "removed_balances", "row_parting", "space_listing_anchors", "standing_*",
+            "statement_checks_held", "statement_listing*", "statement_membership",
+            "statement_opening_*", "statement_period_holes", "statement_span*", "todo", "trust",
+            "valuations", "verdict_words",
+        ),
+    ),
+    (
+        "ingest",
+        (
+            "absorbed_rows", "account_observations", "accounts", "alert_wiring", "alerts",
+            "annotations", "arrival_orders_vary", "artefact_origins", "artefact_shape_link",
+            "assignment_doubt", "attempts", "backfill", "backup", "bring_in*", "buildinfo",
+            "callback", "*_statement", "credit_union_*", "cash_transfers",
+            "cash_withdrawal_measure", "changes_probe", "claimed_window", "classification", "cli",
+            "clock_travel_probe", "closed_space_*",
+            "connection_attribution", "connection_durability", "connections",
+            "consecutive_days_nothing_joined", "cross_source", "cross_source_reissue",
+            "currency", "date_ambiguity", "declared_accounts", "declined_items", "defer",
+            "deterministic_ids", "doctor", "doctor_rebuild_check", "duplication",
+            "empty_rebuild_alarm", "equal_payments_close_together", "exact_rule_*", "explain",
+            "export_declared", "export_raw", "export_rows_dated_after_the_feed",
+            "export_verification", "feed_*", "fetch_now", "file_api_dedup", "fingerprint",
+            "fixture_write_doors", "historical_spaces", "history_boundary_survival", "id_tier",
+            "identifiers", "identity", "identity_health", "identity_health_speed",
+            "instrumentation", "internal_leg_pairing", "jsontypes", "known_accounts",
+            "large_store_*", "leases", "ledger_dates_and_joins", "logs", "lookalike_recipient",
+            "matching", "matching_equivalence", "migrations_are_reachable", "money",
+            "namespaces", "no_row_status_measurement", "occurrence_allocation", "orphan_classes",
+            "orphaned_entity_rows", "own_account_explanations", "parser_*", "parsers", "pdf_*",
+            "pending_*", "probing", "propagation", "provenance", "provenance_registry",
+            "provider_*", "prune_clear", "pull", "pull_*", "qif", "rawview", "rebind_survival",
+            "rebuild*", "refile_leaves_nothing_behind", "repeated_items_in_one_artefact",
+            "replay", "replay_order", "restore", "reversed_and_unpaired_legs", "review_*",
+            "rolling_cursor", "round_up_*", "round_ups", "rule_orphans", "same_money_fold*",
+            "scaling_laws", "scheduled_*", "schema_migrations", "schema_version_gate",
+            "scratch_path_sink", "secret_rotation", "secrets", "serving_over_a_newer_store",
+            "settlement_*", "sighting_*", "sign_convention", "source_search", "source_tiers",
+            "space_*", "spaces", "spaces_finish", "starling", "stated_times_every_source",
+            "statement_batch_cost", "statement_columns", "statement_extraction_stored",
+            "statement_names", "statement_parser_contract", "statement_reading_cache",
+            "statement_section*", "statement_shape", "statement_terms", "statement_upload_skip",
+            "store_schema_twenty", "suite_markers", "suite_runs_against_itself", "synthetic_*",
+            "tiers", "transfer_split", "truelayer_identity", "typed_transactions",
+            "upload_filenames", "worklist_*", "write_batching",
+        ),
+    ),
+)
+
+#: The guards: each enforces a house rule across the tree, or holds a speed budget, rather than
+#: testing one feature. Chosen by reading each candidate; a test that merely asserts a page's own
+#: wording or layout is a feature test and stays out, or `guards` stops being a short list.
+GUARDS: frozenset[str] = frozenset(
+    {
+        "get_routes_hold_no_stored_values", "navigation", "web_hardening",
+        "page_wording_counts", "page_wording_emphasis", "page_wording_internals",
+        "page_wording_plain", "page_wording_times", "page_wording_vocabulary",
+        "report_page_wording", "measurement_wording", "ledger_speed", "recurring_speed",
+        "identity_health_speed", "scaling_laws", "account_names_on_every_page",
+        "fixture_write_doors", "statement_parser_contract", "stylesheet_as_served",
+        "good_results_are_said_quietly", "identifiers_are_set_as_code",
+        "suite_runs_against_itself", "suite_markers", "scratch_path_sink",
+        "every_page_is_reachable", "deep_links", "page_structure", "namespaces",
+        "migrations_are_reachable", "schema_version_gate",
+        "times_on_the_owners_clock", "handler_faults",
+    }
+)
+
+#: Tests that build the large stores (`large_store_corpus`) or rebuild and compare whole stores.
+SLOW: frozenset[str] = frozenset(
+    {
+        "large_store_corpus", "large_store_rebuild", "ledger_speed", "recurring_speed",
+        "identity_health_speed", "page_equivalence", "matching_equivalence", "scaling_laws",
+    }
+)
+
+
+def layer_of(stem: str) -> str | None:
+    """The layer a test file (named without `test_` and `.py`) belongs to, or None if unplaced."""
+    for layer, patterns in LAYERS:
+        if any(fnmatch.fnmatchcase(stem, pattern) for pattern in patterns):
+            return layer
+    return None
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Mark every collected test by its file, and refuse a file the table does not place."""
+    unplaced: set[str] = set()
+    for item in items:
+        stem = Path(str(item.fspath)).stem.removeprefix("test_")
+        layer = layer_of(stem)
+        if layer is None:
+            unplaced.add(Path(str(item.fspath)).name)
+            continue
+        item.add_marker(getattr(pytest.mark, layer))
+        if stem in GUARDS:
+            item.add_marker(pytest.mark.guards)
+        if stem in SLOW:
+            item.add_marker(pytest.mark.slow)
+    if unplaced:
+        raise pytest.UsageError(
+            "Test files not placed in a layer (add them to LAYERS in tests/conftest.py): "
+            + ", ".join(sorted(unplaced))
+        )
 
 #: Prefixes of everything obdi reads from the environment. A prefix rather than a
 #: list of names: a variable added tomorrow is covered without anyone remembering
