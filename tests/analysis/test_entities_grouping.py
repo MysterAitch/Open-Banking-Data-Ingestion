@@ -89,6 +89,59 @@ class TestAnOpeningThatNamesHowAndNotWho:
         assert [len(b.shapes) for b in found.too_broad] == [9]
 
 
+class TestAPossessiveSFusesToItsWordInTheComparison:
+    """KNOWN ANSWERS, decided first. An apostrophe leaves a lone "s" after punctuation goes, so
+    "SAINSBURY'S" is the two words "sainsbury s" in the shape. Compared as it stands, the four
+    names below split into a pair that opens "sainsbury s" and a pair that opens "sainsburys",
+    and the pair that opens differently is left unproposed (measured before the fusing: one
+    proposal of two names, "sainsbury s london" and "sainsbury s york"). Fused, they are one
+    proposal of four. The shape - the key every row is grouped by - must not move."""
+
+    FOUR = (
+        "SAINSBURY'S LONDON",
+        "SAINSBURYS LEEDS",
+        "SAINSBURY'S YORK",
+        "SAINSBURYS BATH",
+    )
+
+    def test_Proposal_WhenOnePayeeIsPrintedWithAndWithoutItsApostrophe_IsOneProposal(self):
+        found = proposals(*self.FOUR)
+
+        assert len(found) == 1
+        assert len(found[0].shapes) == 4
+
+    def test_Proposal_WhenAStrayLoneSFollowsAnAlreadyPluralWord_StillMeetsTheApostropheForm(
+        self,
+    ):
+        found = proposals("SAINSBURY'S MKTS 12", "SAINSBURYS S MKTS 44", "SAINSBURYS MKTS 9")
+
+        assert len(found) == 1
+        assert len(found[0].shapes) == 3
+
+    def test_Tokens_WhenALoneSFollowsAWord_AreTheWordsOwnPlural(self):
+        assert [t.norm for t in tokens_of("sainsbury s mkts")] == ["sainsbury", "mkt"]
+        assert [t.norm for t in tokens_of("sainsburys s mkts")] == ["sainsbury", "mkt"]
+        assert [t.norm for t in tokens_of("sainsburys mkts")] == ["sainsbury", "mkt"]
+
+    def test_Tokens_WhenTheSIsPartOfInitials_AreUnchanged(self):
+        assert [t.norm for t in tokens_of("m s bank")] == ["ms", "bank"]
+
+    @pytest.mark.parametrize(
+        ("shape", "norms"),
+        [
+            ("s", ["s"]),
+            ("s tesco", ["s", "tesco"]),
+            ("bp s", ["bp", "s"]),
+            ("tesco s m", ["tesco", "s", "m"]),
+        ],
+    )
+    def test_Tokens_WhenTheSHasNoWordOfThreeLettersBeforeIt_IsLeftAlone(self, shape, norms):
+        assert [t.norm for t in tokens_of(shape)] == norms
+
+    def test_Shape_WhenAnApostropheIsPrinted_KeepsTheKeyItAlwaysHad(self):
+        assert shape_of("SAINSBURY'S MKTS") == "sainsbury s mkts"
+
+
 class TestTheShapeOfADescription:
     def test_Shape_WhenOnlyTheStoreNumberDiffers_IsTheSameShape(self):
         first = shape_of("FERNHOLLOW GROCERS 1041 LONDON")

@@ -64,7 +64,8 @@ COMPARISON_SENTENCE = (
     "Names are compared word by word. A payment method printed before the name and a country "
     "or company code after it are set aside; a plural “s” on a word of "
     f"{_PLURAL_FLOOR + 1} letters or more, an ampersand or “and”, and spaced initials (“b m”, "
-    "“bm”, “b&m”) make no difference. Initials match initials only, never a spelled-out name, "
+    "“bm”, “b&m”) make no difference, and neither does an apostrophe “s” (“sainsbury s”, "
+    "“sainsburys”). Initials match initials only, never a spelled-out name, "
     f"and a word of fewer than {MIN_DISTINCTIVE_LETTERS} letters never tells two names apart. "
     f"A word that opens with {MIN_FUSED_LETTERS} letters or more and runs into a number "
     "(“bank0806249308”) is compared as its letters (“bank”), though the name itself is made "
@@ -129,9 +130,27 @@ def core_words(shape: str) -> list[str]:
     return words[:end]
 
 
+def _is_lone_s(words: Sequence[str], index: int) -> bool:
+    """Whether `words[index]` is a possessive "s" cut from its word by an apostrophe: a bare "s"
+    straight after a word of `MIN_DISTINCTIVE_LETTERS` letters or more, and not part of a run of
+    single letters (initials such as "m s" are `tokens_of`'s own business)."""
+    if words[index] != "s" or index == 0:
+        return False
+    before = words[index - 1]
+    if len(before) < MIN_DISTINCTIVE_LETTERS or not before.isalpha():
+        return False
+    after = words[index + 1] if index + 1 < len(words) else ""
+    return not (len(after) == 1 and after.isalpha())
+
+
 def tokens_of(shape: str) -> tuple[Token, ...]:
     """The shape's name as comparable tokens. A leading run of two or more one-letter words is
-    one token ("w m" is "wm", and "b m" is "bm"); every other word loses a trailing plural."""
+    one token ("w m" is "wm", and "b m" is "bm"); a lone possessive "s" fuses to the word before
+    it ("sainsbury s" is "sainsburys", and a word already ending in "s" absorbs it); every other
+    word loses a trailing plural.
+
+    The fusing is for COMPARING only. The shape (`entities.shape_of`) keeps "sainsbury s", since
+    it is the key every row is grouped by and must not move for the sake of comparison."""
     words = core_words(shape)
     run = 0
     while run < len(words) and len(words[run]) == 1 and words[run].isalpha():
@@ -141,7 +160,13 @@ def tokens_of(shape: str) -> tuple[Token, ...]:
     if run >= 2:
         found.append(Token("".join(words[:run]), " ".join(words[:run])))
         rest = words[run:]
-    found.extend(Token(_stem(word), word) for word in rest)
+    for position, word in enumerate(rest, start=len(words) - len(rest)):
+        if _is_lone_s(words, position):
+            before = words[position - 1]
+            joined = before if before.endswith("s") else before + "s"
+            found[-1] = Token(_stem(joined), f"{before} {word}")
+            continue
+        found.append(Token(_stem(word), word))
     return tuple(found)
 
 
