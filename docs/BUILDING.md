@@ -10,7 +10,10 @@ budgeting tool. The question every page answers is how far an account can be tru
 to date, complete, adds up to the balances the sources state, locked in by him - and what would
 raise it. Things to do are how trust is raised. Say nothing when all is well, beyond one quiet
 line of evidence that it was looked at. The design and its decisions are under
-`docs/design/2026-10-clean-slate/`.
+`docs/design/2026-10-clean-slate/`. What the product must do, for whom, and the cases it must
+handle are recorded under `docs/requirements/` (personas, use cases, numbered requirements,
+edge cases, a glossary), each with its status; a change that alters one edits it in the same
+commit.
 
 ## Rules that are never relaxed
 
