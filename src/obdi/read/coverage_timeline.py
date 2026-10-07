@@ -71,6 +71,7 @@ from ..verify.agreement import Agreement
 from ..verify.balance_anchors import EffectiveOpening
 from ..verify.statement_span import AccountSpans, Span, add_months, statement_spans
 from ..verify.statement_span import Known as SpanKnown
+from .party_coverage import PartyStated
 from .timeline import parse_window
 
 #: How an edge is known (see the module docstring).
@@ -366,6 +367,9 @@ class AccountTimeline:
     made_by_obdi: int = 0
     #: A Space (a pot inside another account): exports and statements cannot see it.
     is_space: bool = False
+    #: Where the account's transactions state their party, filled by the caller that holds the
+    #: names (`analysis.party_stated`); None where it has not been read.
+    party: PartyStated | None = None
 
     @property
     def fetch_gaps(self) -> tuple[Gap, ...]:

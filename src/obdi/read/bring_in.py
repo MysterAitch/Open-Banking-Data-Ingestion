@@ -34,12 +34,13 @@ from ..verify.standing_data import (
 )
 from ..verify.statement_span import STATEMENT_SOURCES
 from .fetch_gaps import Basis, FetchReport, GapKind
+from .party_coverage import want_words
 from .todo import gap_todos, lockable
 
 #: The gaps a person answers by stating a balance, which is an account page's to-do and not a
 #: file to bring in.
 BALANCE_KINDS = frozenset({GapKind.NO_BALANCE, GapKind.AUTOMATIC_ONLY, GapKind.ONE_BALANCE})
-_EXPORT_KINDS = frozenset({GapKind.EXPORT_STOPS, GapKind.EXPORT_MONTHS})
+_EXPORT_KINDS = frozenset({GapKind.EXPORT_STOPS, GapKind.EXPORT_MONTHS, GapKind.PARTY_UNSTATED})
 
 #: A few words for why each kind of file is wanted. The full reasoning is on the account's page
 #: and in `fetch_gaps`; a row here says it in the space beside a date.
@@ -50,6 +51,7 @@ _WHY = {
     GapKind.EXPORT_STOPS: "the export stops short",
     GapKind.EXPORT_MONTHS: "the export holds none of these months",
     GapKind.FLAG_SETTLE: "settles a flagged transaction",
+    GapKind.PARTY_UNSTATED: "",
 }
 
 
@@ -67,16 +69,27 @@ class WantedFile:
     source: str
     #: Where the days are an inference and not a fact held: drawn dashed.
     guess: bool
+    #: For an export wanted to state the party (`GapKind.PARTY_UNSTATED`), how many transactions
+    #: in its days the description alone names.
+    rows: int = 0
 
     @property
     def export(self) -> bool:
         return self.kind in _EXPORT_KINDS
 
     @property
+    def tests_nothing(self) -> bool:
+        """Whether the file is wanted for what it states and not to check the transactions: it
+        cannot be set aside as a known gap, which is a decision about what a file would test."""
+        return self.kind is GapKind.PARTY_UNSTATED
+
+    @property
     def words(self) -> str:
         """Why it is wanted, in a few words and without a date."""
         if self.kind is GapKind.HOLE_BETWEEN and self.guess:
             return "probably missing"
+        if self.kind is GapKind.PARTY_UNSTATED:
+            return want_words(self.rows)
         return _WHY[self.kind]
 
 
@@ -110,6 +123,13 @@ def files_wanted(report: FetchReport | None) -> tuple[WantedFile, ...]:
                         gap.basis is Basis.INFERRED,
                     )
                 )
+        found.extend(
+            WantedFile(
+                gap.account, gap.kind, gap.first_day, gap.last_day, None, "", False,
+                gap.described_rows,
+            )
+            for gap in outlook.party
+        )
     return tuple(found)
 
 

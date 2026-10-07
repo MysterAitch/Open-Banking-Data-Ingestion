@@ -59,6 +59,7 @@ from ..verify.statement_span import (
 )
 from .fetch_marks import MarkSet, OutOfScope, SetAside, partition
 from .overview import first_row_dates, held_by_account, statement_awaited
+from .party_coverage import PartyStated, stretch_words
 
 __all__ = ["add_months", "cadence_of", "closings_after"]
 
@@ -85,6 +86,10 @@ class GapKind(StrEnum):
     ONE_BALANCE = "one-balance"
     NOTHING_BEFORE = "nothing-before"
     FLAG_SETTLE = "flag-settle"
+    #: An export file that would state the other party of transactions the description alone
+    #: names. It tests nothing, so it is never among an account's `gaps`: it is an
+    #: `AccountOutlook.party` want, listed by Bring in beside the files that do.
+    PARTY_UNSTATED = "party-unstated"
 
 
 #: How pressing each kind is, most first: a missing statement or export stops verification and
@@ -135,6 +140,8 @@ class FetchGap:
     #: A sentence for a gap that returned to the list because a known gap's day to look again on
     #: came; "" otherwise.
     reminder: str = ""
+    #: For a `PARTY_UNSTATED` want, how many transactions in it the description alone names.
+    described_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -154,6 +161,9 @@ class AccountOutlook:
     #: The main account this is a Space of, "" for an account that is not one. A Space has no
     #: statement or export of its own to fetch: it is tested with its main account as a whole.
     space_of: str = ""
+    #: The exports wanted because the description alone names transactions, which test nothing and
+    #: so are kept apart from `gaps`: an account with only these still "needs nothing" to verify.
+    party: tuple[FetchGap, ...] = ()
 
     def due(self, today: date) -> date | None:
         """The day the next statement is expected, where the account needs nothing fetched and
@@ -228,6 +238,9 @@ class FetchEvidence:
     unlisted: RowEvidence = field(default_factory=RowEvidence)
     #: Each known Space's main account, as `family_anchors.Families.parents` says.
     space_parents: Mapping[str, str] = field(default_factory=dict)
+    #: Where each account's transactions state their party, which only the caller that holds the
+    #: names can read (`analysis.party_stated`): `gather_evidence` leaves it empty.
+    party: Mapping[str, PartyStated] = field(default_factory=dict)
 
 
 def gather_evidence(
@@ -511,6 +524,28 @@ def _outlook(
         statements=len(statements),
         next_expected=next_expected,
         source=source,
+        party=_party_wants(ref, evidence),
+    )
+
+
+def _party_wants(ref: str, evidence: FetchEvidence) -> tuple[FetchGap, ...]:
+    """The export for each stretch the description alone names, where a file could state it: none
+    for an account whose every source states no party (`PartyStated.askable`)."""
+    party = evidence.party.get(ref)
+    if party is None or not party.askable:
+        return ()
+    return tuple(
+        FetchGap(
+            ref,
+            GapKind.PARTY_UNSTATED,
+            stretch.first,
+            stretch.last,
+            Basis.STATED,
+            "",
+            stretch_words(stretch, askable=True),
+            described_rows=stretch.rows,
+        )
+        for stretch in party.stretches
     )
 
 

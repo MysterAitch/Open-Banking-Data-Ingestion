@@ -118,6 +118,7 @@ from .read.known_accounts import (
 )
 from .read.ledger import Ledger, LedgerWindow
 from .read.overview import Overview, OverviewCache, build_overview
+from .read.party_coverage import PartyStated, party_row_words
 from .read.position import Position
 from .read.scheduler_status import StepHandle, run_step
 from .verify.coverage import (
@@ -3209,6 +3210,17 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         mark_world_key, name="mark world", epoch=rebuild_epoch
     )
 
+    party_memo: KeyedMemo[dict[str, PartyStated]] = KeyedMemo(
+        mark_world_key, name="party stated", epoch=rebuild_epoch
+    )
+
+    def party_stated_all(store: Store) -> dict[str, PartyStated]:
+        """Where every account's transactions state their party, from the one read of the booked
+        transactions the names need (`analysis.party_stated`), held while they are unchanged."""
+        from .analysis.party_stated import party_stated_by_account
+
+        return party_memo.get(store, lambda: party_stated_by_account(store))
+
     statement_listing_memo: KeyedMemo[StatementListingReport] = KeyedMemo(
         mark_world_key, name="statements by what they list", epoch=rebuild_epoch
     )
@@ -3244,8 +3256,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """What the gaps and the statements' spans are read from, held with the standings' key."""
         return fetch_evidence_memo.get(
             store,
-            lambda: gather_evidence(
-                store, space_parents=families_of(store, _account_map(store)).parents
+            lambda: replace(
+                gather_evidence(
+                    store, space_parents=families_of(store, _account_map(store)).parents
+                ),
+                party=party_stated_all(store),
             ),
         )
 
@@ -3456,6 +3471,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 is_space=ref in space_refs(store),
                 spans=spans_of(store, ref, today),
             )
+            built = replace(built, party=party_stated_all(store).get(ref))
             held[key] = built
             return built
 
@@ -4486,6 +4502,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 note = row_notice(record, rates, today)
                 if note:
                     notes[str(record.ref)] = note
+            # An export file is a thing to do only where one could state the party
+            # (`PartyStated.askable`); a note about terms comes first, as the row has one slot.
+            for ref, party in party_stated_all(store).items():
+                if party.askable and party.stretches and ref not in notes:
+                    notes[ref] = party_row_words(party)
         return notes
 
     def artefact_index() -> list[dict[str, object]]:
