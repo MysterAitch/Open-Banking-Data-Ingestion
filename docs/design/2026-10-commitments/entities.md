@@ -88,6 +88,21 @@ A link is a **claim with a kind and a basis**, never a bare string match:
    because N payments carry both"), never by text similarity alone except as the last rung,
    and it always says which kind of evidence it rests on.
 
+### 3a. The owner is reached through an account, never through a transaction
+
+The owner, 2026-10-07: "re transfers to myself between accounts - this should just be treated
+as a transfer. The account being owned or controlled by me is a second order fact which
+indirectly links 'me' (the entity) by virtue of the counterparty account's attributes... ie not
+via the transaction itself." So a transfer between the household's accounts is a transfer: its
+other party is an ACCOUNT, known by the account identifier the row carries (section 2, first
+row) or by the confirmed transfer pair obdi already holds, and named by that account. Which
+entity that account belongs to is a fact declared on the account (the OWNS role of plan.md
+section 3: the owner solely by default, two owners for a joint account), and "me" is reached
+through it - second order, never from a name, a reference, or a description printed on the
+row. The 0.4.361 "Payments between your own accounts" group, which attached the legs' shapes to
+an owner entity by name, was first-order and is withdrawn: nothing is proposed for a transfer
+leg, and its row says "to your <account>" with the owner behind it derived from the account.
+
 ## 4. What obdi can learn without being told
 
 A payment seen by two sources is ONE row in the derived layer carrying both sources' fields
