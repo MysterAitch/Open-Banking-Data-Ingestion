@@ -26,6 +26,43 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.364] - 2026-10-07
+
+### Added
+- **An entity has its own page, and keeps the rule that made it.** The
+  owner, after the first live reading of the Entities page: "Once an entity
+  is created, I suggest it warrants its own page and metadata etc. ...
+  That's where the rule can be viewed and modified and tweaked and
+  experimentation via a dry run can happen"; and earlier, that a merge "needs
+  to be additive and possible to extend the matches" so a new variant
+  tomorrow attaches without hand work. An entity is now its explicit names,
+  plus every name its rules match, minus its exclusions (schema 25: two more
+  declared tables kept across the rebuild). A merge keeps the rule that
+  joined the group - "and any name that begins with X", a tick on the
+  proposal, ticked by default and offered only where the rule would be
+  accepted - so a holiday's new variant of a retailer attaches on sight,
+  shown "by rule" and detachable, a detach recorded as an exclusion so it
+  does not come back. Each entity's page (`/entity?id=N`) shows its name,
+  parent and children, its names each opening to their transactions, and its
+  rules with how many names each matches; "Add a rule" has Try - a press
+  that answers what the rule would attach and writes nothing - and Keep.
+  The recurring detector reads the same computation, so a rule-matched
+  spelling joins the subscription's series the day it appears. "New entity"
+  makes one with nothing attached yet, with an optional parent - the
+  organisation the owner never pays but expects a reimbursement from.
+  Measured on the large invented store: the entity page issues 23
+  statements and takes 0.37 s; the Entities page's rule ticks cost 236 px at
+  phone width. Not done: a press to put back a name split from a rule
+  (gathering it by hand does the same), a press to remove an entity (fold is
+  the way), and rules are read by the entity pages and the detector only,
+  not by any export.
+- **The feature was landed on the split tree by regenerating the move over
+  its branch**, not by resolving imports by hand: the branch took the 0.4.362
+  fix by merge, ran through the seven generated steps with the judge passing
+  at each, and the difference between its generated tree and the released
+  one is the change. The one thing this proves about the move tool beyond
+  0.4.363 is that a branch cut before the split lands after it in minutes.
+
 ## [0.4.363] - 2026-10-07
 
 ### Changed
