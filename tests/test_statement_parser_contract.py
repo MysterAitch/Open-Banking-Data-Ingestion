@@ -204,6 +204,35 @@ class TestEveryStatementParserKeepsTheContract:
                 )
 
 
+class TestARebrandedIssuerIsStillRecognised:
+    """The owner's Virgin Money card statement of October 2026 printed "Nationwide" where every
+    earlier one printed "Virgin Money" - the card's issuer was rebranded - and the same layout
+    to the line was refused as "no reader for this layout yet". A reader recognises a layout; a
+    name on it is one of the names that layout has carried."""
+
+    def test_VirginLayout_PrintingNationwideInsteadOfVirginMoney_IsReadByTheVirginReader(self):
+        rebranded = [
+            line.replace("Virgin Money", "Nationwide") for line in VIRGIN
+        ]
+        payload = build_pdf(rebranded)
+
+        assert "Virgin Money" not in "\n".join(rebranded)
+        assert VirginMoneyCreditCardPdfParser().sniff(payload)
+        assert not NationwideStatementPdfParser().sniff(payload), (
+            "the current-account reader must not claim the card's statement"
+        )
+        rows = list(VirginMoneyCreditCardPdfParser().parse(payload, account_id="an-account"))
+        assert [row.amount_minor for row in rows] == [
+            row.amount_minor
+            for row in VirginMoneyCreditCardPdfParser().parse(
+                build_pdf(VIRGIN), account_id="an-account"
+            )
+        ]
+
+    def test_NationwideCurrentAccountStatement_IsNotClaimedByTheVirginReader(self):
+        assert not VirginMoneyCreditCardPdfParser().sniff(build_nationwide_pdf(NATIONWIDE))
+
+
 class TestNoStatementParserCanSkipTheContract:
     def test_EveryRegisteredStatementParser_IsCoveredHere(self):
         # The backstop. A parser added without stating which way its
