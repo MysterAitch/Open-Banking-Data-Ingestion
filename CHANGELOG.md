@@ -26,6 +26,35 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.367] - 2026-10-07
+
+### Fixed
+- **A word fused to a number is dropped from a name whole again, and
+  compared by its letters instead.** 0.4.366 kept the letters in the name
+  itself so M&S Bank could be seen as a bank, and the real store answered in
+  counts: series 63 to 70 and stopped 31 to 36 with the habit unchanged -
+  the same signature as 0.4.361's, at a smaller scale. A payee printed with a
+  reference on some rows (`REF0042`, now `ref`) and not on others had two
+  names, and a series spanning both became a stopped half and a new half.
+  The rule is the one learned twice today: the name is the key every row is
+  grouped by and the detector's series key, and a change made for
+  comparison must not move it. The letters now live in a reading the
+  proposals compare by, so M&S Bank still meets M&S Bank and the name never
+  changed. Pinned by the constructed case: twelve monthly rows, six printed
+  with a reference and six without, are one live series and one name.
+- **A word is common by where it appears, not how often.** Once proposals
+  became one-rule groups, six groups of 89 names were "too broad": a
+  retailer's twenty towns are one group only if its opening word is
+  distinctive, and the old floor took the fifty most frequent tokens as
+  common - which on a real store are exactly the brands with the most
+  variants. A word is now common when it follows three or more different
+  opening words in the names it does not open (`payment`, `ltd`, a town
+  printed after several brands), and a word that only ever opens names is a
+  brand however frequent it is. The function words a printed name carries
+  ("the", "of", a title) are never a brand either, since "the" only ever
+  opens and the rule could not see it. On the large invented store this
+  proposes one more group - a planted retailer's towns, whole.
+
 ## [0.4.366] - 2026-10-07
 
 ### Fixed
