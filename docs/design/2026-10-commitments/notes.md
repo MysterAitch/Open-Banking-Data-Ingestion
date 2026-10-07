@@ -237,6 +237,25 @@ The split is declared state on the transaction and never alters the source row. 
 marks a split and its fold lists the parts. The projection to Actual sends a split transaction.
 A split whose parts do not sum to the amount is refused where it is made.
 
+## Measured on the real store (counts only, read from the page after each deploy)
+
+| Version | Recurring series | Kinds (pulled / scheduled / habit) | Payments / transfers / incomes | Stopped (over a year) | Changed | Entities: names / proposals / covered / too broad |
+|---|---|---|---|---|---|---|
+| 0.4.356 | 77 | - | 58 / 11 / 8 | 44 | 4 | - |
+| 0.4.357 (four-slot rule, kinds) | 61 | 52 / 8 / 1 | 50 / 7 / 4 | 31 (20) | 4 | - |
+| 0.4.359 (Entities page) | 61 | 52 / 8 / 1 | 50 / 7 / 4 | 31 (20) | 4 | 1,335 / 181 / 529 / 6 groups of 80 |
+| 0.4.361 (counterparty-first shape; a fault) | 61 | 53 / 8 / 0 | 46 / 7 / 8 | 36 (17) | 4 | 872 / 98 / 263 / 1 of 10 |
+| 0.4.365 (shape from the description; account-first split; rules) | 63 | 54 / 8 / 1 | 51 / 7 / 5 | 31 (19) | 5 | 1,297 / 158 / 830 / 0 |
+
+What the rows say: the four-slot rule removed sixteen fragments, thirteen of them stopped
+(0.4.357); keying the shape on a source-dependent field split one payee by source and cost the
+habit (0.4.361, undone in 0.4.362); the account-first split finds one more payment, one more
+income, and one more changed window than before (0.4.365, the same effect as the 12 -> 18 on
+the large invented store); and the method-word, token, one-word-opening, and bank-name rules
+cover 830 of 1,297 names in proposals against 529 of 1,335 before, with no group too broad.
+The Entities page serves in 0.9 s masked at this size (0.65 s before the drill-down folds).
+The owner's precision read of the proposals is still to come.
+
 ## Rejected so far
 
 - **Grouping by account and payee** (the first version): refused when the owner said a
