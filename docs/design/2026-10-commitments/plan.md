@@ -234,7 +234,9 @@ Target / accrual (what a category must hold by when; what a prepaid period costs
   fell in. The detector's occurrences are these without the declaration.
 - **Category and Rule.** A category is a name in a tree (Household > Energy > Gas). A rule maps
   an entity (or, before one exists, a shape) to a category; a commitment implies a rule for
-  its entity. A bank's own category is a suggestion with its basis. A rule applied is recorded on
+  its entity. A rule's condition may combine the row's other held facts - the stated payment
+  type, an amount range, the account, a text in the description - where the entity alone is
+  not reliable (roadmap R6 says why and quotes the owner). A bank's own category is a suggestion with its basis. A rule applied is recorded on
   the row as derived state with its basis: "by rule R", "confirmed", "the bank says".
 - **Label.** A second axis, independent of the category tree. The owner, 2026-10-07: "tagging
   of transactions and allowing multiple labels ... purchasing building/electrical things and
@@ -804,6 +806,16 @@ Then, each its own slice:
   and year, and the forward calendar by account and space.
 - **R6.** Categories and rules: the category tree, a rule per entity, a commitment implying its
   rule, the bank's category as a suggestion with basis, the Categorise page reading rules first.
+  A rule's condition is a conjunction over the facts held on the row, not the entity alone
+  (the owner, 2026-10-07: "rules might need to combine multiple metadata items to be reliable.
+  For example if it's direct debit vs card payments vs bacs vs standing order, and the amount
+  for the transaction, and perhaps some detail from the description/comment"): entity or shape,
+  the payment type the source stated (the `sighting_words` the detector already reads for
+  pulled/scheduled), an amount or amount range, the account, and a text the description
+  contains. The first case it serves is a retailer's subscription service billed under the
+  retailer's name: by type and amount it is a series of its own, which the detector already
+  separates, and the rule says so without a second entity where the name alone cannot. Each
+  applied rule is recorded on the row with the facts that fired it.
 - **R7.** Splits on a transaction, the fold listing parts, the projection sending split rows.
 - **R8.** The projection to Actual: categories per commitment with targets, the space's transfer
   target, the card's repayment target; the audit extended to categories and targets.
