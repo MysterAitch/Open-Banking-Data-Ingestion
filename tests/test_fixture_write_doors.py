@@ -236,6 +236,9 @@ JUSTIFIED = {
     "disregarded_balances table existed, and with a version NEWER than the code knows: the "
     "application stamps only the current version, so neither an old store growing the table "
     "nor a newer store being refused can be reached through it",
+    ("test_entity_store.py", "obdi_meta"): "stamps a store with the version BEFORE the entities "
+    "and entity_shapes tables existed, for the same reason as the entries above: only a rewound "
+    "marker shows that opening an old store grows the tables the first entity needs",
     ("test_disregarded_balances.py", "obdi_meta"): "stamps a store with the version BEFORE "
     "the disregarded_balances table existed, for the same reason as the entry above",
     ("test_serving_over_a_newer_store.py", "obdi_meta"): "stamps a store with a version NEWER "

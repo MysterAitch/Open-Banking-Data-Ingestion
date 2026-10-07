@@ -39,6 +39,7 @@ from .accounts import (
     mint_account_id,
     read_registry_file,
 )
+from .entities import Entity, EntityRefused
 from .errors import DataError
 from .models import (
     BASIS_FOLD,
@@ -119,7 +120,11 @@ from .stated_words import recorded_words
 #: table's cells, the names found, the sections of a divided document, its masked shape), kept by
 #: digest and extractor version so no page reads a PDF. It is derived from the raw artefacts, and a
 #: store stamped 21 would never have grown it.
-SCHEMA_VERSION = 22
+#:
+#: 22 -> 23: the `entities` and `entity_shapes` tables, likewise: the owner's decisions about
+#: which counterparty shapes are one entity, kept across the rebuild from raw. A store stamped 22
+#: would never have grown them.
+SCHEMA_VERSION = 23
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -688,6 +693,32 @@ CREATE TABLE IF NOT EXISTS preferences (
     set_at TEXT NOT NULL
 );
 
+-- DECLARED: the owner's names for who a payment was to (`entities` module). A name the owner gave,
+-- an optional parent entity, and a removal that is a stamp, so splitting the last shape away from
+-- an entity leaves its history. Like `protections`, nothing that regenerates the derived layers
+-- may touch it.
+CREATE TABLE IF NOT EXISTS entities (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    parent_id  INTEGER,
+    created_at TEXT NOT NULL,
+    removed_at TEXT
+);
+
+-- DECLARED: which counterparty shape (`recurring`'s payee shape) is under which entity. Detaching
+-- is a stamp, never a delete, so a shape that was split apart and attached elsewhere keeps both
+-- rows. `of_entity` and not `entity_id`, which in this store is the id of a transaction row. At
+-- most one attachment of a shape is live at once.
+CREATE TABLE IF NOT EXISTS entity_shapes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    of_entity   INTEGER NOT NULL,
+    shape       TEXT NOT NULL,
+    attached_at TEXT NOT NULL,
+    detached_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_entity_shapes_live
+    ON entity_shapes(shape) WHERE detached_at IS NULL;
+
 -- One row, moved by a trigger on every table whose writes can change an account's standing
 -- (EPOCH_TABLES). The pages that hold a standing between requests key it on this number.
 CREATE TABLE IF NOT EXISTS standing_epoch (
@@ -734,6 +765,15 @@ NOT_STANDING_TABLES: dict[str, str] = {
     "annotations": (
         "categories, payees, and deferrals label a row for the person and are read by no "
         "standing or movement check"
+    ),
+    "entities": (
+        "the owner's names for who a payment was to, read by the Entities page and the "
+        "recurring detector, which is a measurement and not a standing; no balance, "
+        "agreement, or protection reads a name"
+    ),
+    "entity_shapes": (
+        "which counterparty shape is under which entity, read where `entities` is and for the "
+        "same reason"
     ),
     "events": "the outbox of changes to publish, written after the change it describes",
     "fetch_attempts": (
@@ -841,6 +881,8 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'closed', 'date_basis', 'declared_at', 'kind', 'label', 'opened',
         'parent', 'ref', 'stable_id',
     ],
+    'entities': ['created_at', 'id', 'name', 'parent_id', 'removed_at'],
+    'entity_shapes': ['attached_at', 'detached_at', 'id', 'of_entity', 'shape'],
     'events': ['created_at', 'entity_id', 'id', 'kind', 'payload', 'published_at'],
     'fetch_marks': [
         'account', 'evidence', 'fingerprint', 'first_day', 'id', 'kind', 'last_day',
@@ -4445,6 +4487,143 @@ class Store:
         )
         self.connection.commit()
 
+    def entities_with_shapes(self) -> list[Entity]:
+        """Every entity not removed, by name, each with the shapes attached to it now."""
+        shapes: dict[int, list[str]] = {}
+        for row in self.connection.execute(
+            "SELECT of_entity, shape FROM entity_shapes WHERE detached_at IS NULL ORDER BY shape"
+        ):
+            shapes.setdefault(int(row["of_entity"]), []).append(str(row["shape"]))
+        return [
+            Entity(
+                id=int(row["id"]),
+                name=str(row["name"]),
+                parent_id=None if row["parent_id"] is None else int(row["parent_id"]),
+                shapes=tuple(shapes.get(int(row["id"]), ())),
+            )
+            for row in self.connection.execute(
+                "SELECT id, name, parent_id FROM entities WHERE removed_at IS NULL "
+                "ORDER BY name COLLATE NOCASE, id"
+            )
+        ]
+
+    def shape_entities(self) -> dict[str, tuple[int, str]]:
+        """Each shape attached now, to the id and name of its entity."""
+        return {
+            str(row["shape"]): (int(row["id"]), str(row["name"]))
+            for row in self.connection.execute(
+                "SELECT s.shape, e.id, e.name FROM entity_shapes s "
+                "JOIN entities e ON e.id = s.of_entity "
+                "WHERE s.detached_at IS NULL AND e.removed_at IS NULL"
+            )
+        }
+
+    def create_entity(
+        self, name: str, shapes: Iterable[str], *, now: datetime | None = None
+    ) -> int:
+        """Make an entity of `name` holding `shapes`, in one commit; returns its id.
+
+        Refused whole, with nothing written, for no name, no shape, a name another entity has, or
+        a shape another entity holds: a merge that took some of its shapes would leave the owner
+        with an entity he did not ask for.
+        """
+        clean = _entity_name(name)
+        chosen = _chosen_shapes(shapes)
+        self._refuse_name_in_use(clean, except_id=None)
+        self._refuse_shapes_held(chosen)
+        stamp = (now or datetime.now(UTC)).isoformat()
+        try:
+            cursor = self.connection.execute(
+                "INSERT INTO entities (name, created_at) VALUES (?, ?)", (clean, stamp)
+            )
+            entity = int(cursor.lastrowid or 0)
+            self._insert_shapes(entity, chosen, stamp)
+        except BaseException:
+            self.connection.rollback()
+            raise
+        self.connection.commit()
+        return entity
+
+    def attach_shapes(
+        self, entity: int, shapes: Iterable[str], *, now: datetime | None = None
+    ) -> None:
+        """Put `shapes` under an entity that is not removed, in one commit; refused whole."""
+        chosen = _chosen_shapes(shapes)
+        self._refuse_missing_entity(entity)
+        self._refuse_shapes_held(chosen)
+        try:
+            self._insert_shapes(entity, chosen, (now or datetime.now(UTC)).isoformat())
+        except BaseException:
+            self.connection.rollback()
+            raise
+        self.connection.commit()
+
+    def detach_shape(self, shape: str, *, now: datetime | None = None) -> bool:
+        """Split `shape` apart from its entity, and commit; False where it belonged to none.
+
+        An entity left with no shape is removed in the same commit: it names nothing a page or
+        the detector could read, and its name is free for the owner to use again.
+        """
+        stamp = (now or datetime.now(UTC)).isoformat()
+        row = self.connection.execute(
+            "SELECT id, of_entity FROM entity_shapes WHERE shape = ? AND detached_at IS NULL",
+            (shape,),
+        ).fetchone()
+        if row is None:
+            return False
+        entity = int(row["of_entity"])
+        self.connection.execute(
+            "UPDATE entity_shapes SET detached_at = ? WHERE id = ?", (stamp, row["id"])
+        )
+        left = self.connection.execute(
+            "SELECT 1 FROM entity_shapes WHERE of_entity = ? AND detached_at IS NULL", (entity,)
+        ).fetchone()
+        if left is None:
+            self.connection.execute(
+                "UPDATE entities SET removed_at = ? WHERE id = ? AND removed_at IS NULL",
+                (stamp, entity),
+            )
+        self.connection.commit()
+        return True
+
+    def rename_entity(self, entity: int, name: str) -> None:
+        """Rename an entity not removed, and commit; refused for no name or a name in use."""
+        clean = _entity_name(name)
+        self._refuse_missing_entity(entity)
+        self._refuse_name_in_use(clean, except_id=entity)
+        self.connection.execute("UPDATE entities SET name = ? WHERE id = ?", (clean, entity))
+        self.connection.commit()
+
+    def _refuse_missing_entity(self, entity: int) -> None:
+        found = self.connection.execute(
+            "SELECT 1 FROM entities WHERE id = ? AND removed_at IS NULL", (entity,)
+        ).fetchone()
+        if found is None:
+            raise EntityRefused("There is no such entity; it may have been removed.")
+
+    def _refuse_name_in_use(self, name: str, *, except_id: int | None) -> None:
+        for row in self.connection.execute(
+            "SELECT id, name FROM entities WHERE removed_at IS NULL"
+        ):
+            if int(row["id"]) != except_id and str(row["name"]).casefold() == name.casefold():
+                raise EntityRefused("That name is already an entity; choose another.")
+
+    def _refuse_shapes_held(self, shapes: Sequence[str]) -> None:
+        for shape in shapes:
+            held = self.connection.execute(
+                "SELECT 1 FROM entity_shapes s JOIN entities e ON e.id = s.of_entity "
+                "WHERE s.shape = ? AND s.detached_at IS NULL AND e.removed_at IS NULL",
+                (shape,),
+            ).fetchone()
+            if held is not None:
+                raise EntityRefused("A shape already belongs to an entity; split it apart first.")
+
+    def _insert_shapes(self, entity: int, shapes: Sequence[str], stamp: str) -> None:
+        self.connection.executemany(
+            "INSERT INTO entity_shapes (of_entity, shape, attached_at) VALUES (?, ?, ?)",
+            [(entity, shape, stamp) for shape in shapes],
+        )
+
     def clear_record_scope(self, account: str) -> None:
         self.connection.execute("DELETE FROM record_scopes WHERE account = ?", (account,))
         self.connection.commit()
@@ -4762,7 +4941,13 @@ class Store:
             "SELECT COUNT(*) FROM raw_artefacts WHERE source IN (?, ?)",
             (MANUAL_SOURCE, MANUAL_WITHDRAWAL_SOURCE),
         ).fetchone()[0]
+        # Which shapes a person decided are one counterparty: the shapes are evidence, the
+        # grouping is not.
+        gathered = self.connection.execute(
+            "SELECT COUNT(*) FROM entity_shapes WHERE detached_at IS NULL"
+        ).fetchone()[0]
         return {
+            "counterparty shapes gathered into entities": int(gathered),
             "hand-entered categories": int(categories),
             "deferred decisions": int(deferrals),
             "other hand-entered notes": int(other),
@@ -4771,6 +4956,22 @@ class Store:
             "statement section assignments": int(sections),
             "typed transactions and withdrawals": int(typed),
         }
+
+
+def _entity_name(name: str) -> str:
+    """The name an owner typed, with its spacing tidied; refused where nothing is left."""
+    clean = " ".join(name.split())
+    if not clean:
+        raise EntityRefused("An entity needs a name.")
+    return clean
+
+
+def _chosen_shapes(shapes: Iterable[str]) -> list[str]:
+    """The shapes asked for, each once and in the order given; refused where there are none."""
+    chosen = list(dict.fromkeys(shape for shape in shapes if shape))
+    if not chosen:
+        raise EntityRefused("An entity needs at least one shape.")
+    return chosen
 
 
 def _row_to_transaction(row: sqlite3.Row) -> Transaction:
