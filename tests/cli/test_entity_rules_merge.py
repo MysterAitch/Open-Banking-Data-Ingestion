@@ -119,7 +119,7 @@ class TestTheProposalFormOffersTheRule:
 
         (tick,) = [i for i in elements(form, "input") if i.attrs.get("name") == "keep_rule"]
         assert "checked" in tick.attrs
-        assert "and any transaction whose description begins with “fernhollow grocers”" in (
+        assert "and any transaction whose name begins with “fernhollow grocers”" in (
             form.text()
         )
 
@@ -133,7 +133,7 @@ class TestTheProposalFormOffersTheRule:
         (tick,) = [i for i in elements(form, "input") if i.attrs.get("name") == "keep_rule"]
         assert "checked" in tick.attrs
         assert (
-            "and any transaction whose description holds the words “quillon hardware” in any order"
+            "and any transaction whose name holds the words “quillon hardware” in any order"
         ) in form.text()
 
     def test_Merge_ByHandOrFromACouldBelongToOffer_OffersNoRule(self, world):
@@ -161,7 +161,7 @@ class TestPressingMerge:
         assert response.status_code == 200
         assert rules_of(db) == [(BEGINS, "fernhollow grocers")]
         assert (
-            "any transaction whose description, reduced to a name as above, begins with "
+            "any transaction whose name, made as above, begins with "
             "“fernhollow grocers” will join it"
         ) in outcome_of(response.text)
 

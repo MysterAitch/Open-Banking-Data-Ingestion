@@ -206,14 +206,12 @@ class TestHowNamesAreCompared:
 
 
 class TestARuleReadsAsWhatItDoes:
-    def test_Rule_Begins_NamesTheFieldAndTheReduction(self):
+    def test_Rule_Begins_NamesTheNameAndItsMaking(self):
         assert rule_phrase(BEGINS, "uber eats") == (
-            "any transaction whose description, reduced to a name as above, "
-            "begins with “uber eats”"
+            "any transaction whose name, made as above, begins with “uber eats”"
         )
 
-    def test_Rule_Contains_NamesTheFieldAndSaysAnyOrder(self):
+    def test_Rule_Contains_NamesTheNameAndSaysAnyOrder(self):
         assert rule_phrase(CONTAINS, "uber eats") == (
-            "any transaction whose description, reduced to a name as above, "
-            "holds the words “uber eats” in any order"
+            "any transaction whose name, made as above, holds the words “uber eats” in any order"
         )

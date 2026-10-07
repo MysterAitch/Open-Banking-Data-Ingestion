@@ -204,8 +204,7 @@ class TestShowingValues:
 
         assert len(lines) == 1
         assert lines[0].startswith(
-            "Matches any transaction whose description, reduced to a name as above, "
-            "begins with “sainsburys”"
+            "Matches any transaction whose name, made as above, begins with “sainsburys”"
         )
         assert "matches 3 names" in lines[0]
         assert "Remove" in lines[0]
@@ -334,7 +333,7 @@ class TestKeepingARule:
 
         assert response.status_code == 200
         assert (
-            "any transaction whose description, reduced to a name as above, begins with "
+            "any transaction whose name, made as above, begins with "
             "“sainsburys” will join Sainsburys"
         ) in outcome_of(
             response.text

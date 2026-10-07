@@ -485,12 +485,16 @@ def clean_rule(kind: str, words: str) -> tuple[str, str]:
 def rule_parts(
     kind: str, *, source: str = DESCRIPTION_SOURCE, reduced: bool = True
 ) -> tuple[str, str]:
-    """What a rule does, as the words before and after its own words: the field it reads
-    (`source`), that the field is reduced to a name first (`reduced`; left out where the line
-    is on a phone and the reduction is stated beside it), and how the name is compared."""
-    reads = f"any transaction whose {source}"
+    """What a rule does, as the words before and after its own words: that it reads the
+    transaction's NAME - the strongest field the row carries, made as the page states above
+    (`reduced`; left out where the line is on a phone and the making is stated beside it) - and
+    how the name is compared. `source` names the field only where a rule is tied to one; a rule
+    of the two kinds kept today reads the name whatever its kind."""
+    reads = "any transaction whose name" if source == DESCRIPTION_SOURCE else (
+        f"any transaction whose {source}"
+    )
     if reduced:
-        reads += ", reduced to a name as above,"
+        reads += ", made as above,"
     if kind == BEGINS:
         return f"{reads} begins with", ""
     return f"{reads} holds the words", " in any order"
