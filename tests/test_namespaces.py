@@ -25,13 +25,18 @@ from obdi.namespaces import (
     validate_canonical_name,
     validate_connection_name,
 )
+from source_tree import source_tree
 
-SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "obdi"
 APPLIER = pathlib.Path(__file__).resolve().parent.parent / "applier"
 
 
-def _python_sources() -> list[pathlib.Path]:
-    return [p for p in SRC.rglob("*.py") if p.name != "namespaces.py"]
+def _python_sources() -> list[tuple[str, str]]:
+    """(file name, text) of every module but the registry itself, at any depth."""
+    return [
+        (path.rsplit("/", 1)[-1], text)
+        for path, text in source_tree().items()
+        if path.rsplit("/", 1)[-1] != "namespaces.py"
+    ]
 
 
 class TestTheRegistryDescribesTheCode:
@@ -43,9 +48,9 @@ class TestTheRegistryDescribesTheCode:
         pattern = re.compile(
             r"""source\s*(?:=|==)\s*["']([a-z][a-z0-9_-]*)["']""",
         )
-        for path in _python_sources():
-            for match in pattern.finditer(path.read_text(encoding="utf-8")):
-                used.setdefault(match.group(1), path.name)
+        for name, text in _python_sources():
+            for match in pattern.finditer(text):
+                used.setdefault(match.group(1), name)
 
         undeclared = {name: where for name, where in used.items() if name not in SOURCES}
 
@@ -62,12 +67,14 @@ class TestTheRegistryDescribesTheCode:
             r"""(?:acquire|acquire_exclusive|release|held|lease|takeLease|"""
             r"""leaseHeld|releaseLease)\s*\(\s*[^,()]+,\s*["']([a-z][a-z0-9-]*)["']"""
         )
-        candidates = _python_sources() + list(APPLIER.glob("*.mjs"))
-        for path in candidates:
-            if path.name.endswith(".test.mjs"):
+        candidates = _python_sources() + [
+            (path.name, path.read_text(encoding="utf-8")) for path in APPLIER.glob("*.mjs")
+        ]
+        for name, text in candidates:
+            if name.endswith(".test.mjs"):
                 continue
-            for match in pattern.finditer(path.read_text(encoding="utf-8")):
-                used.setdefault(match.group(1), path.name)
+            for match in pattern.finditer(text):
+                used.setdefault(match.group(1), name)
 
         undeclared = {name: where for name, where in used.items() if name not in LEASES}
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pathlib
 import re
 
 import pytest
@@ -23,6 +22,7 @@ from obdi.identifiers import (
     claims_from_truelayer_card,
     derive,
 )
+from source_tree import source_tree
 
 
 class TestSourcesClaimWhatTheyKnow:
@@ -210,14 +210,13 @@ class TestRevealIsTheOnlyDoorAndItIsGreppable:
         """reveal() is deliberately the single escape hatch, so "who reads
         the real number" is one grep. The web layer must never be an
         answer to that grep."""
-        src = pathlib.Path(__file__).resolve().parent.parent / "src" / "obdi"
         offenders = {}
-        for path in src.rglob("*.py"):
-            if path.name == "identifiers.py":
+        for path, text in source_tree().items():
+            name = path.rsplit("/", 1)[-1]
+            if name == "identifiers.py":
                 continue
-            text = path.read_text(encoding="utf-8")
             if re.search(r"\.reveal\(\)", text):
-                offenders[path.name] = text.count(".reveal()")
+                offenders[name] = text.count(".reveal()")
 
         assert "web.py" not in offenders, (
             f"the web layer called reveal() - rendering must use masked(): {offenders}"

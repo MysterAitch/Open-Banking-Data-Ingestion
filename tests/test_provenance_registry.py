@@ -14,7 +14,6 @@ here rather than being discovered as lost categorisation months later.
 
 from __future__ import annotations
 
-import pathlib
 import re
 from datetime import date
 
@@ -24,8 +23,7 @@ from obdi.ingest import reconcile_batch
 from obdi.models import SourceTier, Transaction
 from obdi.namespaces import PROVENANCE_RANKS
 from obdi.store import Store
-
-SRC = pathlib.Path(__file__).resolve().parent.parent / "src" / "obdi"
+from source_tree import source_tree
 
 #: An annotate/forget_annotation call, including one spread over several
 #: lines. Scoped to those two doors on purpose: "provenance" also names
@@ -77,13 +75,13 @@ def _plant_unrankable(store: Store, entity: str, provenance: str) -> None:
 class TestTheRegistryDescribesTheCode:
     def test_EveryProvenanceWrittenInCode_IsDeclaredOnTheLadder(self):
         used: dict[str, str] = {}
-        for path in SRC.rglob("*.py"):
-            if path.name == "namespaces.py":
+        for path, text in source_tree().items():
+            name = path.rsplit("/", 1)[-1]
+            if name == "namespaces.py":
                 continue
-            text = path.read_text(encoding="utf-8")
             for call in _ANNOTATION_CALL.finditer(text):
                 for match in _PROVENANCE_ARGUMENT.finditer(call.group(0)):
-                    used.setdefault(match.group(1).split(":", 1)[0], path.name)
+                    used.setdefault(match.group(1).split(":", 1)[0], name)
 
         undeclared = {
             prefix: where

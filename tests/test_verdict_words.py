@@ -24,7 +24,6 @@ sentence below is what the page says today.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import httpx
 import pytest
@@ -37,8 +36,8 @@ from obdi.standing_data import (
 )
 from page_dom import elements, parse
 from page_walk import household, household_pages, household_served  # noqa: F401
+from source_tree import source_tree
 
-SOURCE = Path(__file__).resolve().parent.parent / "src" / "obdi"
 ACCOUNTS_SENTENCE = (
     "2 of 4 accounts add up to their latest known balance; 1 does not add up; "
     "1 has nothing to check against."
@@ -169,13 +168,11 @@ class TestTheWordsAreWrittenOnceInTheirOwnModule:
         return sorted(
             name
             for name, text in sources.items()
-            if name != "standing_data.py" and self.LITERAL.search(text)
+            if name.rsplit("/", 1)[-1] != "standing_data.py" and self.LITERAL.search(text)
         )
 
     def test_Source_OfEveryModule_HoldsNoSecondCopyOfTheVerdictWords(self):
-        sources = {p.name: p.read_text(encoding="utf-8") for p in SOURCE.glob("*.py")}
-
-        assert self.literals_outside_the_definition(sources) == []
+        assert self.literals_outside_the_definition(source_tree()) == []
 
     def test_Guard_OnAPlantedCopy_NamesIt(self):
         planted = {

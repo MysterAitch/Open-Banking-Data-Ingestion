@@ -22,13 +22,13 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from pathlib import Path
 
 from obdi.identity import artefact_digest
 from obdi.models import RawArtefact
 from obdi.namespaces import ENTITY_KEYED_TABLES
 from obdi.rebuild import rebuild_from_raw
 from obdi.store import Store
+from source_tree import module_text
 
 FEED = (
     b'{"feedItems": [{"feedItemUid": "u-1", '
@@ -117,7 +117,7 @@ class TestTheRegistryDescribesTheSchema:
         # The backstop. A table that grows an entity-id column without
         # joining the registry would be silently left behind by the next
         # rebind - which is exactly how this defect arrived.
-        schema = Path("src/obdi/store.py").read_text(encoding="utf-8")
+        schema = module_text("store.py")
         found: dict[str, set[str]] = {}
         for block in re.finditer(
             r"CREATE TABLE IF NOT EXISTS (\w+) \((.*?)\n\);", schema, re.S

@@ -15,15 +15,13 @@ it off on its own, since "cash withdrawals" is a sentence and not an account.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 
 from named_household import LABELLED, Named
 from page_dom import HEADINGS, Node, elements, parse, text_nodes
 from page_walk import household, household_pages, household_served  # noqa: F401
-
-SOURCE = Path(__file__).resolve().parent.parent / "src" / "obdi"
+from source_tree import source_tree
 
 #: Blocks that hold one thing a reader takes in at once; the label must stand in the same one.
 BLOCKS = frozenset(
@@ -197,16 +195,14 @@ def modules_that_decide_a_name(sources: dict[str, str]) -> list[str]:
     return sorted(
         name
         for name, text in sources.items()
-        if name not in {MODULE_OWNING_NAMES, *NOT_PAGE_NAMING}
+        if name.rsplit("/", 1)[-1] not in {MODULE_OWNING_NAMES, *NOT_PAGE_NAMING}
         and any(p.search(text) for p in OFFENDING)
     )
 
 
 class TestNoModuleOtherThanTheCentralOneDecidesAName:
     def test_Guard_OverTheSource_FindsNoOtherModuleDecidingAnAccountsName(self):
-        sources = {p.name: p.read_text(encoding="utf-8") for p in SOURCE.glob("*.py")}
-
-        assert modules_that_decide_a_name(sources) == []
+        assert modules_that_decide_a_name(source_tree()) == []
 
     @pytest.mark.parametrize(
         "offender",

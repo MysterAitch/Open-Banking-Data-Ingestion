@@ -17,6 +17,7 @@ from pathlib import Path
 from obdi.accounts import AccountBinding, AccountMap
 from obdi.cli import _apply_bind, _recorded_boundary
 from obdi.store import Store
+from source_tree import module_text
 
 
 def _account_with_history(db: Path, account_id: str, land) -> None:
@@ -234,8 +235,7 @@ class TestBoundaryLookupsShareOneReader:
         """The fault was one lookup composing the fact key from the current
         canonical alone. Reading the source tree rather than keeping a list
         by hand: a new lookup that composes the key itself fails here."""
-        source_path = Path(__file__).resolve().parents[1] / "src" / "obdi" / "cli.py"
-        source = source_path.read_text(encoding="utf-8")
+        source = module_text("cli.py")
         spans = [
             (node.lineno, node.end_lineno or node.lineno, node.name)
             for node in ast.walk(ast.parse(source))
@@ -271,8 +271,7 @@ class TestBoundaryLookupsShareOneReader:
         facts have to move with them. A third bind door added later without
         the carry orphans the wall again, so the source tree is read rather
         than a list of doors kept by hand."""
-        source_path = Path(__file__).resolve().parents[1] / "src" / "obdi" / "cli.py"
-        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        tree = ast.parse(module_text("cli.py"))
         careless = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef):

@@ -15,12 +15,11 @@ A chip (`.pill-ok`) is a small label and not a sentence, and is judged by its ow
 from __future__ import annotations
 
 import importlib
-import pkgutil
 import re
 
 import pytest
 
-import obdi
+from source_tree import dotted_name, source_tree
 
 GOOD = re.compile(r"\.(?:ok|clear|quiet-ok|verdict-ok|allclear)\b(?!-)")
 DISPLAY_SIZES = ("--text-lg", "--text-xl", "--text-2xl")
@@ -31,13 +30,14 @@ COMMENT = re.compile(r"/\*.*?\*/", re.S)
 def stylesheets() -> dict[str, str]:
     """Every stylesheet module's CSS text, by module: any string constant that holds rules."""
     found: dict[str, str] = {}
-    for module_info in pkgutil.iter_modules(obdi.__path__):
-        if not module_info.name.startswith("stylesheet"):
+    for relative in source_tree():
+        module_name = dotted_name(relative)
+        if not module_name.rsplit(".", 1)[-1].startswith("stylesheet"):
             continue
-        module = importlib.import_module(f"obdi.{module_info.name}")
+        module = importlib.import_module(f"obdi.{module_name}")
         for name, value in vars(module).items():
             if isinstance(value, str) and "{" in value and name.isupper():
-                found[f"{module_info.name}.{name}"] = value
+                found[f"{module_name}.{name}"] = value
     assert len(found) > 5, f"read too few stylesheets to mean anything: {sorted(found)}"
     return found
 

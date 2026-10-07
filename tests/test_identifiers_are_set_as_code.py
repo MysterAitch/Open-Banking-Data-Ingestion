@@ -26,15 +26,14 @@ LINK TEXT is not exempt: a link that reads as an identifier holds a `<code>` ins
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 
 from named_household import ACCOUNTS, SOURCES
 from page_dom import HEADINGS, Node, inside, parse, text_nodes
 from page_walk import household, household_pages, household_served  # noqa: F401
+from source_tree import source_tree
 
-SOURCE = Path(__file__).resolve().parent.parent / "src" / "obdi"
 ORDINARY = re.compile(r"[a-z]+")
 PLAIN_TEXT_ELEMENTS = ("option", "textarea", "pre", "title")
 
@@ -150,9 +149,7 @@ def hand_built_in(sources: dict[str, str]) -> list[str]:
 
 class TestNoHandBuiltMonospaceAroundAnIdentifier:
     def test_Source_OfEveryPageModule_HoldsNoMonospaceSpanAroundAnIdentifier(self):
-        sources = {p.name: p.read_text(encoding="utf-8") for p in SOURCE.glob("*.py")}
-
-        assert hand_built_in(sources) == []
+        assert hand_built_in(source_tree()) == []
 
     @pytest.mark.parametrize(
         "offender",

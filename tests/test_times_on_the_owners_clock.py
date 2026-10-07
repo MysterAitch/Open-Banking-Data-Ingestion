@@ -18,6 +18,7 @@ from obdi.account_names import AccountShown, AccountsShown
 from obdi.page_times import PAGE_ZONE
 from obdi.web import _rebuild_history_html
 from obdi.web_statements import statements_body
+from source_tree import module_text
 
 SUMMER = "2026-07-15T14:25:00+00:00"
 WINTER = "2026-01-15T14:25:00+00:00"
@@ -89,9 +90,7 @@ def test_TheSlicesNote_OnTodayShowingUtc_IsMarkedDone():
 
 @pytest.mark.parametrize("module", ["web_overview", "values_sitting"])
 def test_PagesThatPrintClockTimes_NoLongerSayUtcBesideThem(module):
-    source = (Path(__file__).parent.parent / "src/obdi" / f"{module}.py").read_text(
-        encoding="utf-8"
-    )
+    source = module_text(f"{module}.py")
 
     assert "All times are UTC" not in source
     assert "%H:%M} UTC" not in source
