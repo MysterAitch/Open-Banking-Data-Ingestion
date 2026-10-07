@@ -261,7 +261,10 @@ def _name_field(value: str, press: str, *, label: str = "Name") -> str:
     )
 
 
-def _group(group: Proposal, view: EntitiesView, *, unmasked: bool) -> str:
+def _group(group: Proposal, view: EntitiesView, *, unmasked: bool, checked: bool = True) -> str:
+    """One proposal as a form. `checked` is whether its names (and the rule it keeps) start
+    ticked: a group the cap withheld (`MAX_SHAPES_PROPOSED`) starts with nothing ticked, so one
+    press never merges names the owner has not chosen."""
     across = _across(len(group.shapes), group.transactions)
     if not unmasked:
         return (
@@ -271,23 +274,24 @@ def _group(group: Proposal, view: EntitiesView, *, unmasked: bool) -> str:
     return (
         f'<section class="ent-group"><form method="post" action="{MERGE_ROUTE}">'
         f"{_name_field(group.name, 'Merge')}"
-        f"{_ticks(group.shapes, view, checked=True)}"
-        f"{_keep_rule(group)}"
+        f"{_ticks(group.shapes, view, checked=checked)}"
+        f"{_keep_rule(group, checked=checked)}"
         f'<p class="ent-why">{across}; {_why(group)}.</p></form></section>'
     )
 
 
-def _keep_rule(group: Proposal) -> str:
+def _keep_rule(group: Proposal, *, checked: bool = True) -> str:
     """The tick that keeps the group's reason as a rule of the entity it makes, ticked unless the
-    owner removes it; nothing where the group's reason gives no rule."""
+    owner removes it (or `checked` is false); nothing where the group's reason gives no rule."""
     rule = group.rule()
     if rule is None:
         return ""
     kind, words = rule
+    box = " checked" if checked else ""
     return (
         f'<input type="hidden" name="rule_kind" value="{_esc(kind)}">'
         f'<input type="hidden" name="rule_words" value="{_esc(words)}">'
-        '<label class="tick"><input type="checkbox" name="keep_rule" value="1" checked>'
+        f'<label class="tick"><input type="checkbox" name="keep_rule" value="1"{box}>'
         f'<span class="txt">and {_esc(rule_phrase(kind, words, reduced=False))}</span></label>'
     )
 
@@ -311,6 +315,20 @@ def _groups(view: EntitiesView, *, unmasked: bool) -> str:
         else ""
     )
     return "<h2>Could be one payee</h2>" + hint + lead
+
+
+def _too_broad(view: EntitiesView, *, unmasked: bool) -> str:
+    """The groups the cap withheld, in a closed fold after the proposals, each an ordinary
+    proposal with nothing ticked: they are the owner's to read and act on name by name."""
+    broad = view.proposals.too_broad
+    if not broad:
+        return ""
+    wide = sum(len(group.shapes) for group in broad)
+    body = "".join(_group(g, view, unmasked=unmasked, checked=False) for g in broad)
+    return (
+        f'<details class="ent-more ent-broad"><summary>{plural(len(broad), "group")} too wide '
+        f"to offer whole ({plural(wide, 'name')})</summary>{body}</details>"
+    )
 
 
 def _owner(view: EntitiesView, *, unmasked: bool) -> str:
@@ -503,6 +521,7 @@ def render_entities(
         + f'<p class="ent-summary">{_esc(summary_line(view))}</p>'
         + _owner(view, unmasked=unmasked)
         + _groups(view, unmasked=unmasked)
+        + _too_broad(view, unmasked=unmasked)
         + _entities(view, unmasked=unmasked)
         + (_by_hand(view) if unmasked else "")
         + names_method_html(

@@ -823,6 +823,87 @@ class TestFoldingOneEntityIntoAnother:
         assert set(entity.shapes) == {LONDON, READING}
 
 
+BROAD_WORDS = ["alpha", "bravo", "coral", "delta", "ember", "frost", "grove", "haven", "ivory"]
+
+
+@pytest.fixture
+def broad_world(tmp_path, monkeypatch):
+    """Nine invented names that open with the same two ordinary words (above the cap of eight,
+    so none is offered whole), and three brands that make "store" a word many brands carry."""
+    rows = [(f"{n + 1:02d}/09/2026", f"STORE FRONT {w.upper()} 12", "10.00")
+            for n, w in enumerate(BROAD_WORDS)]
+    rows += [("10/09/2026", f"{b} STORE 5", "20.00") for b in ("ALDER", "BIRCH", "CEDAR")]
+    csv = tmp_path / "broad.csv"
+    _export(csv, rows)
+    db = tmp_path / "store.sqlite3"
+    with Store(db) as store:
+        import_file(store, csv, account_id=ACCOUNT)
+    environment(monkeypatch, tmp_path)
+    config = build_web_config(db)
+    assert config is not None
+    base, stop = serve_config(config)
+    yield base
+    stop()
+
+
+def _broad_fold(page: str):
+    (fold,) = [d for d in elements(parse(page), "details") if "ent-broad" in d.classes]
+    return fold
+
+
+class TestAGroupTooWideToOfferWhole:
+    def test_EntitiesPage_WhenAGroupIsAboveTheCap_ItIsInAClosedFoldWithEveryTickEmpty(
+        self, broad_world
+    ):
+        page = shown(broad_world)
+
+        fold = _broad_fold(page)
+        assert "open" not in fold.attrs
+        assert fold.children[0].text().strip() == "1 group too wide to offer whole (9 names)"
+        form = next(f for f in elements(fold, "form") if f.attrs.get("action") == "/entities-merge")
+        boxes = [i for i in elements(form, "input") if i.attrs.get("type") == "checkbox"]
+        shapes = [b for b in boxes if b.attrs.get("name") == "shape"]
+        assert len(shapes) == 9
+        assert not any("checked" in b.attrs for b in boxes)
+        assert "all begin with “store front”" in page
+        assert "Merge" in [b.text().strip() for b in elements(form, "button")]
+
+    def test_Merge_WhenTwoNamesAreTickedInAWithheldGroup_ThoseTwoBecomeOneEntity(
+        self, broad_world
+    ):
+        response = press(
+            broad_world, "/entities-merge", name="Store Front Two",
+            shape=["store front alpha", "store front bravo"],
+        )
+
+        assert response.status_code == 200
+        assert outcome_of(response.text)
+        assert "Store Front Two" in response.text
+
+    def test_EntitiesPage_WhenAGroupIsAboveTheCap_TheSummaryLineStillCountsIt(self, broad_world):
+        assert "1 more group of 9 names is too broad to offer" in summary_of(shown(broad_world))
+        assert "1 more group of 9 names is too broad to offer" in summary_of(
+            httpx.get(f"{broad_world}/entities", timeout=60).text
+        )
+
+    def test_EntitiesPage_WhenFetchedMasked_TheWithheldGroupHoldsCountsAndSealedNamesOnly(
+        self, broad_world
+    ):
+        response = httpx.get(f"{broad_world}/entities", timeout=60)
+
+        fold = _broad_fold(response.text)
+        assert "9 names" in fold.children[0].text()
+        assert list(elements(fold, "form")) == []
+        assert list(elements(fold, "input")) == []
+        for hidden in ("store front", "alpha", "bravo"):
+            assert hidden not in response.text.casefold()
+
+    def test_EntitiesPage_WhenNoGroupIsAboveTheCap_OffersNoWithheldFold(self, served):
+        page = shown(served)
+
+        assert not [d for d in elements(parse(page), "details") if "ent-broad" in d.classes]
+
+
 class TestThePageAsItIsRead:
     def test_EntitiesPage_WithEntitiesAndGroups_RepeatsNoLineOfThreeWordsMoreThanTwice(
         self, served

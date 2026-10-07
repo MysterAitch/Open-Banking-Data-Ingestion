@@ -573,6 +573,9 @@ def is_distinctive(norm: str, common: Collection[str]) -> bool:
 #: was made and not who it was to, while the real variants of one retailer were four towns. A
 #: group above this is counted and left unproposed (`Proposals.too_broad`), never merged on the
 #: owner's one press; the figure is a threshold to relax on evidence, not a property of retailers.
+#: A withheld group is still shown, in a closed fold with nothing ticked, so the owner can read
+#: it and merge the names that are one payee; stripping method words has since removed most of
+#: what this cap was measured against.
 MAX_SHAPES_PROPOSED = 8
 
 

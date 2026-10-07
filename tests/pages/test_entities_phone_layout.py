@@ -169,3 +169,45 @@ class TestThirtyNamesOnAPhone:
         assert overflow <= 0, "the page scrolls sideways"
         assert height <= (SCREENS_OPEN if folds_open else SCREENS) * PHONE_HEIGHT, height
         assert height <= (MEASURED_OPEN if folds_open else MEASURED_CLOSED), height
+
+
+def _serve(view: EntitiesView) -> HTTPServer:
+    config = WebConfig(
+        client_id="c",
+        client_secret="tlcs_live_abcdefghij1234567890",
+        redirect_uri="https://obdi.example.com/callback",
+        connection_store=ConnectionStore(Path(os.devnull)),
+        entities_data=lambda: view,
+    )
+    handler = type("H", (ConnectionHandler,), {"config": config, "session": AuthorisationSession()})
+    httpd = HTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+class TestAWithheldGroupOnAPhone:
+    """A group the cap withheld sits in a closed fold, so it costs one summary line and no more:
+    the same number of names with nothing to group is the measured baseline."""
+
+    #: A summary line at this width, with room for the fold's margins.
+    ALLOWANCE = 120
+
+    def test_EntitiesPage_WithAWithheldGroupClosed_AddsOnlyItsSummaryLine(self, browser):
+        words = ["alpha", "bravo", "coral", "delta", "ember", "frost", "grove", "haven", "ivory"]
+        brands = {"alder store": 1, "birch store": 1, "cedar store": 1}
+        withheld = {f"store front {w}": 2 for w in words} | brands
+        scattered = {f"{w} unrelated{'abcdefghi'[i]}": 2 for i, w in enumerate(words)} | brands
+        assert view_of(withheld, [], None, {}).proposals.too_broad
+        assert not view_of(scattered, [], None, {}).proposals.too_broad
+        heights = {}
+        for label, counts in (("withheld", withheld), ("scattered", scattered)):
+            httpd = _serve(view_of(counts, [], None, {}))
+            try:
+                served = f"http://127.0.0.1:{httpd.server_port}"
+                heights[label], overflow = _measure(
+                    browser, served, shown=True, label=f"broad-{label}"
+                )
+                assert overflow <= 0
+            finally:
+                httpd.shutdown()
+        assert heights["withheld"] - heights["scattered"] <= self.ALLOWANCE, heights
