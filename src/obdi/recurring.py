@@ -519,12 +519,17 @@ def _series_in_group(
     return _split(legs, shape, reach, closings, today, _SPLITS)
 
 
-#: What a group that does not fit as a whole is divided by, in turn: exact amount, then account.
-#: A payee taking two payments a month is two things to tell apart by what differs; where the
-#: price is the same, the account is what is left.
+#: What a group that does not fit as a whole is divided by, in turn: account, then exact amount.
+#: Only a group that already fits no cadence reaches here, so a payee paid from several accounts
+#: on one rhythm is never divided (an occurrence from another account is marked, not lost). The
+#: account comes first because gathering names into one payee (an entity, or a counterparty one
+#: bank states for every account) put one employer's monthly varying pay beside its other
+#: payments elsewhere; dividing by exact amount first left that pay in pieces of one or two,
+#: and a series that was found before the gathering vanished (12 series to 11 on the large store).
+#: A payee taking two payments a month into one account is then told apart by amount.
 _SPLITS: tuple[Callable[[_Leg], object], ...] = (
-    lambda leg: leg.row.amount_minor,
     lambda leg: leg.row.account_id,
+    lambda leg: leg.row.amount_minor,
 )
 
 

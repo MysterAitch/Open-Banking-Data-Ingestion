@@ -778,3 +778,31 @@ class TestKindAndBasis:
         (series,) = find_recurring(rows, pairs=(), today=TODAY)
 
         assert series.kind == SCHEDULED
+
+
+class TestOneCounterpartyPayingSeveralAccounts:
+    """The large store in miniature: one employer pays account A a varying amount each month, and
+    pays B and C other sums on other days. Gathered into one payee the group fits no cadence, so
+    it is divided; dividing by account first keeps A's monthly series, which dividing by exact
+    amount first left in pieces of one or two payments."""
+
+    def rows(self) -> list[Transaction]:
+        months = [(2026, m) for m in range(1, 10)]
+        varying = [tx(A, date(y, m, 25), -(30000 + 137 * m), "EMPLOYER") for y, m in months]
+        other_b = [tx(B, date(2026, m, 3), -(1000 * m + 17), "EMPLOYER") for m in (1, 4, 8)]
+        other_c = [tx(C, date(2026, m, 11), -(2500 + 3 * m), "EMPLOYER") for m in (2, 5, 9)]
+        return varying + other_b + other_c
+
+    def test_Detector_WhenAGroupAcrossAccountsFitsNoCadence_KeepsEachAccountsOwnSeries(self):
+        found = find_recurring(self.rows(), [], TODAY)
+
+        series = find_one(found, "employer", A)
+        assert series.cadence == "monthly" and series.count == 9
+
+    def test_Detector_WhenAGroupAcrossAccountsFitsOneCadence_IsNotSplit(self):
+        rows = [tx(A, date(2026, m, 15), -999, "SUBSCRIPTION") for m in (1, 2, 3, 4)]
+        rows += [tx(B, date(2026, m, 15), -999, "SUBSCRIPTION") for m in (5, 6, 7)]
+
+        (series,) = find_recurring(rows, [], TODAY)
+
+        assert series.count == 7 and series.off_account == 3
