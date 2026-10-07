@@ -728,7 +728,10 @@ obdi each day, and the projection to Actual moves to the end as an export. The s
    further side effects (applying a label, a category) wait for R6a and R6, when those exist;
    the rule table is built so a side effect is a column added, not a rule kind.
    **R2c (the owner, 2026-10-07): the stated counterparty is the primary identifier; the
-   description elaborates.** "Using the description for the counterparty details is the wrong
+   description elaborates.** (`entities.md` beside this plan is the first-principles record -
+   what an entity is, the five kinds of evidence a source states about the other party ranked
+   by consistency, the link as a claim with a kind, and the four builds in order; R2c is its
+   first.) "Using the description for the counterparty details is the wrong
    default. It is acceptable as a means to elaborate or enhance, but not as the primary
    identifier." A name is the source's stated counterparty where one is stated (a provider's
    merchant name, Starling's counter-party name, a statement's Counter Party column),
