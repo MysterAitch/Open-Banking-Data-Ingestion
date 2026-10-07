@@ -727,6 +727,26 @@ obdi each day, and the projection to Actual moves to the end as an export. The s
    but never pays, such as one he expects reimbursement from (worked example E). A rule's
    further side effects (applying a label, a category) wait for R6a and R6, when those exist;
    the rule table is built so a side effect is a column added, not a rule kind.
+   **R2c (the owner, 2026-10-07): the stated counterparty is the primary identifier; the
+   description elaborates.** "Using the description for the counterparty details is the wrong
+   default. It is acceptable as a means to elaborate or enhance, but not as the primary
+   identifier." A name is the source's stated counterparty where one is stated (a provider's
+   merchant name, Starling's counter-party name, a statement's Counter Party column),
+   normalised lightly; the description names a row only where none is stated. What made
+   counterparty-first fail in 0.4.361 was the missing join, not the identifier: a payee whose
+   months come from a feed (with a merchant name) and from statements (without) took two
+   names. The join is learned from obdi's own evidence - a transaction held as one payment
+   with two sightings says description-name D and counterparty-name C are one payee - as
+   derived state rebuilt from raw with its supporting count, and a statement-only row whose
+   description reduces to D is named C, shown as "matched to the bank's merchant name through
+   N payments seen by both". The series key is the entity if gathered, else the
+   counterparty-name or its alias, else the description-name; every name on the page says
+   which of the three it is (NF-TRACE-01). A description-name with no evidence stays one,
+   visibly. Measured by the same count lines as before: the habit must stay at one and stopped
+   near 31 on the real store, with the names count falling as feed and statement spellings of
+   one payee become one. Rejected: description-first (0.4.362), which removed the split by
+   removing the identifier; and asking the owner to join the two spellings by hand, which the
+   evidence already answers.
 3. **Position, honestly** (new, before R3) - one page: what is held, what is owed, what is
    committed before the next income, and what is free, per account and in total, each figure
    with its basis beside it. The "available to spend" of a budgeting tool collapsed to one
