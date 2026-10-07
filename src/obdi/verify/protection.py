@@ -541,7 +541,7 @@ def press(
         # span is reproduced by is the other source's, not the statement's, so it is preferred.
         key=lambda k: (k.day, k.closed_before is None, k.source),
     )
-    from ..ledger import running_balance
+    from ..read.ledger import running_balance
 
     opening_day = date.fromordinal(start.toordinal() - 1)
     span = span_rows(store, ref, start, through)
@@ -696,7 +696,7 @@ def protection_view(
     check: Check | None = None,
 ) -> ProtectionView:
     """`check` is the span's check where the caller already made it."""
-    from ..ledger import running_balance
+    from ..read.ledger import running_balance
 
     record = store.protection_record(ref)
     offer: tuple[date, ...] = ()

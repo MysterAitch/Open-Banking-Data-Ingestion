@@ -36,8 +36,24 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from .account_names import AccountsShown, code_html
-from .bring_in import (
+from .bring_in_dry_run import (
+    VALUES_BUTTON,
+    decision_line,
+    dry_run_fold,
+    values_page_body,
+)
+from .bring_in_preview import preview_html, second_witness_html, unreadable_html
+from .callback import render_page
+from .core.namespaces import UNASSIGNED_ACCOUNT
+from .core.page_times import clock_text, instant_of, local_day, span_phrase
+from .core.plural import plural
+from .ingest.bring_in_guess import Guess, GuessBasis, guess_account, section_guess
+from .ingest.connections import Connection, ConnectionStore
+from .ingest.pipeline import MatcherPreview
+from .ingest.pull import STARLING_CONNECTION
+from .ingest.rebuild_hold import RebuildInProgress
+from .read.account_names import AccountsShown, code_html
+from .read.bring_in import (
     BALANCE_KINDS,
     UploadKind,
     WantedFile,
@@ -48,29 +64,13 @@ from .bring_in import (
     upload_kind,
     wanted_heading,
 )
-from .bring_in_dry_run import (
-    VALUES_BUTTON,
-    decision_line,
-    dry_run_fold,
-    values_page_body,
-)
-from .bring_in_outcome import coverage, new_transactions, open_flags_by_account, sentences
-from .bring_in_preview import preview_html, second_witness_html, unreadable_html
-from .callback import render_page
-from .core.namespaces import UNASSIGNED_ACCOUNT
-from .core.page_times import clock_text, instant_of, local_day, span_phrase
-from .core.plural import plural
-from .coverage_timeline import EXPORT, STATEMENT, AccountTimeline
-from .fetch_gaps import FetchReport, GapKind
-from .fetch_marks import AGGREGATOR
-from .fetch_reasons import gap_lines
-from .ingest.bring_in_guess import Guess, GuessBasis, guess_account, section_guess
-from .ingest.connections import Connection, ConnectionStore
-from .ingest.pipeline import MatcherPreview
-from .ingest.pull import STARLING_CONNECTION
-from .ingest.rebuild_hold import RebuildInProgress
-from .overview import AccountOverview, Overview
-from .todo import account_page, wanted_days
+from .read.bring_in_outcome import coverage, new_transactions, open_flags_by_account, sentences
+from .read.coverage_timeline import EXPORT, STATEMENT, AccountTimeline
+from .read.fetch_gaps import FetchReport, GapKind
+from .read.fetch_marks import AGGREGATOR
+from .read.fetch_reasons import gap_lines
+from .read.overview import AccountOverview, Overview
+from .read.todo import account_page, wanted_days
 from .trust_bar import bar_html, source_lane_html
 from .verify.standing_data import AccountStanding
 from .verify.trust import Trust, month_marks, trust_of

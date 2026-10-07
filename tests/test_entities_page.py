@@ -575,7 +575,7 @@ class TestWhatANameCoversBeforeMerging:
         assert "and 2 more" in london.text()
 
     def test_Fold_WhenValuesAreShown_LinksEachRowToItsPlaceInTheLedger(self, busy_world):
-        from obdi.ledger import row_anchor
+        from obdi.read.ledger import row_anchor
 
         base, db = busy_world
         with Store(db) as store:

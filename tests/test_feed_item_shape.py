@@ -85,7 +85,7 @@ def crowd(count: int, **fields_for) -> tuple[list[dict[str, Any]], tuple[Row, ..
 
 
 def page_of(store) -> str:
-    from obdi.ledger import build_ledger
+    from obdi.read.ledger import build_ledger
     from obdi.web_ledger import render_ledger
 
     ledger = build_ledger(store, MAIN, "2026-09", bound=False, families=families_of(store, MAP))

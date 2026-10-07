@@ -27,7 +27,7 @@ from obdi.core.models import Transaction, TransactionStatus
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
-from obdi.ledger import build_ledger
+from obdi.read.ledger import build_ledger
 from obdi.verify.balance_anchors import FAMILY, OPENED, effective_opening
 from obdi.web_ledger import render_ledger
 from test_family_anchors import CSV_HEADER, land_evidence, leg

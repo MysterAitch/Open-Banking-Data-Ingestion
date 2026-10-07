@@ -31,7 +31,7 @@ from datetime import date
 import pytest
 
 from obdi.ingest.store import Store
-from obdi.position import read_position
+from obdi.read.position import read_position
 from obdi.verify.balance_anchors import record_stated_anchor
 from obdi.web_position import render_position
 from test_ledger import land, txn

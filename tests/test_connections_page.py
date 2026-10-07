@@ -21,8 +21,8 @@ import pytest
 
 from actual_states import NOW as ACTUAL_NOW
 from actual_states import STATES
-from obdi.account_names import AccountShown, AccountsShown
 from obdi.ingest.connections import Connection, ConnectionStore
+from obdi.read.account_names import AccountShown, AccountsShown
 from obdi.web_sections import render_connections
 from page_dom import Node, elements, parse
 

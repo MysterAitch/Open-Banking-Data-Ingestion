@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from obdi.ingest.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
 from obdi.ingest.rebuild_hold import RebuildHold
 from obdi.ingest.store import Store
-from obdi.overview import build_overview
+from obdi.read.overview import build_overview
 from obdi.verify.balance_anchors import record_stated_anchor
 from obdi.web_overview import overview_html
 from page_dom import Node, elements, parse

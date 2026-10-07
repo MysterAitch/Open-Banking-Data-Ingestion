@@ -55,8 +55,8 @@ import httpx
 import pytest
 
 import invented_balance_account as inv
-from obdi.balance_chart import BalanceChart, empty_chart
 from obdi.ingest.connections import ConnectionStore
+from obdi.read.balance_chart import BalanceChart, empty_chart
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from obdi.web_balance_chart import render_balance_chart
 from test_balance_chart_fit import Page

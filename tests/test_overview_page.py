@@ -18,11 +18,11 @@ from typing import ClassVar
 import httpx
 import pytest
 
-from obdi.alerts import Finding
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.store import Store
-from obdi.overview import STATE_RULES, OverviewCache
+from obdi.read.alerts import Finding
+from obdi.read.overview import STATE_RULES, OverviewCache
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig, render_index
 from test_account_pages import assert_tap_targets_are_thumb_sized
 from test_balance_reconciliation import _built

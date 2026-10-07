@@ -54,7 +54,7 @@ from obdi.ingest.accounts import (
 from obdi.ingest.pipeline import pair_transfers_across_store
 from obdi.ingest.spaces import ArchiveNote
 from obdi.ingest.store import Store
-from obdi.ledger import Ledger
+from obdi.read.ledger import Ledger
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_accounts import archive_controls
 from page_dom import Node, elements, parse

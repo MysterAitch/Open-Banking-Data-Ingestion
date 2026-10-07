@@ -15,10 +15,10 @@ import httpx
 import pytest
 
 from obdi import web_destinations
-from obdi.checks_index import CHECKS, CheckResult, result_of
 from obdi.ingest.rebuild_hold import RebuildHold
 from obdi.navigation import PAGE_NAMES
-from obdi.overview import (
+from obdi.read.checks_index import CHECKS, CheckResult, result_of
+from obdi.read.overview import (
     HOUSEKEEPING,
     INFORMATION,
     NOW,

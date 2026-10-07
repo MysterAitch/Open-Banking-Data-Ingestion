@@ -178,7 +178,7 @@ class TestTwoSourcesDiffering:
 
 class TestTheRemedyForDisagreeingBalances:
     def test_Overview_WhenKnownBalancesDisagree_PointsAtDisregardingNotRemoving(self):
-        from obdi.overview import _KINDS
+        from obdi.read.overview import _KINDS
 
         _, remedy = _KINDS["known-balances-disagree"]
 

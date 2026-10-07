@@ -30,7 +30,7 @@ from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import pair_transfers_across_store, reconcile_batch
 from obdi.ingest.store import Store
-from obdi.ledger import (
+from obdi.read.ledger import (
     ANCHOR_QUERIES,
     QUERIES_PER_PAGE,
     STATEMENT_CHECK_QUERIES,

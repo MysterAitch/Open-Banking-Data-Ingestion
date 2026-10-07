@@ -38,7 +38,7 @@ from late_settlement_corpus import Payment, aggregator_item, household, late_set
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
-from obdi.ledger import build_ledger
+from obdi.read.ledger import build_ledger
 from obdi.web_ledger import render_ledger
 from test_family_anchors import land_evidence
 from test_id_tier import aggregator_artefact, arrive, feed_artefact

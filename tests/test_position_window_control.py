@@ -30,7 +30,7 @@ import httpx
 import pytest
 
 from obdi.ingest.store import Store
-from obdi.position import Position, read_position
+from obdi.read.position import Position, read_position
 from obdi.web_position import WINDOW_FIELDS, render_position, window_choice
 from position_window_household import CARD, TODAY, window_household
 from test_position_chart_window import CHART, polylines

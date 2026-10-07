@@ -13,12 +13,12 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from obdi.core.models import RawArtefact, SourceTier, Transaction
-from obdi.coverage_timeline import build_account_timeline
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import starling
 from obdi.ingest.store import Store
+from obdi.read.coverage_timeline import build_account_timeline
 from obdi.verify.statement_span import describe_account
 from obdi.web_coverage_timeline import render_account_timeline
 

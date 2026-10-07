@@ -18,8 +18,8 @@ from __future__ import annotations
 import html
 from collections import Counter
 
-from .account_names import code_html
 from .core.plural import plural
+from .read.account_names import code_html
 
 _esc = html.escape
 

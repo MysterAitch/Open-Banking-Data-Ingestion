@@ -43,7 +43,7 @@ def shown_balances_are_stated_or_named(
     quantities, which the owner's own correction accepts ("a closing balance is not the balance at
     the end of a calendar day") and the page must therefore say rather than leave "adds up"
     beside a different figure."""
-    from obdi.ledger import running_balance
+    from obdi.read.ledger import running_balance
     from obdi.verify.balance_anchors import STATEMENT, effective_opening
     from obdi.verify.standing_data import statement_checks_for
 

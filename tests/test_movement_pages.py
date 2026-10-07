@@ -30,7 +30,7 @@ import pytest
 
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.store import Store
-from obdi.overview import NOW, build_overview
+from obdi.read.overview import NOW, build_overview
 from obdi.verify.movement_completeness import (
     ChainFault,
     MovementCompleteness,

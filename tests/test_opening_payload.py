@@ -25,7 +25,7 @@ import pytest
 
 from obdi.actual_push import build_audit_envelope, build_envelope, build_prune_envelope
 from obdi.ingest.store import Store
-from obdi.ledger import build_ledger
+from obdi.read.ledger import build_ledger
 from obdi.replay import (
     OPENING_IMPORTED_ID_PREFIX,
     ActualAccountBinding,

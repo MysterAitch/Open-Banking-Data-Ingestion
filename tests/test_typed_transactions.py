@@ -39,7 +39,7 @@ from obdi.ingest.typed_transactions import (
     typed_entries,
     withdraw_typed_transaction,
 )
-from obdi.ledger import running_balance
+from obdi.read.ledger import running_balance
 from obdi.replay import ActualAccountBinding, build_payload
 from obdi.verify.balance_anchors import AnchorRefused
 from obdi.web import AuthorisationSession, ConnectionHandler

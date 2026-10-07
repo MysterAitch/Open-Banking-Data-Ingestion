@@ -20,7 +20,6 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from .account_names import AccountShown
 from .callback import render_page
 from .core.logs import say
 from .core.masking import mask_text
@@ -40,6 +39,7 @@ from .entities import (
     Suggestion,
 )
 from .navigation import page_name
+from .read.account_names import AccountShown
 from .web_recurring import values_mode
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone

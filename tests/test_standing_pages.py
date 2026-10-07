@@ -17,7 +17,7 @@ import pytest
 
 from obdi.cli import build_web_config
 from obdi.ingest.store import Store
-from obdi.overview import STALE_AGREEMENT_DAYS, build_overview, standing_items_from
+from obdi.read.overview import STALE_AGREEMENT_DAYS, build_overview, standing_items_from
 from obdi.verify.agreement import standing_of
 from obdi.verify.balance_anchors import (
     STATED,

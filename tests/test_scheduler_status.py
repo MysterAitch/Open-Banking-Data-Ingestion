@@ -19,13 +19,13 @@ from pathlib import Path
 
 import pytest
 
-from obdi.alerts import Finding
 from obdi.cli import _await_scheduled_clearance, collect_alert_findings, main
 from obdi.ingest import leases
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.store import Store
-from obdi.overview import _alert_item
-from obdi.scheduler_status import (
+from obdi.read.alerts import Finding
+from obdi.read.overview import _alert_item
+from obdi.read.scheduler_status import (
     CYCLE_STEPS,
     STUCK_FLOOR_SECONDS,
     describe_error,

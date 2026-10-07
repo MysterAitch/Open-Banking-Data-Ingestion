@@ -32,7 +32,7 @@ import pytest
 from late_settlement_corpus import Payment, aggregator_item
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.store import Store
-from obdi.ledger import build_ledger
+from obdi.read.ledger import build_ledger
 from obdi.web_ledger import render_ledger
 from round_up_corpus import card_payment
 from test_family_anchors import land_evidence

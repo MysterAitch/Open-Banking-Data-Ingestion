@@ -26,7 +26,7 @@ from obdi.core.masking import MASKED_TOTAL
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.store import Store
 from obdi.ingest.valuations import Asset, AssetKind, record_observation
-from obdi.position import AccountInput, AssetInput, Observation, build_position
+from obdi.read.position import AccountInput, AssetInput, Observation, build_position
 from obdi.verify.balance_anchors import record_stated_anchor
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_position import render_position

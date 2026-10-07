@@ -17,10 +17,10 @@ import html
 from collections.abc import Mapping, Sequence
 from datetime import date
 
-from .account_names import AccountsShown, code_html
 from .core.page_times import range_with_span
 from .core.plural import plural
 from .ingest.statement_extraction import not_yet_extracted_words
+from .read.account_names import AccountsShown, code_html
 from .web_statements import names_found_words
 
 _esc = html.escape

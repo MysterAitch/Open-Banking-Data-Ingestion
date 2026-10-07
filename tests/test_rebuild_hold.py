@@ -35,12 +35,12 @@ import httpx
 import pytest
 
 from obdi import cli
-from obdi.alerts import DERIVED_FINDING_PREFIXES, Finding, process
 from obdi.cli import build_web_config, collect_alert_findings, main
 from obdi.ingest.rebuild import RebuildReport
 from obdi.ingest.rebuild_hold import RebuildEpoch, abandoned_for, epoch_for, hold_for
 from obdi.ingest.store import Store
-from obdi.overview import (
+from obdi.read.alerts import DERIVED_FINDING_PREFIXES, Finding, process
+from obdi.read.overview import (
     DERIVED_ALERT_CONDITIONS,
     DERIVED_OVERVIEW_CHECKS,
     OVERVIEW_CHECKS,

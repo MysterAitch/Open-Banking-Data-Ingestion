@@ -32,10 +32,10 @@ from datetime import date
 import httpx
 import pytest
 
-from obdi.account_names import accounts_shown
 from obdi.ingest.accounts import AccountRecord, AccountRef, LimitWindow, RateWindow
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.store import Store
+from obdi.read.account_names import accounts_shown
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 #: Controls as reachable as the links beside them. The class and the width

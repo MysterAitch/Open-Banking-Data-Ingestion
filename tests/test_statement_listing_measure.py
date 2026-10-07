@@ -48,7 +48,6 @@ import httpx
 import pytest
 
 from credit_union_documents import nine_accounts, pdf
-from obdi.account_names import AccountsShown
 from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.family_anchors import Families
@@ -58,6 +57,7 @@ from obdi.ingest.pipeline import import_file, media_type_of, reconcile_batch
 from obdi.ingest.statement_terms import keep_statement_readings
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
+from obdi.read.account_names import AccountsShown
 from obdi.statement_listing_page import statement_listing_html
 from obdi.verify.balance_anchors import record_stated_anchor
 from obdi.verify.statement_listing_measure import (

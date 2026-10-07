@@ -18,9 +18,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 
-from .account_names import AccountShown
 from .core.page_times import date_with_age
-from .overview import AccountOverview
+from .read.account_names import AccountShown
+from .read.overview import AccountOverview
 from .trust_bar import axis_html, key_html
 from .verify.standing_data import ADDS_UP, NOTHING_TO_CHECK_AGAINST
 from .verify.trust import Trust

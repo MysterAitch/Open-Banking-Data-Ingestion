@@ -17,7 +17,7 @@ import html
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from .account_names import AccountsShown
+from .read.account_names import AccountsShown
 from .verify.agreement import NONE
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone

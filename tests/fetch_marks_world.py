@@ -30,10 +30,10 @@ from fetch_gaps_world import (
     feed,
     santander_statements,
 )
-from obdi.fetch_gaps import STATEMENT_SOURCES, fetch_report, gather_evidence
-from obdi.fetch_marks import MarkSet, MarkWorld, gather_world, make_mark, read_marks, set_scope
 from obdi.ingest.providers.truelayer import artefact_for
 from obdi.ingest.store import Store
+from obdi.read.fetch_gaps import STATEMENT_SOURCES, fetch_report, gather_evidence
+from obdi.read.fetch_marks import MarkSet, MarkWorld, gather_world, make_mark, read_marks, set_scope
 from obdi.verify.standing_data import standings_for
 
 NOW = "2026-10-05T09:00:00+00:00"

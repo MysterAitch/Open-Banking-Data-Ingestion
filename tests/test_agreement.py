@@ -22,7 +22,7 @@ from obdi.core.models import Transaction, TransactionStatus
 from obdi.core.namespaces import CLEARING_SOURCES, SOURCES
 from obdi.core.page_times import marks_removed
 from obdi.ingest.store import Store
-from obdi.ledger import build_ledger
+from obdi.read.ledger import build_ledger
 from obdi.verify.agreement import (
     AGREES,
     DEFINES,

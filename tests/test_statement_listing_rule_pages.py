@@ -30,11 +30,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from obdi.account_names import AccountsShown
 from obdi.cli import build_web_config
 from obdi.core.models import TransactionStatus
 from obdi.ingest.store import Store
-from obdi.overview import NOW, standing_items_from
+from obdi.read.account_names import AccountsShown
+from obdi.read.overview import NOW, standing_items_from
 from obdi.statement_listing_page import statement_listing_html
 from obdi.verify.balance_anchors import effective_opening
 from obdi.verify.standing_data import standings_for

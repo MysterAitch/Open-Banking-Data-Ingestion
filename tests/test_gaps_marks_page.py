@@ -35,10 +35,10 @@ from fetch_marks_world import (
     report_with,
     scope,
 )
-from obdi.account_names import accounts_shown
-from obdi.bring_in import files_wanted, wanted_heading
 from obdi.cli import build_web_config
 from obdi.ingest.store import Store
+from obdi.read.account_names import accounts_shown
+from obdi.read.bring_in import files_wanted, wanted_heading
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_bring_in import BringInData, Evidence, render_bring_in
 from obdi.web_marks import evidence_text, verdict_clauses
@@ -169,15 +169,15 @@ class TestAContradictedMarkStandsOut:
 class TestEvidenceWords:
     def evidence(self, db, account, kind, first, last, source=""):
         from fetch_marks_world import world_of
-        from obdi.fetch_gaps import STATEMENT_SOURCES
-        from obdi.fetch_marks import MarkKind, gather_evidence, judge
+        from obdi.read.fetch_gaps import STATEMENT_SOURCES
+        from obdi.read.fetch_marks import MarkKind, gather_evidence, judge
 
         world = world_of(db)
         found = gather_evidence(world, account, source, first, last,
                                 statement_sources=STATEMENT_SOURCES)
         standing, reason = judge(MarkKind(kind), source, first, last, found,
                                  statement_sources=STATEMENT_SOURCES)
-        from obdi.fetch_marks import MarkKind as K
+        from obdi.read.fetch_marks import MarkKind as K
 
         return evidence_text(K(kind), source, first, last, found, standing, reason, marked=False)
 

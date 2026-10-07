@@ -16,8 +16,8 @@ from typing import Any
 import pytest
 
 from coverage_page_world import repeated_lines
-from obdi.account_names import AccountShown, AccountsShown
 from obdi.callback import render_page
+from obdi.read.account_names import AccountShown, AccountsShown
 from obdi.web_statements import statements_body
 from page_dom import elements, parse
 from test_phone_layout import sync_api

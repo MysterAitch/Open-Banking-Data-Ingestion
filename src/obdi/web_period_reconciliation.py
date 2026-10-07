@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import html
 
-from .account_names import AccountsShown
 from .core.plural import plural
+from .read.account_names import AccountsShown
 from .verify.period_reconciliation import (
     AccountPeriods,
     Locus,

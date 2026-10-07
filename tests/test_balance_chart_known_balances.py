@@ -35,10 +35,10 @@ from itertools import pairwise
 
 import pytest
 
-from obdi.balance_chart import BalanceChart, build_balance_chart, chart_of_opening
 from obdi.core.models import Transaction
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.store import Store
+from obdi.read.balance_chart import BalanceChart, build_balance_chart, chart_of_opening
 from obdi.verify.balance_anchors import (
     STATED,
     STATEMENT,

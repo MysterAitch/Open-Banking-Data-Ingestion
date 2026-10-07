@@ -60,7 +60,7 @@ from obdi.ingest.providers import starling, truelayer
 from obdi.ingest.rebuild import parse_artefact_transactions, rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.ingest.typed_transactions import record_typed_transaction
-from obdi.ledger import (
+from obdi.read.ledger import (
     ANCHOR_QUERIES,
     FAMILY_DISCOVERY_QUERIES,
     FAMILY_QUERIES,

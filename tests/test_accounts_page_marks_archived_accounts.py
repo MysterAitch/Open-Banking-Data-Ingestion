@@ -30,11 +30,11 @@ from datetime import date
 
 import pytest
 
-from obdi.account_names import accounts_shown
 from obdi.ingest.accounts import ARCHIVE_BASIS_PREFIX, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.store import Store
-from obdi.known_accounts import KnownAccount, KnownAccounts, read_known_accounts
-from obdi.overview import ARCHIVED
+from obdi.read.account_names import accounts_shown
+from obdi.read.known_accounts import KnownAccount, KnownAccounts, read_known_accounts
+from obdi.read.overview import ARCHIVED
 from obdi.web_accounts import accounts_page
 from test_ledger import land, txn
 from test_phone_layout import LONG_NAME, PHONE_HEIGHT, PHONE_WIDTH, _assert_fits, _measure, sync_api

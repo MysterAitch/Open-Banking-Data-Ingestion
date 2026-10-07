@@ -30,12 +30,12 @@ from pathlib import Path
 import pytest
 
 from obdi import cli
-from obdi.alerts import Finding
 from obdi.core.models import RawArtefact
 from obdi.ingest.identity import artefact_digest, content_key
 from obdi.ingest.store import Store
-from obdi.overview import _alert_item
-from obdi.scheduler_status import (
+from obdi.read.alerts import Finding
+from obdi.read.overview import _alert_item
+from obdi.read.scheduler_status import (
     CYCLE_STEPS,
     ItemPosition,
     describe_error,
@@ -77,7 +77,7 @@ def db(tmp_path) -> Path:
 
 
 def beat(db: Path):
-    from obdi.scheduler_status import read_record
+    from obdi.read.scheduler_status import read_record
 
     return lambda: read_record(db)
 

@@ -491,7 +491,7 @@ class TestWhatTheLedgerPageSaysOfAnUnheldSpace:
         import re
 
         from obdi.core.masking import Disclosed
-        from obdi.ledger import family_view
+        from obdi.read.ledger import family_view
         from obdi.web_ledger import _family_html
 
         import_export(store, tmp_path)

@@ -29,7 +29,6 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.account_names import accounts_shown
 from obdi.cli import main as cli_main
 from obdi.core.models import RawArtefact
 from obdi.export_declared import export_declared
@@ -39,13 +38,14 @@ from obdi.ingest.providers import starling
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.space_attribution import space_parents
 from obdi.ingest.store import Store
-from obdi.known_accounts import (
+from obdi.navigation import DESTINATIONS
+from obdi.read.account_names import accounts_shown
+from obdi.read.known_accounts import (
     declare_known_accounts,
     plan_parents,
     read_known_accounts,
     set_space_parents,
 )
-from obdi.navigation import DESTINATIONS
 from test_ledger import land, txn
 from test_space_attribution import BILLS, BINDINGS, HOLIDAY, LANDER, MAIN, PROVIDER_MAP
 

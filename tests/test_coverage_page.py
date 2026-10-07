@@ -21,7 +21,7 @@ import pytest
 
 import coverage_page_world as world
 from obdi.core.page_times import date_with_age
-from obdi.coverage_timeline import AGGREGATOR, EXPORT, FEED, KIND_NAMES, STATEMENT
+from obdi.read.coverage_timeline import AGGREGATOR, EXPORT, FEED, KIND_NAMES, STATEMENT
 from page_dom import Node, elements, inside, parse
 from section_harness import config, environment, serve_config
 

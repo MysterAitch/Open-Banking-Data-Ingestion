@@ -43,7 +43,6 @@ from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from . import entity_actions, values_sitting
-from .account_names import AccountShown, AccountsShown, accounts_shown, code_html
 from .actual_audit import (
     NAMED_DIFFERENCES as _AUDIT_NAMED_DIFFERENCES,
 )
@@ -58,8 +57,6 @@ from .actual_audit import (
 )
 from .actual_push import NothingQueued, valid_progress
 from .actual_verdict import APPLIER_STALE_SECONDS
-from .alerts import consent_rung
-from .balance_chart import BalanceChart
 from .callback import render_page
 from .core.classification import redact_summary
 from .core.errors import DataError
@@ -82,10 +79,7 @@ from .core.page_words import (
 from .core.plural import plural, word
 from .core.secrets import SecretError, read_secret
 from .core.timings import Timings
-from .coverage_timeline import AccountTimeline
 from .entities import EntitiesView
-from .fetch_gaps import FetchReport
-from .fetch_marks import MarkSet, MarkWorld
 from .ingest.accounts import AccountRecord, ArchiveOutcome
 from .ingest.asked_coverage import Hole, describe_spans
 from .ingest.attended_fetch import PRESS_KIND, PressRefused
@@ -100,11 +94,17 @@ from .ingest.statement_extraction import not_yet_extracted_words
 from .ingest.statement_shape import ShapeReport
 from .ingest.store import Store
 from .ingest.upload_script import UPLOAD_SCRIPT
-from .known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, ParentPlan
-from .ledger import LedgerData
 from .navigation import answering, current_route, page_name
-from .overview import Overview
-from .position import Position
+from .read.account_names import AccountShown, AccountsShown, accounts_shown, code_html
+from .read.alerts import consent_rung
+from .read.balance_chart import BalanceChart
+from .read.coverage_timeline import AccountTimeline
+from .read.fetch_gaps import FetchReport
+from .read.fetch_marks import MarkSet, MarkWorld
+from .read.known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, ParentPlan
+from .read.ledger import LedgerData
+from .read.overview import Overview
+from .read.position import Position
 from .recurring import RecurringFindings
 from .statement_listing_page import statement_listing_html
 from .verify.coverage import DoubtReport, SourceCoverage
@@ -4018,7 +4018,7 @@ class ConnectionHandler(
                     parsed if parsed.tzinfo else parsed.replace(tzinfo=_UTC)
                 ).astimezone(_UTC)
 
-        from .timeline import timeline_svg
+        from .read.timeline import timeline_svg
 
         def link(query: str, label: str, current: bool = False) -> str:
             if current:

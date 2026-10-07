@@ -13,10 +13,10 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from obdi.account_names import accounts_shown
 from obdi.ingest.connections import Connection, ConnectionStore
 from obdi.ingest.store import Store
 from obdi.navigation import PAGE_NAMES
+from obdi.read.account_names import accounts_shown
 
 #: Far enough ahead that the date is the same whenever the test runs.
 CONSENT_FAR = "2099-06-15T00:00:00+00:00"

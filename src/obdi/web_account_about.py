@@ -10,7 +10,12 @@ from __future__ import annotations
 import html
 from datetime import date
 
-from .account_about import (
+from .core.masking import MASKED_TOTAL
+from .core.money import format_amount
+from .core.plural import plural
+from .ingest.accounts import AccountRecord, LimitWindow
+from .navigation import account_address
+from .read.account_about import (
     DIFFERS,
     AccountAbout,
     RateCheck,
@@ -22,11 +27,6 @@ from .account_about import (
     rate_checks,
     windows_in_order,
 )
-from .core.masking import MASKED_TOTAL
-from .core.money import format_amount
-from .core.plural import plural
-from .ingest.accounts import AccountRecord, LimitWindow
-from .navigation import account_address
 from .verify.statement_sections import masked
 
 

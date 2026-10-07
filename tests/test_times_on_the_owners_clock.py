@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from obdi.account_names import AccountShown, AccountsShown
 from obdi.core.page_times import PAGE_ZONE
+from obdi.read.account_names import AccountShown, AccountsShown
 from obdi.web import _rebuild_history_html
 from obdi.web_statements import statements_body
 from source_tree import module_text

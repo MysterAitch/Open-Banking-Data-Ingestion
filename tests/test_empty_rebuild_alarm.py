@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.alerts import empty_rebuild_finding
+from obdi.read.alerts import empty_rebuild_finding
 
 FAILED_EMPTY = {
     "ok": 0,

@@ -308,7 +308,7 @@ class TestThePageForASpace:
     def page(store: Store) -> str:
         import html
 
-        from obdi.ledger import build_ledger
+        from obdi.read.ledger import build_ledger
         from obdi.web_ledger import render_ledger
 
         ledger = build_ledger(store, BILLS, None, bound=False, families=families_of(store, MAP))

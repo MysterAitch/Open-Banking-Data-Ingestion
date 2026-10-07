@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from obdi.balance_chart import WHOLE, BalanceChart
+from obdi.read.balance_chart import WHOLE, BalanceChart
 from obdi.verify.fault_structure import Point, StructureReport, structure
 
 FIRST = date(2019, 1, 1)

@@ -28,7 +28,6 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from urllib.parse import quote
 
-from .account_names import AccountShown
 from .core.logs import say
 from .core.page_times import (
     clock_text,
@@ -39,9 +38,10 @@ from .core.page_times import (
     span_phrase,
 )
 from .core.plural import plural
-from .fetch_gaps import FetchReport
 from .ingest.rebuild_hold import RebuildInProgress
-from .overview import (
+from .read.account_names import AccountShown
+from .read.fetch_gaps import FetchReport
+from .read.overview import (
     ALERT_CONDITIONS,
     ARCHIVED,
     EMPTY,
@@ -57,7 +57,7 @@ from .overview import (
     AccountOverview,
     Overview,
 )
-from .todo import Todo, build_todos, grouped, lockable, wanted_days
+from .read.todo import Todo, build_todos, grouped, lockable, wanted_days
 from .trust_bar import axis_html, bar_html, ends_html, key_html, own_life
 from .verify.agreement import Standing
 from .verify.standing_data import (
@@ -191,7 +191,7 @@ def data_line(
         return StatusLine("Data", href, "unchecked", "pill-warn", "Nothing was checked.")
     if overview.rebuilding is not None:
         return _paused("Data", href)
-    from .scheduler_status import read_scheduler
+    from .read.scheduler_status import read_scheduler
 
     finished = None
     if scheduler_heartbeat is not None:

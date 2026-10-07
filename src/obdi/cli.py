@@ -24,11 +24,7 @@ from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
-from .account_about import facts_from_readings, read_about
-from .account_names import AccountsShown, accounts_shown
 from .actual_push import ACTUAL_NOT_CONFIGURED, ENVELOPE_VERSION, NothingQueued
-from .alerts import Finding
-from .balance_chart import BalanceChart
 from .core.errors import DataError
 from .core.money import parse_amount
 from .core.namespaces import UNASSIGNED_ACCOUNT
@@ -36,10 +32,7 @@ from .core.outbound import install_if_requested as install_outbound_refusal_if_r
 from .core.page_times import instant_of
 from .core.plural import agree, plural
 from .core.secrets import SecretError, read_secret, truelayer_readiness
-from .coverage_timeline import AccountTimeline
 from .entities import EntitiesView
-from .fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
-from .fetch_marks import MarkSet, MarkWorld, gather_world, read_marks
 from .ingest import fingerprint
 from .ingest.accounts import (
     AccountBinding,
@@ -86,7 +79,14 @@ from .ingest.space_binding import UNBOUND, SpacesPress, space_states
 from .ingest.spaces import ArchiveNote
 from .ingest.store import Store, StoreIsNewer, request_meta_and_provenance
 from .ingest.valuations import Asset, AssetKind, record_observation
-from .known_accounts import (
+from .read.account_about import facts_from_readings, read_about
+from .read.account_names import AccountsShown, accounts_shown
+from .read.alerts import Finding
+from .read.balance_chart import BalanceChart
+from .read.coverage_timeline import AccountTimeline
+from .read.fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
+from .read.fetch_marks import MarkSet, MarkWorld, gather_world, read_marks
+from .read.known_accounts import (
     DeclareOutcome,
     KnownAccounts,
     ParentOutcome,
@@ -96,9 +96,10 @@ from .known_accounts import (
     read_known_accounts,
     set_space_parents,
 )
-from .ledger import Ledger, LedgerWindow
-from .overview import Overview, OverviewCache, build_overview
-from .position import Position
+from .read.ledger import Ledger, LedgerWindow
+from .read.overview import Overview, OverviewCache, build_overview
+from .read.position import Position
+from .read.scheduler_status import StepHandle, run_step
 from .recurring import RecurringFindings
 from .replay import (
     ActualAccountBinding,
@@ -107,7 +108,6 @@ from .replay import (
     build_transfer_pairs,
     unbound_accounts,
 )
-from .scheduler_status import StepHandle, run_step
 from .verify.coverage import (
     DoubtReport,
     SourceCoverage,
@@ -907,7 +907,7 @@ def _silent_feed_findings(
     The registry is the one place a person can say so, and a closing date
     still in the future excuses nothing.
     """
-    from .alerts import silent_feed_finding
+    from .read.alerts import silent_feed_finding
     from .verify.coverage import silent_feeds
 
     if not watched:
@@ -941,7 +941,7 @@ def _push_refusal_findings(db_path: Path, store: Store) -> list[Finding]:
     here; any other exception propagates to be reported as a failed check.
     """
     from .actual_push import DuplicateImportedIdError
-    from .alerts import push_refused_finding
+    from .read.alerts import push_refused_finding
 
     if not os.getenv("ACTUAL_SYNC_ID", "").strip():
         return []
@@ -969,7 +969,7 @@ def _stale_apply_findings(db_path: Path, now: datetime) -> list[Finding]:
     is a deliberate configuration, and one mid-set-up has nothing to apply yet.
     """
     from .actual_push import applier_heartbeat, latest_results_with_totals
-    from .alerts import stale_apply_finding
+    from .read.alerts import stale_apply_finding
 
     if not os.getenv("ACTUAL_SYNC_ID", "").strip() or not _actual_bindings():
         return []
@@ -990,7 +990,7 @@ def _guarded(name: str, check: Callable[[], list[Finding]]) -> list[Finding]:
     A check that raised would otherwise take the whole alert cycle down, or
     be dropped and read as a pass. The full error goes to the process log.
     """
-    from .alerts import check_failed_finding
+    from .read.alerts import check_failed_finding
 
     try:
         return check()
@@ -1006,14 +1006,14 @@ def collect_alert_findings(db_path: Path, *, now: datetime | None = None) -> lis
     notification channel. Reads only: it never queues a push or writes to
     the Actual directory or the account map.
     """
-    from .alerts import (
+    from .ingest.identity_health import identity_health
+    from .read.alerts import (
         consent_rung,
         disk_finding,
         empty_rebuild_finding,
         refusal_trends,
         shared_identity_findings,
     )
-    from .ingest.identity_health import identity_health
 
     now = now or datetime.now(UTC)
     findings: list[Finding] = []
@@ -1098,7 +1098,7 @@ def _protection_findings(store: Store) -> list[Finding]:
 
 def _scheduler_findings(db_path: Path, now: datetime) -> list[Finding]:
     """What the scheduler's own record says is wrong with the scheduler; see `scheduler_status`."""
-    from . import scheduler_status
+    from .read import scheduler_status
 
     state = scheduler_status.read_scheduler(scheduler_status.read_record(db_path), now)
     return [Finding(key, message) for key, message in scheduler_status.findings(state)]
@@ -1542,7 +1542,7 @@ def queue_actual_audit(db_path: Path) -> str:
 
 
 def _alert(db_path: Path) -> int:
-    from .alerts import DERIVED_FINDING_PREFIXES, process, send_heartbeat, send_ntfy
+    from .read.alerts import DERIVED_FINDING_PREFIXES, process, send_heartbeat, send_ntfy
 
     began_held = hold_for(db_path)
     findings = collect_alert_findings(db_path)
@@ -3319,7 +3319,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return held[key]
 
     def ledger_data(ref: str, month: str, window: LedgerWindow | None = None) -> Ledger:
-        from .ledger import build_ledger
+        from .read.ledger import build_ledger
 
         bound = ref in {binding.canonical_id for binding in _actual_bindings()}
         hold = hold_for(db_path)
@@ -3368,7 +3368,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return replace(built, about=read_about(store, ref, names))
 
     def balance_chart_data(ref: str) -> BalanceChart:
-        from .balance_chart import build_balance_chart  # deferred like the other data hooks
+        from .read.balance_chart import build_balance_chart  # deferred like the other data hooks
 
         with Store(db_path) as store:
             return build_balance_chart(
@@ -3401,7 +3401,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """One account's timeline. With `balances` it reads the known balances themselves, for
         the tick on each; without, the standing the memo holds is all it reads of verification,
         which is what an account's own page can afford beside its rows."""
-        from .coverage_timeline import build_account_timeline
+        from .read.coverage_timeline import build_account_timeline
         from .verify.agreement import standing_of
         from .verify.balance_anchors import effective_opening, known_account
 
@@ -3456,7 +3456,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return timeline_for(ref, today, balances=False)
 
     def coverage_timeline_household(today: date) -> list[AccountTimeline]:
-        from .coverage_timeline import build_account_timeline
+        from .read.coverage_timeline import build_account_timeline
 
         by_account = gaps_by_account(today)
         with Store(db_path) as store:
@@ -3486,7 +3486,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             ]
 
     def position_data() -> Position:
-        from .position import read_position  # deferred like the other data hooks
+        from .read.position import read_position  # deferred like the other data hooks
 
         with Store(db_path) as store:
             return read_position(
@@ -3665,7 +3665,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return {}
 
     def scheduler_heartbeat() -> dict[str, object]:
-        from .scheduler_status import read_record
+        from .read.scheduler_status import read_record
 
         return read_record(db_path)
 
@@ -3903,7 +3903,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             shape_of,
             view_of,
         )
-        from .ledger import row_anchor
+        from .read.ledger import row_anchor
         from .recurring import counts_as_occurrence
 
         with Store(db_path) as store:
@@ -4378,8 +4378,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         Statements are read only for an account that declares a rate, since a rate that differs
         can only be found against one.
         """
-        from .account_about import row_notice
         from .ingest.statement_terms import account_readings
+        from .read.account_about import row_notice
 
         notes: dict[str, str] = {}
         with Store(db_path) as store:

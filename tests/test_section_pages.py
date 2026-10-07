@@ -16,10 +16,10 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.alerts import CONSENT_RUNGS
 from obdi.ingest.connections import Connection, ConnectionStore
 from obdi.ingest.probing import elapsed_words, sca_note
-from obdi.overview import Overview
+from obdi.read.alerts import CONSENT_RUNGS
+from obdi.read.overview import Overview
 from obdi.verify.coverage import SourceCoverage
 from obdi.web import AuthorisationSession, ConnectionHandler, ExtendableAccount, WebConfig
 from page_dom import elements, parse

@@ -37,13 +37,13 @@ from math import ceil
 from typing import TYPE_CHECKING
 from urllib.parse import quote, urlencode
 
-from .account_names import AccountShown, code_html
 from .callback import render_page
 from .core.date_window import resolve
 from .core.logs import say
 from .core.page_times import range_text, range_with_span
 from .core.plural import plural
-from .coverage_timeline import (
+from .read.account_names import AccountShown, code_html
+from .read.coverage_timeline import (
     ASK_HOLE,
     COMPLETE,
     CONFLICT,

@@ -13,9 +13,9 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.account_names import accounts_shown
 from obdi.ingest.connections import ConnectionStore, build_connection
 from obdi.ingest.spaces import RECOVERY_BOUND
+from obdi.read.account_names import accounts_shown
 from obdi.web import (
     AuthorisationSession,
     ConnectionHandler,

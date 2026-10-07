@@ -11,7 +11,7 @@ from itertools import pairwise
 
 import pytest
 
-from obdi import coverage_timeline as ct
+from obdi.read import coverage_timeline as ct
 from obdi.web_balance_chart import Scale
 from obdi.web_coverage_timeline import (
     KNOWN_TICK_MIN_PX,

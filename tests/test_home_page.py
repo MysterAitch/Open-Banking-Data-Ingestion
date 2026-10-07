@@ -15,7 +15,7 @@ import pytest
 
 import home_world as world
 from obdi.ingest.store import Store
-from obdi.overview import (
+from obdi.read.overview import (
     _KINDS,
     HOUSEKEEPING,
     INFORMATION,
@@ -240,7 +240,7 @@ class TestEveryKindHasABandAndAnAct:
 
     @pytest.mark.parametrize("kind", sorted(_KINDS))
     def test_ToDo_ForEveryKindOfItem_HasAControlThatSaysWhatItDoesAndNeverABareOpen(self, kind):
-        from obdi.todo import build_todos
+        from obdi.read.todo import build_todos
 
         item = AttentionItem(kind, _KINDS[kind][0], "m", "r", "/x", accounts=("a", "b"))
         overview = replace(_EMPTY, items=(item,))

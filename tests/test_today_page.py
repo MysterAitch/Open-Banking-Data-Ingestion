@@ -12,9 +12,9 @@ import re
 from dataclasses import replace
 from datetime import UTC, date, datetime
 
-from obdi.fetch_gaps import AccountOutlook, Basis, FetchGap, FetchReport, GapKind
 from obdi.ingest.rebuild_hold import RebuildHold
-from obdi.overview import (
+from obdi.read.fetch_gaps import AccountOutlook, Basis, FetchGap, FetchReport, GapKind
+from obdi.read.overview import (
     CURRENT,
     EMPTY,
     FILE_ONLY,

@@ -25,7 +25,7 @@ import pytest
 from obdi.cli import build_web_config
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.store import Store
-from obdi.ledger import build_ledger
+from obdi.read.ledger import build_ledger
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from test_account_pages import assert_tap_targets_are_thumb_sized
 from test_ledger import (
@@ -290,7 +290,7 @@ class TestTheMaskedPageCarriesEveryStructuralFact:
         page = get(served, ref=CURRENT, month="2026-03").text
 
         assert "value date" in page
-        from obdi.ledger import QUERIES_PER_PAGE
+        from obdi.read.ledger import QUERIES_PER_PAGE
 
         assert f"makes {QUERIES_PER_PAGE} database queries" in page
 

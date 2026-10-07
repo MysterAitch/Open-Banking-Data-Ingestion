@@ -25,11 +25,11 @@ from pathlib import Path
 
 import pytest
 
-from obdi.alerts import Finding, process
 from obdi.cli import collect_alert_findings, main
 from obdi.ingest.connections import Connection, ConnectionStore
 from obdi.ingest.identity_health import identity_health
 from obdi.ingest.store import Store
+from obdi.read.alerts import Finding, process
 
 NOW = datetime(2026, 2, 1, 12, 0, tzinfo=UTC)
 

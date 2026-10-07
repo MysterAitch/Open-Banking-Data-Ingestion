@@ -41,7 +41,7 @@ from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.restore import restore_backup
 from obdi.ingest.statement_terms import statement_balances
 from obdi.ingest.store import SCHEMA_VERSION, Store
-from obdi.position import read_position
+from obdi.read.position import read_position
 from obdi.verify.statement_sections import assign_section, section_token
 from section_harness import (
     UNASSIGNED,
