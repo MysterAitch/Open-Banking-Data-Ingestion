@@ -28,7 +28,7 @@ from account_about_world import (
 )
 from obdi.account_about import AS_DECLARED, NOT_DECLARED, StatedRate, check_rate
 from obdi.account_about import DIFFERS as DIFFERENT
-from obdi.accounts import AccountRecord, AccountRef, RateWindow
+from obdi.ingest.accounts import AccountRecord, AccountRef, RateWindow
 from page_dom import elements
 
 

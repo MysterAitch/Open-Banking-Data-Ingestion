@@ -13,7 +13,7 @@ import threading
 import httpx
 import pytest
 
-from obdi.connections import ConnectionStore
+from obdi.ingest.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from test_statement_shape import build_pdf
 

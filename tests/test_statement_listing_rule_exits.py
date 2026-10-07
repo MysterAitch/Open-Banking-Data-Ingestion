@@ -22,7 +22,7 @@ import pytest
 
 from listing_rule_reading import app_reading
 from obdi.balance_anchors import STATEMENT, disregard_balance, effective_opening
-from obdi.store import Store
+from obdi.ingest.store import Store
 from test_statement_listing_measure import FAMILIES
 from test_statement_listing_measure import world as listing_world  # noqa: F401 - the fixture
 from test_statement_listing_rule_accounts import build

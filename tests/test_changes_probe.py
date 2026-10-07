@@ -11,14 +11,14 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from obdi.probe import (
+from obdi.ingest.probe import (
     ProbeReport,
     amendment_cutoff_suggestions,
     parse_cutoff,
     probe_starling_changes,
 )
-from obdi.providers import starling
-from obdi.store import Store
+from obdi.ingest.providers import starling
+from obdi.ingest.store import Store
 
 
 def _item(uid: str, txn_time: str, updated: str | None = None, minor: int = 100) -> dict:
@@ -39,17 +39,17 @@ def _item(uid: str, txn_time: str, updated: str | None = None, minor: int = 100)
 
 class TestVerdictsAreEvidenceBounded:
     def _run(self, monkeypatch, tmp_path, feed_items):
-        from obdi.accounts import AccountMap
+        from obdi.ingest.accounts import AccountMap
 
         monkeypatch.setattr(
-            "obdi.providers.starling.fetch_accounts",
+            "obdi.ingest.providers.starling.fetch_accounts",
             lambda token: (
                 [{"accountUid": "acc-1", "defaultCategory": "cat-1"}],
                 b'{"accounts": []}',
             ),
         )
         monkeypatch.setattr(
-            "obdi.providers.starling.fetch_feed",
+            "obdi.ingest.providers.starling.fetch_feed",
             lambda token, a, c, since_at=None: (
                 feed_items,
                 json.dumps({"feedItems": feed_items}).encode(),
@@ -98,17 +98,17 @@ class TestVerdictsAreEvidenceBounded:
         assert "INCONCLUSIVE" in report.verdict()
 
     def test_TheResponsesLandAsEvidence(self, monkeypatch, tmp_path):
-        from obdi.accounts import AccountMap
+        from obdi.ingest.accounts import AccountMap
 
         monkeypatch.setattr(
-            "obdi.providers.starling.fetch_accounts",
+            "obdi.ingest.providers.starling.fetch_accounts",
             lambda token: (
                 [{"accountUid": "acc-1", "defaultCategory": "cat-1"}],
                 b'{"accounts": []}',
             ),
         )
         monkeypatch.setattr(
-            "obdi.providers.starling.fetch_feed",
+            "obdi.ingest.providers.starling.fetch_feed",
             lambda token, a, c, since_at=None: (
                 [],
                 b'{"feedItems": []}',
@@ -200,8 +200,8 @@ class TestTheProbePage:
 
         import httpx
 
-        from obdi.connections import ConnectionStore
-        from obdi.probe import ProbeAccount
+        from obdi.ingest.connections import ConnectionStore
+        from obdi.ingest.probe import ProbeAccount
         from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
         report = ProbeReport(cutoff="2026-08-01T12:00:00Z")

@@ -128,7 +128,7 @@ class TestTheAlarmThroughTheRealCommand:
 
     @pytest.fixture
     def store_whose_last_rebuild_emptied_it(self, tmp_path, monkeypatch):
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_CONNECTION_STORE", str(tmp_path / "c.json"))
         monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(tmp_path / "a.json"))
@@ -165,7 +165,7 @@ class TestTheAlarmThroughTheRealCommand:
         because the finding stops being produced and the edge protocol turns
         that absence into a resolution."""
         from obdi.cli import main
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         with Store(store_whose_last_rebuild_emptied_it) as store:
             store.record_rebuild_run(

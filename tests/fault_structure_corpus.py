@@ -30,14 +30,14 @@ from datetime import date, timedelta
 
 from obdi.balance_anchors import FamilyWalk, walk_family
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
-from obdi.family_anchors import (
+from obdi.ingest.family_anchors import (
     CSV_SOURCE,
     OPENED,
     FamilyAnchor,
     FamilyAnchors,
     OpeningEvidence,
 )
-from obdi.identity import content_key
+from obdi.ingest.identity import content_key
 
 MAIN = "starling-personal"
 OPENING_DAY = date(2025, 12, 31)

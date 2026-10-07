@@ -49,9 +49,10 @@ from .core.errors import DataError
 from .core.masking import Structural
 from .core.models import SourceTier, TransactionStatus
 from .core.page_words import REMOVE_PROTECTION, REMOVE_TYPED_TRANSACTION
-from .join_basis import how_words, sighting_views
-from .matching import EXACT_RULE_DOUBT
-from .payment_links import AGGREGATORS
+from .ingest.join_basis import how_words, sighting_views
+from .ingest.matching import EXACT_RULE_DOUBT
+from .ingest.payment_links import AGGREGATORS
+from .ingest.store import Store
 from .review_report import (
     GAP_AFTER,
     GAP_BEFORE,
@@ -61,7 +62,6 @@ from .review_report import (
     live_neighbours,
     neighbour_proof,
 )
-from .store import Store
 
 #: The `Evidence.verdict` of a line that says what would settle a flag rather than which way the
 #: evidence points.

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import obdi.same_money_fold as same_money_fold
+import obdi.ingest.same_money_fold as same_money_fold
 from card_chain_corpus import (
     CARD,
     CHARGES,
@@ -32,14 +32,8 @@ from card_chain_corpus import (
 from card_variant_corpus import CLOSINGS as MINI_CLOSINGS
 from card_variant_corpus import SIBLING_SCOPE, Variant, build_mini_card
 from obdi.core.models import TransactionStatus
-from obdi.period_reconciliation import (
-    PeriodKind,
-    dated_list,
-    gather_evidence,
-    period_reconciliation,
-)
-from obdi.rebuild import rebuild_from_raw
-from obdi.same_money_fold import (
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.same_money_fold import (
     _Attempt,
     _Candidate,
     _outcome_of,
@@ -47,8 +41,14 @@ from obdi.same_money_fold import (
     fold_same_money,
     plan_same_money,
 )
+from obdi.ingest.store import SCHEMA_VERSION, Store
+from obdi.period_reconciliation import (
+    PeriodKind,
+    dated_list,
+    gather_evidence,
+    period_reconciliation,
+)
 from obdi.same_money_outcome import AccountOutcome, Verdict
-from obdi.store import SCHEMA_VERSION, Store
 from test_period_reconciliation import MONEY_FIGURE, _held_statement
 
 

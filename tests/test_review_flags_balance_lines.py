@@ -33,8 +33,8 @@ from flag_balance_world import (
     label_of,
 )
 from obdi.cli import build_web_config
+from obdi.ingest.store import Store
 from obdi.review_flags import VERDICT_SETTLE, build_queue
-from obdi.store import Store
 from section_harness import environment, serve_config
 
 BEFORE = "No known balance before 2026-09-14: a statement covering it would settle this."
@@ -163,7 +163,7 @@ class TestThePage:
     def test_Page_AfterTheRebuildTheFlagsAreSettledBy_ListsOnlyTheTwelveAndCountsNone(
         self, served
     ):
-        from obdi.rebuild import rebuild_from_raw
+        from obdi.ingest.rebuild import rebuild_from_raw
 
         base, db = served
         with Store(db) as store:

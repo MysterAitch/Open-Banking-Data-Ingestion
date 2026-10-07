@@ -18,7 +18,7 @@ import httpx
 import pytest
 
 from obdi.cli import build_web_config
-from obdi.store import Store
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_balance_anchors import ACCOUNT, everyday
 

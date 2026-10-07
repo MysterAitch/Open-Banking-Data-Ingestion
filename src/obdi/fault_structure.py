@@ -46,7 +46,6 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from .core.masking import Structural, Total
-from .family_anchors import OPENED
 from .fault_explanation import (
     EXPLAINED_CHANGES,
     NONE,
@@ -54,6 +53,7 @@ from .fault_explanation import (
     Selection,
     WalkExplanation,
 )
+from .ingest.family_anchors import OPENED
 
 if TYPE_CHECKING:
     from .balance_anchors import EffectiveOpening, FamilyWalk

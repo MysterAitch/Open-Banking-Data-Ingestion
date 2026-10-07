@@ -44,10 +44,10 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.arrival_order import in_arrival_order
+from obdi.ingest.arrival_order import in_arrival_order
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from obdi.movement_completeness import check_rows
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
 from round_up_corpus import card_payment, household_store, main_feed, space_feed
 from test_export_cuts import Row
 from test_movement_rows_listed import EXPORT, canonical, drop_sighting, export_sightings

@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from obdi.connections import ConnectionStore, build_connection
+from obdi.ingest.connections import ConnectionStore, build_connection
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from obdi.web_sections import render_connections
 

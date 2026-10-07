@@ -19,8 +19,8 @@ from datetime import date
 
 from obdi.categorise import apply_to_group, group_members
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest import reconcile_batch
-from obdi.store import Store
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.store import Store
 
 
 def txn(day: int, amount: int, desc: str, *, source_id: str) -> Transaction:
@@ -71,7 +71,7 @@ class TestFindingAGroupsMembers:
             assert len(remaining) == 2
 
     def test_AGroup_ExcludesConfirmedTransferLegs(self, tmp_path):
-        from obdi.ingest import pair_transfers_across_store
+        from obdi.ingest.pipeline import pair_transfers_across_store
 
         with Store(tmp_path / "s.sqlite3") as store:
             reconcile_batch(

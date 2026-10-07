@@ -24,31 +24,11 @@ from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
 
-from . import fingerprint
 from .account_about import facts_from_readings, read_about
 from .account_names import AccountsShown, accounts_shown
-from .accounts import (
-    AccountBinding,
-    AccountMap,
-    AccountRecord,
-    AccountRef,
-    ArchiveOutcome,
-    lifecycle_breach,
-    read_registry_file,
-)
 from .actual_push import ACTUAL_NOT_CONFIGURED, ENVELOPE_VERSION, NothingQueued
 from .alerts import Finding
-from .asked_coverage import Coverage, Hole, canonical_resolver, coverage_by_account
-from .attended_fetch import (
-    STARLING_TARGET,
-    ledger_tail,
-    short_reason,
-    start_press,
-    write_status,
-)
-from .backup import BackupRefused, take_backup, verify_copy
 from .balance_chart import BalanceChart
-from .connections import ConnectionStore
 from .core.errors import DataError
 from .core.money import parse_amount
 from .core.namespaces import UNASSIGNED_ACCOUNT
@@ -69,19 +49,55 @@ from .coverage import (
 )
 from .coverage import report as coverage_report
 from .coverage_timeline import AccountTimeline
-from .declined_items import void_declined_items
-from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .entities import EntitiesView
-from .family_anchors import Families, families_of
 from .fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
 from .fetch_marks import MarkSet, MarkWorld, gather_world, read_marks
-from .ingest import (
+from .ingest import fingerprint
+from .ingest.accounts import (
+    AccountBinding,
+    AccountMap,
+    AccountRecord,
+    AccountRef,
+    ArchiveOutcome,
+    lifecycle_breach,
+    read_registry_file,
+)
+from .ingest.asked_coverage import Coverage, Hole, canonical_resolver, coverage_by_account
+from .ingest.attended_fetch import (
+    STARLING_TARGET,
+    ledger_tail,
+    short_reason,
+    start_press,
+    write_status,
+)
+from .ingest.backup import BackupRefused, take_backup, verify_copy
+from .ingest.connections import ConnectionStore
+from .ingest.declined_items import void_declined_items
+from .ingest.doctor import CheckResult, live_checks, report, run_checks, shape_problems
+from .ingest.family_anchors import Families, families_of
+from .ingest.pipeline import (
     MatcherPreview,
     import_file,
     pair_transfers_across_store,
     preview_reconcile,
     unconfirmed_transfers,
 )
+from .ingest.probing import StepRefused, sca_note, walk_history
+from .ingest.pull import STARLING_CONNECTION, PullResult, pull_starling, pull_truelayer
+from .ingest.rebuild_hold import (
+    RebuildEpoch,
+    RebuildInProgress,
+    abandoned_for,
+    epoch_for,
+    hold_for,
+    require_idle,
+)
+from .ingest.same_money_fold import fold_same_money
+from .ingest.space_attribution import fold_space_copies
+from .ingest.space_binding import UNBOUND, SpacesPress, space_states
+from .ingest.spaces import ArchiveNote
+from .ingest.store import Store, StoreIsNewer, request_meta_and_provenance
+from .ingest.valuations import Asset, AssetKind, record_observation
 from .known_accounts import (
     DeclareOutcome,
     KnownAccounts,
@@ -95,17 +111,7 @@ from .known_accounts import (
 from .ledger import Ledger, LedgerWindow
 from .overview import Overview, OverviewCache, build_overview
 from .position import Position
-from .probing import StepRefused, sca_note, walk_history
 from .protection import recheck as recheck_protections
-from .pull import STARLING_CONNECTION, PullResult, pull_starling, pull_truelayer
-from .rebuild_hold import (
-    RebuildEpoch,
-    RebuildInProgress,
-    abandoned_for,
-    epoch_for,
-    hold_for,
-    require_idle,
-)
 from .recurring import RecurringFindings
 from .replay import (
     ActualAccountBinding,
@@ -116,11 +122,7 @@ from .replay import (
 )
 from .review_flags import FlagQueue, Outcome
 from .review_settlement import settle_review_flags
-from .same_money_fold import fold_same_money
 from .scheduler_status import StepHandle, run_step
-from .space_attribution import fold_space_copies
-from .space_binding import UNBOUND, SpacesPress, space_states
-from .spaces import ArchiveNote
 from .standing_data import (
     AccountStanding,
     KeyedMemo,
@@ -132,8 +134,6 @@ from .standing_data import (
 from .statement_listing_measure import StatementListingReport
 from .statement_opening_measure import StatementOpeningReport, statement_opening_report
 from .statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
-from .store import Store, StoreIsNewer, request_meta_and_provenance
-from .valuations import Asset, AssetKind, record_observation
 from .web import ExtendableAccount, WebConfig
 from .web import serve as serve_web
 
@@ -339,8 +339,8 @@ def finish_recovered_spaces(db_path: Path) -> SpacesPress:
     was declared is reported, not raised: the others still finish, and pressing
     again retries only that one.
     """
-    from .space_attribution import provider_mains_by_space_uid
-    from .spaces import account_for, recover
+    from .ingest.space_attribution import provider_mains_by_space_uid
+    from .ingest.spaces import account_for, recover
 
     with Store(db_path) as store:
         found = recover(store)
@@ -387,8 +387,8 @@ def rename_connection(db_path: Path, old_name: str, new_name: str) -> str:
     reported rather than assumed - a rename that moved no ledger rows is
     worth seeing, because it means the name was never used for a pull.
     """
-    from .connections import ConnectionStore
     from .core.namespaces import validate_connection_name
+    from .ingest.connections import ConnectionStore
 
     old_name = (old_name or "").strip()
     new_name = (new_name or "").strip().lower()
@@ -471,7 +471,7 @@ def build_push_envelope(store: Store, map_path: Path) -> dict[str, object]:
     `queue_actual_push`, where writing is the point.
     """
     from .actual_push import build_envelope
-    from .labels import collect_display_labels
+    from .ingest.labels import collect_display_labels
 
     bindings = _actual_bindings()
     connection_ids: list[str] = []
@@ -625,7 +625,7 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
     (rows replayed before it move, rows after it land under the old ref),
     and a push or audit reads a half-populated store - all recoverable,
     none worth allowing."""
-    from . import leases
+    from .ingest import leases
 
     if leases.held(leases.locks_dir(db_path), "rebuild-derived"):
         return (
@@ -654,12 +654,12 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
 if TYPE_CHECKING:
     from .balance_anchors import EffectiveOpening
     from .core.models import Transaction
+    from .ingest.parsers.base import StatementParser
+    from .ingest.parsers.pdf_statements import SectionReading
+    from .ingest.rebuild import RebuildReport
     from .movement_completeness import MovementCompleteness
-    from .parsers.base import StatementParser
-    from .parsers.pdf_statements import SectionReading
     from .period_reconciliation import PeriodReport
     from .reader_findings import Findings
-    from .rebuild import RebuildReport
     from .statement_sections import AssignmentCheck
 
 
@@ -707,7 +707,7 @@ def start_background_rebuild(db_path: Path) -> str:
     """
     import threading
 
-    from . import leases
+    from .ingest import leases
 
     if leases.held(leases.locks_dir(db_path), "pull-cycle"):
         return (
@@ -737,7 +737,7 @@ def start_background_rebuild(db_path: Path) -> str:
     )
 
     def run() -> None:
-        from .rebuild import rebuild_from_raw
+        from .ingest.rebuild import rebuild_from_raw
 
         # Progress now ticks once per RECORD, tens of thousands of times a
         # run, so publishing is rate-limited while counting is not. The
@@ -1013,7 +1013,7 @@ def collect_alert_findings(db_path: Path, *, now: datetime | None = None) -> lis
         refusal_trends,
         shared_identity_findings,
     )
-    from .identity_health import identity_health
+    from .ingest.identity_health import identity_health
 
     now = now or datetime.now(UTC)
     findings: list[Finding] = []
@@ -1124,7 +1124,7 @@ def _starling_probe_runner(db_path: Path) -> Callable[[str], object]:
 
     def run(raw_cutoff: str) -> object:
         from .core.secrets import read_secret
-        from .probe import parse_cutoff, probe_starling_changes
+        from .ingest.probe import parse_cutoff, probe_starling_changes
 
         cutoff = parse_cutoff(raw_cutoff)
         if cutoff is None:
@@ -1140,7 +1140,7 @@ def _starling_probe_runner(db_path: Path) -> Callable[[str], object]:
 
 
 def _probe_suggestions(db_path: Path) -> list[object]:
-    from .probe import amendment_cutoff_suggestions
+    from .ingest.probe import amendment_cutoff_suggestions
 
     with Store(db_path) as store:
         return list(amendment_cutoff_suggestions(store))
@@ -1190,14 +1190,14 @@ def replay_single_artefact(db_path: Path, artefact_id: int) -> str:
     if busy:
         raise ValueError(busy)
     from .core.namespaces import MANUAL_SOURCE
-    from .ingest import ImportSummary, reconcile_batch
-    from .rebuild import (
+    from .ingest.pipeline import ImportSummary, reconcile_batch
+    from .ingest.rebuild import (
         _READS_NO_ROWS,
         _starling_defaults,
         parse_artefact_transactions,
         resolve_artefact_ref,
     )
-    from .typed_transactions import withdrawn_entry_ids
+    from .ingest.typed_transactions import withdrawn_entry_ids
 
     with Store(db_path) as store:
         row = store.connection.execute(
@@ -1353,7 +1353,7 @@ def queue_actual_align(
     bindings = _actual_bindings()
     if not bindings:
         raise ValueError("no Actual-bound accounts - push first. Nothing was queued.")
-    from .labels import collect_display_labels
+    from .ingest.labels import collect_display_labels
 
     connection_ids: list[str] = []
     store_path_env = os.getenv("OBDI_CONNECTION_STORE", "").strip()
@@ -1950,7 +1950,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             write_status(status_path, name, **fields)
 
         def run() -> None:
-            from . import leases
+            from .ingest import leases
 
             locks = leases.locks_dir(db_path)
             # A scheduled pull mid-cycle writes the same accounts; colliding
@@ -2275,7 +2275,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """
         import time as _time
 
-        from .rawview import summarise
+        from .ingest.rawview import summarise
 
         timings: list[tuple[str, float]] = []
 
@@ -2342,7 +2342,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                             "provider_ref": account["account_id"],
                         }
         mark = _timed_phase("connection-details", mark)
-        from .labels import collect_feeder_labels
+        from .ingest.labels import collect_feeder_labels
 
         with Store(db_path) as store:
             breakdown = store.source_breakdown(ref)
@@ -2506,8 +2506,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         the period they share - the only external truth available to a
         file with no balance column, now visible before anything lands.
         """
-        from .ingest import claimed_window_note, dates_cannot_confirm_format
-        from .parsers.uk_banks import detect
+        from .ingest.parsers.uk_banks import detect
+        from .ingest.pipeline import claimed_window_note, dates_cannot_confirm_format
 
         parser = detect(payload)
         rows = list(parser.parse(payload, account_id=account))
@@ -2521,7 +2521,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         ]
         ambiguous = dates_cannot_confirm_format([r.value_date for r in rows])
         from .coverage import agreements
-        from .verification import verify_export
+        from .ingest.verification import verify_export
 
         # This file versus every OTHER source of the same account - held
         # rows of the file's own source in THIS account are excluded, or a
@@ -2777,7 +2777,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return replay_single_artefact(db_path, artefact_id)
 
     def balance_walk_text(masked: bool) -> str:
-        from .rawview import balance_walk_report
+        from .ingest.rawview import balance_walk_report
 
         artefacts: list[dict[str, object]] = []
         with Store(db_path) as store:
@@ -2872,7 +2872,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return joiner.join(lines)
 
     def date_lag_text() -> str:
-        from .rawview import settlement_lag_report
+        from .ingest.rawview import settlement_lag_report
 
         with Store(db_path) as store:
             rows = [
@@ -2999,7 +2999,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return undo(store, answer, flag, other)
 
     def identity_health_text() -> str:
-        from .identity_health import identity_health
+        from .ingest.identity_health import identity_health
 
         if (paused := paused_text()) is not None:
             return paused
@@ -3081,7 +3081,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def archive_notes_for(store: Store, *, only: str | None = None) -> dict[str, ArchiveNote]:
-        from .spaces import archive_notes as read_archive_notes
+        from .ingest.spaces import archive_notes as read_archive_notes
 
         account_map = _account_map(store)
         return read_archive_notes(
@@ -3097,7 +3097,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
     def archive_account_hook(ref: str, closed: date | None, basis: str) -> ArchiveOutcome:
         """Archive one account, naming it as the pages already do if it is new."""
-        from .accounts import archive_account
+        from .ingest.accounts import archive_account
 
         with Store(db_path) as store:
             return archive_account(
@@ -3110,7 +3110,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def unarchive_account_hook(ref: str) -> ArchiveOutcome:
-        from .accounts import unarchive_account
+        from .ingest.accounts import unarchive_account
 
         with Store(db_path) as store:
             return unarchive_account(store, ref)
@@ -3563,7 +3563,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def typed_save(ref: str, day: str, direction: str, amount: str, description: str) -> None:
-        from .typed_transactions import TypedRefused, record_typed_transaction
+        from .ingest.typed_transactions import TypedRefused, record_typed_transaction
 
         # A rebuild reads the artefacts once, at its start: an entry landed
         # while it runs would be resolved live into a store about to be wiped
@@ -3609,7 +3609,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             accept(store, ref)
 
     def typed_withdraw(ref: str, entry_id: str) -> None:
-        from .typed_transactions import TypedRefused, withdraw_typed_transaction
+        from .ingest.typed_transactions import TypedRefused, withdraw_typed_transaction
 
         busy = rebuild_in_progress_note(db_path)
         if busy:
@@ -3640,17 +3640,17 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return applier_heartbeat(_actual_dir(db_path))
 
     def update_in_progress() -> bool:
-        from . import leases
+        from .ingest import leases
 
         return leases.held(leases.locks_dir(db_path), leases.STACK_UPDATE)
 
     def auth_lease_take() -> None:
-        from . import leases
+        from .ingest import leases
 
         leases.acquire(leases.locks_dir(db_path), "bank-auth", "obdi-web", ttl_seconds=600)
 
     def auth_lease_release() -> None:
-        from . import leases
+        from .ingest import leases
 
         leases.release(leases.locks_dir(db_path), "bank-auth")
 
@@ -3770,9 +3770,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         copy is preferred to one waiting, because it says whose the bytes are.
         """
         from .core.models import RawArtefact
-        from .identity import artefact_digest
-        from .statement_extraction import is_kept as extraction_is_kept
-        from .statement_extraction import keep_extraction
+        from .ingest.identity import artefact_digest
+        from .ingest.statement_extraction import is_kept as extraction_is_kept
+        from .ingest.statement_extraction import keep_extraction
 
         digest = artefact_digest(payload)
         with Store(db_path) as store:
@@ -3814,7 +3814,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     ) -> tuple[sqlite3.Row, StatementParser, list[Transaction], AssignmentCheck] | str:
         """A kept statement read and checked against `destination`, or the sentence
         that answers without reading it."""
-        from .parsers.uk_banks import detect
+        from .ingest.parsers.uk_banks import detect
         from .statement_sections import check_assignment
 
         row = store.connection.execute(
@@ -3867,8 +3867,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """What recurs across every account's held transactions, judged against today on the
         owner's clock - two whole-table reads, whatever the store's size."""
         from .core.page_times import local_day
+        from .ingest.statement_terms import statement_balances
         from .recurring import find_recurring
-        from .statement_terms import statement_balances
 
         with Store(db_path) as store:
             transactions = store.all_transactions()
@@ -3949,7 +3949,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         one that reads it: a count of what cannot be read is no answer.
         """
         from .core.namespaces import validate_canonical_name
-        from .parsers.uk_banks import detect
+        from .ingest.parsers.uk_banks import detect
 
         destination = account_id.strip()
         try:
@@ -4013,7 +4013,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         result sentence then quotes it.
         """
         from .core.namespaces import validate_canonical_name
-        from .ingest import ImportSummary, reconcile_batch
+        from .ingest.pipeline import ImportSummary, reconcile_batch
 
         destination = account_id.strip()
         if not destination:
@@ -4101,10 +4101,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         values sitting. None where the statement has no extraction at the current version, and
         the document is never read.
         """
+        from .ingest.statement_extraction import serving
+        from .ingest.statement_extraction import stored as stored_extraction
+        from .ingest.statement_shape import shape_of_extraction
         from .reader_findings import findings_of
-        from .statement_extraction import serving
-        from .statement_extraction import stored as stored_extraction
-        from .statement_shape import shape_of_extraction
 
         with Store(db_path) as store, serving(store, strict=True):
             row = store.connection.execute(
@@ -4185,11 +4185,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         statements under newer feed payloads, which is why this exists.
         """
         from .core.errors import DataError
-        from .parsers.credit_union_pdf import section_key
-        from .parsers.pdf_statements import PdfStatementParser
-        from .parsers.uk_banks import detect
-        from .statement_extraction import Extracted, serving
-        from .statement_extraction import stored as stored_extraction
+        from .ingest.parsers.credit_union_pdf import section_key
+        from .ingest.parsers.pdf_statements import PdfStatementParser
+        from .ingest.parsers.uk_banks import detect
+        from .ingest.statement_extraction import Extracted, serving
+        from .ingest.statement_extraction import stored as stored_extraction
         from .statement_sections import masked, section_token
 
         def divided_by(
@@ -4379,7 +4379,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         can only be found against one.
         """
         from .account_about import row_notice
-        from .statement_terms import account_readings
+        from .ingest.statement_terms import account_readings
 
         notes: dict[str, str] = {}
         with Store(db_path) as store:
@@ -4433,7 +4433,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def artefact_detail(artefact_id: int, with_payload: bool = False) -> dict[str, object] | None:
         import json as _json
 
-        from .rawview import summarise
+        from .ingest.rawview import summarise
 
         with Store(db_path) as store:
             row = store.connection.execute(
@@ -4488,7 +4488,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         the recovery's first live run offered the current account as a deleted
         Space - reporting first is what turned that into a line somebody read.
         """
-        from .spaces import recover
+        from .ingest.spaces import recover
 
         with Store(db_path) as store:
             found = recover(store)
@@ -5061,7 +5061,7 @@ def scheduled_pull_skip_reason(db_path: Path, now: datetime | None = None) -> st
     by construction. The second gate keeps a cycle from starting while
     the stack is being updated underneath it.
     """
-    from . import leases
+    from .ingest import leases
 
     directory = leases.locks_dir(db_path)
     if leases.held(directory, leases.STACK_UPDATE):
@@ -5293,7 +5293,7 @@ def _pull_everything(db_path: Path, since: date | None, step: StepHandle | None 
         print("No connections to pull. Authorise a bank first.", file=sys.stderr)
         return 1
 
-    from . import leases
+    from .ingest import leases
 
     worst = 0
     not_pulled: list[str] = []
@@ -5968,7 +5968,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "statement-shape":
-        from .statement_shape import shape_report
+        from .ingest.statement_shape import shape_report
 
         if not args.path.is_file():
             print(f"No such file: {args.path}", file=sys.stderr)
@@ -6031,7 +6031,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
     if args.command == "identity-health":
-        from .identity_health import identity_health
+        from .ingest.identity_health import identity_health
 
         # Exits zero whatever it finds: this measures, and nothing gates on
         # it until the numbers have shown what an acceptable answer is.
@@ -6077,7 +6077,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        from .rebuild import rebuild_from_raw
+        from .ingest.rebuild import rebuild_from_raw
 
         cli_started = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with Store(db_path) as store:
@@ -6125,8 +6125,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "recover-spaces":
-        from .space_binding import RETRY_NOTE, WHAT_HAPPENS_NEXT
-        from .spaces import RECOVERY_BOUND, former_names_note, recover
+        from .ingest.space_binding import RETRY_NOTE, WHAT_HAPPENS_NEXT
+        from .ingest.spaces import RECOVERY_BOUND, former_names_note, recover
 
         with Store(db_path) as store:
             found = recover(store)
@@ -6181,7 +6181,7 @@ def main(argv: list[str] | None = None) -> int:
         # never updated. A gate reading a broader signal than its question is
         # a false positive waiting to happen, and one that blocks a deploy
         # costs more than the noise it was guarding against.
-        from .doctor import rebuild_check
+        from .ingest.doctor import rebuild_check
 
         in_flight = rebuild_in_progress_note(Path(db_path))
         if in_flight:
@@ -6218,7 +6218,7 @@ def main(argv: list[str] | None = None) -> int:
         # belong in the same report - a person running doctor wants one
         # answer, not two commands.
         with contextlib.suppress(Exception):
-            from .doctor import collision_checks
+            from .ingest.doctor import collision_checks
 
             store_path = os.getenv("OBDI_CONNECTION_STORE", "").strip()
             known = list(ConnectionStore(store_path).load()) if store_path else []
@@ -6231,7 +6231,7 @@ def main(argv: list[str] | None = None) -> int:
         # check that VANISHES when it cannot run would restore exactly that:
         # doctor would exit 0 having never looked, and silence would again be
         # indistinguishable from success. Unable-to-check is a failure here.
-        from .doctor import rebuild_check
+        from .ingest.doctor import rebuild_check
 
         try:
             # A rebuild in flight has not written its row yet, so the newest
@@ -6338,7 +6338,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "inspect-backup":
-        from .backup import inspect_backup
+        from .ingest.backup import inspect_backup
 
         try:
             print(inspect_backup(Path(args.backup)).describe())
@@ -6358,7 +6358,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "restore":
-        from .restore import restore_backup
+        from .ingest.restore import restore_backup
 
         # Defaults to the configured store, because restoring somewhere else and
         # then moving the file by hand is where the sidecars get left behind.

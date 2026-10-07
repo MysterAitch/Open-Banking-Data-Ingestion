@@ -46,7 +46,7 @@ from obdi.export_parting import (
     Surplus,
     first_parting,
 )
-from obdi.family_anchors import ExportRow, families_of
+from obdi.ingest.family_anchors import ExportRow, families_of
 from test_export_cuts import Row
 from test_export_dating import render as render_escaped
 from test_space_attribution import MAIN, MAP

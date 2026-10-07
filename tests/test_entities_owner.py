@@ -24,8 +24,8 @@ import pytest
 
 from obdi.core.models import SourceTier, Transaction
 from obdi.entities import OWNER_NAME, OWNER_ROLE, Entity, EntityRefused, view_of
+from obdi.ingest.store import Store
 from obdi.recurring import Series, find_recurring
-from obdi.store import Store
 
 NOW = datetime(2026, 10, 7, 9, 0, tzinfo=UTC)
 TODAY = date(2026, 10, 7)

@@ -32,12 +32,12 @@ from datetime import date
 import pytest
 
 from late_settlement_corpus import export_text
-from obdi import rebuild
 from obdi.exact_rule_measure import NAMED_DATES, exact_rule_report
-from obdi.ingest import import_file
-from obdi.providers import starling
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
+from obdi.ingest import rebuild
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.providers import starling
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from round_up_corpus import card_payment
 from test_absorbed_rows import arrive
 from test_family_anchors import FEED_ORIGIN, land_evidence

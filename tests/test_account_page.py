@@ -29,8 +29,8 @@ from account_page_corpus import (
     corpus_environment,
     served_corpus,
 )
+from obdi.ingest.store import Store
 from obdi.ledger import build_ledger
-from obdi.store import Store
 
 
 @pytest.fixture(scope="module")

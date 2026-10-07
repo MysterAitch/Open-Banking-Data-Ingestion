@@ -30,10 +30,10 @@ from flag_world import (
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening, record_stated_anchor
 from obdi.cli import build_web_config
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from obdi.movement_completeness import MovementCompleteness
 from obdi.protection import press
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
 from section_harness import environment, serve_config
 
 TOKENS = [*PAYEES.values(), *FIGURES.values(), *(f.replace(".", "") for f in FIGURES.values())]

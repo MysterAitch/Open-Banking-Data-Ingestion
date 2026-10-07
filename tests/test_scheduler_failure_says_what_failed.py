@@ -32,7 +32,8 @@ import pytest
 from obdi import cli
 from obdi.alerts import Finding
 from obdi.core.models import RawArtefact
-from obdi.identity import artefact_digest, content_key
+from obdi.ingest.identity import artefact_digest, content_key
+from obdi.ingest.store import Store
 from obdi.overview import _alert_item
 from obdi.scheduler_status import (
     CYCLE_STEPS,
@@ -42,7 +43,6 @@ from obdi.scheduler_status import (
     run_step,
     strip_sentence,
 )
-from obdi.store import Store
 from obdi.web import _scheduler_row
 from obdi.web_scheduler import scheduler_section
 from test_scheduler_status import (  # noqa: F401 - _clean_env is an autouse fixture
@@ -150,7 +150,7 @@ class TestWhereAWithheldFailureArose:
         assert error is not None
         assert error["type"] == "AttributeError"
         assert error["withheld"] is True
-        assert "obdi.identity.content_key" in str(error["where"])
+        assert "obdi.ingest.identity.content_key" in str(error["where"])
         assert PRIVATE_PAYEE not in json.dumps(error)
         assert "isoformat" not in json.dumps(error)
 
@@ -209,7 +209,7 @@ class TestWhereAWithheldFailureArose:
         for page in pages:
             assert PRIVATE_PAYEE not in page
             assert PRIVATE_AMOUNT not in page
-        assert "obdi.identity.content_key" in pages[0]
+        assert "obdi.ingest.identity.content_key" in pages[0]
 
 
 class TestTheItemPositionIsWordedWithoutData:

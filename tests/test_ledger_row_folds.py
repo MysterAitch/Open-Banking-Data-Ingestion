@@ -29,9 +29,9 @@ import httpx
 import pytest
 
 from obdi.core.models import RawArtefact
-from obdi.ingest import pair_transfers_across_store
+from obdi.ingest.pipeline import pair_transfers_across_store
+from obdi.ingest.store import Store
 from obdi.ledger import row_anchor
-from obdi.store import Store
 from page_dom import Node, elements, parse
 from served_store import environment_for, served_store
 from test_ledger import land, row_id, txn

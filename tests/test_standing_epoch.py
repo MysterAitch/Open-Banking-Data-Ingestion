@@ -26,10 +26,10 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor, remove_stated_anchor
 from obdi.cli import build_web_config
-from obdi.store import SCHEMA_VERSION, TABLE_NAMES, Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import SCHEMA_VERSION, TABLE_NAMES, Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_balance_anchors import ACCOUNT, everyday
 
@@ -157,7 +157,7 @@ class TestTheMemoIsReusedWhenNothingChanged:
 
 class TestEveryTableIsClassified:
     def test_Schema_WhenATableIsInNeitherList_IsRefused(self):
-        from obdi.store import EPOCH_TABLES, NOT_STANDING_TABLES
+        from obdi.ingest.store import EPOCH_TABLES, NOT_STANDING_TABLES
 
         unplaced = set(TABLE_NAMES) - set(EPOCH_TABLES) - set(NOT_STANDING_TABLES)
         assert not unplaced, (
@@ -167,18 +167,18 @@ class TestEveryTableIsClassified:
         )
 
     def test_Schema_WhenATableIsInBothLists_IsRefused(self):
-        from obdi.store import EPOCH_TABLES, NOT_STANDING_TABLES
+        from obdi.ingest.store import EPOCH_TABLES, NOT_STANDING_TABLES
 
         assert not set(EPOCH_TABLES) & set(NOT_STANDING_TABLES)
 
     def test_Schema_EveryExcludedTableSaysWhyItCannotMoveAStanding(self):
-        from obdi.store import NOT_STANDING_TABLES
+        from obdi.ingest.store import NOT_STANDING_TABLES
 
         for table, reason in NOT_STANDING_TABLES.items():
             assert len(reason.split()) >= 6, f"{table}: the reason is not a reason"
 
     def test_Schema_EveryListedTableIsARealTable(self):
-        from obdi.store import EPOCH_TABLES, NOT_STANDING_TABLES
+        from obdi.ingest.store import EPOCH_TABLES, NOT_STANDING_TABLES
 
         assert set(EPOCH_TABLES) <= set(TABLE_NAMES)
         assert set(NOT_STANDING_TABLES) <= set(TABLE_NAMES)
@@ -189,7 +189,7 @@ class TestEveryTableIsClassified:
         The writes name only the columns the table needs, so a table added later with a
         column this does not know fails here with the table's name rather than passing.
         """
-        from obdi.store import EPOCH_TABLES, NOT_STANDING_TABLES
+        from obdi.ingest.store import EPOCH_TABLES, NOT_STANDING_TABLES
 
         with Store(tmp_path / "classified.sqlite3") as store:
             for table in TABLE_NAMES:
@@ -357,7 +357,7 @@ class TestTheOverviewIsNotOlderThanTheViewersOwnPress:
 
 
 def _land_truelayer_row(store: Store, account_ref: str) -> int:
-    from obdi.providers.truelayer import artefact_for
+    from obdi.ingest.providers.truelayer import artefact_for
 
     body = json.dumps(
         {
@@ -486,7 +486,7 @@ class TestUpgradingAStoreHoldingTheVersionBefore:
             ]
 
     def test_Store_WhenCreatedFresh_HasATriggerForEveryWriteKindOfEveryListedTable(self, tmp_path):
-        from obdi.store import EPOCH_TABLES
+        from obdi.ingest.store import EPOCH_TABLES
 
         with Store(tmp_path / "fresh.sqlite3") as store:
             names = {
@@ -505,7 +505,7 @@ class TestAFailedReadingOfAStatementIsNotHeldForTheLifeOfTheProcess:
     def test_Usable_WhenTheFirstReadingFailedAndTheStoreHasSinceChanged_ReadsAgain(
         self, tmp_path, monkeypatch
     ):
-        from obdi import statement_terms
+        from obdi.ingest import statement_terms
 
         calls: list[str] = []
 

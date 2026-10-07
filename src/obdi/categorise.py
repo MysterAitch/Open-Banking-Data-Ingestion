@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .core.models import Transaction
 from .core.plural import plural
-from .store import Store
+from .ingest.store import Store
 
 
 def load_rules(path: Path) -> dict[str, list[dict[str, str]]]:

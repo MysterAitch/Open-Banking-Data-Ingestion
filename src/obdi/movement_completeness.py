@@ -75,14 +75,14 @@ from time import perf_counter
 from typing import TYPE_CHECKING, NamedTuple
 from urllib.parse import parse_qs, urlparse
 
-from .accounts import AccountMap, AccountRef
-from .arrival_order import in_arrival_order
 from .core.models import SourceTier, Transaction
 from .core.namespaces import CASH_LEG_SOURCE
 from .core.page_times import clock_text
 from .core.plural import plural as _plural
-from .matching import INTERNAL_TRANSFER_WINDOW_DAYS, SETTLEMENT_KEEPS_ID
-from .store import FOLDED_SIGHTING_PREFIX, Store
+from .ingest.accounts import AccountMap, AccountRef
+from .ingest.arrival_order import in_arrival_order
+from .ingest.matching import INTERNAL_TRANSFER_WINDOW_DAYS, SETTLEMENT_KEEPS_ID
+from .ingest.store import FOLDED_SIGHTING_PREFIX, Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
     from .balance_anchors import EffectiveOpening
@@ -420,8 +420,8 @@ def _statement_rows(store: Store, digest: str, account: str) -> list[Transaction
     None where nothing is kept. A reading its parser would refuse lists nothing:
     the import lands no rows from it.
     """
-    from .parsers.pdf_statements import PDF_PARSERS
-    from .parsers.statement_reading import reading_from_json
+    from .ingest.parsers.pdf_statements import PDF_PARSERS
+    from .ingest.parsers.statement_reading import reading_from_json
 
     stored = store.stored_statement_reading(digest)
     if stored is None:
@@ -440,7 +440,7 @@ def _statement_rows(store: Store, digest: str, account: str) -> list[Transaction
 
 def _rows_listed(store: Store, artefact: sqlite3.Row, account: str) -> list[Transaction] | None:
     """The rows one artefact lists, as the rebuild reads them; None when unreadable."""
-    from .rebuild import parse_artefact_transactions
+    from .ingest.rebuild import parse_artefact_transactions
 
     source, digest = str(artefact["source"]), str(artefact["digest"])
     if str(artefact["media_type"]) == _PDF:
@@ -772,7 +772,7 @@ def _asked_days(origin: str) -> tuple[date, date | None, str] | None:
     A `changesSince` ask runs from its stamp to now, and a bounded window names both ends
     (`providers.starling.parse_window_spec`); any other origin says nothing about its reach.
     """
-    from .providers.starling import WINDOW_MAX_PARAM, WINDOW_MIN_PARAM
+    from .ingest.providers.starling import WINDOW_MAX_PARAM, WINDOW_MIN_PARAM
 
     query = parse_qs(urlparse(origin).query)
 
@@ -811,7 +811,7 @@ def _reissue_evidence(
     not asked about, and the store holds two rows, correctly as far as anything shows.
     None where the signature is not found, else the evidence as a clause of counts.
     """
-    from .matching import same_payee
+    from .ingest.matching import same_payee
 
     _account, source, direction, size, day = cell
     wanted = (day, direction, size)
@@ -865,7 +865,7 @@ def _the_fetches(silent: int, asked: int) -> str:
 
 def _family_accounts(store: Store, account_map: AccountMap) -> frozenset[str]:
     """Accounts that are a Space or have one, whose balances are read through the family."""
-    from .space_attribution import space_parents
+    from .ingest.space_attribution import space_parents
 
     parents = space_parents(store, account_map)
     return frozenset(parents) | frozenset(parents.values())
@@ -892,7 +892,7 @@ def _measure_balances(
     An account read through its family is not measured here (`_family_accounts`).
     """
     from .balance_anchors import ASSUMED_NIL, effective_opening
-    from .family_anchors import OPENED
+    from .ingest.family_anchors import OPENED
 
     account, _source, direction, size, day = cell
     if account not in openings:
@@ -931,7 +931,7 @@ def check_rows(
     store: Store, canonical_for_ref: Callable[[str], str] | None
 ) -> MovementCompleteness:
     from .core.namespaces import UNASSIGNED_ACCOUNT
-    from .rebuild import _READS_NO_ROWS, _starling_defaults, resolve_artefact_ref
+    from .ingest.rebuild import _READS_NO_ROWS, _starling_defaults, resolve_artefact_ref
 
     report = MovementCompleteness()
     account_map = _CanonicalMap(canonical_for_ref or (lambda ref: ref))
@@ -1456,7 +1456,7 @@ def movement_completeness(
     leg names one that can be resolved.
     `clock` and `stamp` time the checks and say when the report was worked out.
     """
-    from .space_attribution import category_resolver
+    from .ingest.space_attribution import category_resolver
 
     began = clock()
     report = check_rows(store, canonical_for_ref)

@@ -24,9 +24,9 @@ from feed_morning_corpus import (
     top_up,
 )
 from obdi.balance_anchors import effective_opening
-from obdi.family_anchors import families_of
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ledger import build_ledger
-from obdi.rebuild import rebuild_from_raw
 from obdi.web_ledger import render_ledger
 from round_up_corpus import card_payment, household_store, main_feed, space_feed
 from test_export_cuts import Row
@@ -171,7 +171,7 @@ class TestThePageShowsTheFeedsTime:
         assert "the transaction keeps the feed's own (UTC) date and counts toward that day" in page
 
     def test_Page_WhenNoRowIsFedByTheBank_SaysNothingOfTheClockAndShowsNoTime(self, tmp_path):
-        from obdi.store import Store
+        from obdi.ingest.store import Store
         from test_ledger import CURRENT, land, txn
 
         with Store(tmp_path / "elsewhere.sqlite3") as store:

@@ -46,18 +46,18 @@ from late_settlement_corpus import (
     household,
     late_settlement_payments,
 )
-from obdi import ingest
 from obdi.core.models import RawArtefact, Transaction
 from obdi.core.namespaces import ENTITY_KEYED_TABLES
 from obdi.exact_rule_measure import exact_rule_report
-from obdi.family_anchors import families_of
-from obdi.ingest import import_file, reconcile_batch
+from obdi.ingest import pipeline as ingest
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.pipeline import import_file, reconcile_batch
+from obdi.ingest.providers import starling
+from obdi.ingest.rebuild import parse_artefact_transactions, rebuild_from_raw
+from obdi.ingest.space_attribution import fold_space_copies
+from obdi.ingest.store import Store
 from obdi.movement_completeness import check_rows
 from obdi.protection import diff_span, fingerprint_of, span_rows
-from obdi.providers import starling
-from obdi.rebuild import parse_artefact_transactions, rebuild_from_raw
-from obdi.space_attribution import fold_space_copies
-from obdi.store import Store
 from round_up_corpus import main_feed
 from test_family_anchors import FEED_ORIGIN
 from test_movement_chains import canonical

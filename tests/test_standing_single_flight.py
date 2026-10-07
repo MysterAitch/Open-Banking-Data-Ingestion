@@ -29,8 +29,8 @@ from datetime import UTC, datetime
 import pytest
 
 from obdi import cli
+from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.movement_completeness import movement_completeness
-from obdi.rebuild import rebuild_from_raw
 from obdi.standing_data import KeyedMemo
 from round_up_corpus import household_store
 from section_harness import config, environment

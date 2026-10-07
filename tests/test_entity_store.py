@@ -16,8 +16,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from obdi.entities import EntityRefused
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import SCHEMA_VERSION, Store
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import SCHEMA_VERSION, Store
 
 GROCER = ("fernhollow grocers", "fernhollow grocers express", "fernhollow metro")
 NOW = datetime(2026, 10, 7, 9, 0, tzinfo=UTC)

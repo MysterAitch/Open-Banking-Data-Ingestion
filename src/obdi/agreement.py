@@ -124,7 +124,7 @@ from .balance_anchors import (
 from .core.masking import Structural
 from .core.page_times import range_with_span
 from .core.plural import agree, plural
-from .family_anchors import OPENED
+from .ingest.family_anchors import OPENED
 from .statement_checks import (
     DOES_NOT_REACH,
     HELD_TWICE,

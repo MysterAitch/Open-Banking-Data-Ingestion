@@ -12,8 +12,8 @@ from __future__ import annotations
 import json
 
 from obdi.duplication import analyse
-from obdi.providers import starling, truelayer
-from obdi.store import Store
+from obdi.ingest.providers import starling, truelayer
+from obdi.ingest.store import Store
 
 
 def _feed(store, items):

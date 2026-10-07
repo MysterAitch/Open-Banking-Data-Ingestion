@@ -32,17 +32,17 @@ from credit_union_documents import (
     pdf,
     section,
 )
-from obdi.accounts import AccountMap, AccountRecord, AccountRef
-from obdi.backup import take_backup
 from obdi.export_declared import export_declared
-from obdi.parsers.base import ParseError
-from obdi.parsers.credit_union_pdf import section_key
+from obdi.ingest.accounts import AccountMap, AccountRecord, AccountRef
+from obdi.ingest.backup import take_backup
+from obdi.ingest.parsers.base import ParseError
+from obdi.ingest.parsers.credit_union_pdf import section_key
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.restore import restore_backup
+from obdi.ingest.statement_terms import statement_balances
+from obdi.ingest.store import SCHEMA_VERSION, Store
 from obdi.position import read_position
-from obdi.rebuild import rebuild_from_raw
-from obdi.restore import restore_backup
 from obdi.statement_sections import assign_section, section_token
-from obdi.statement_terms import statement_balances
-from obdi.store import SCHEMA_VERSION, Store
 from section_harness import (
     UNASSIGNED,
     config,
@@ -589,7 +589,7 @@ class TestThePage:
             first = keep(store, pdf(nine_accounts(), step=5.5), "first.pdf", order=0)
             keep(store, pdf(other, step=10), "second.pdf", order=1)
         wired = config(db)
-        from obdi.accounts import AccountRecord, AccountRef
+        from obdi.ingest.accounts import AccountRecord, AccountRef
 
         with Store(db) as store:
             store.declare_account(AccountRecord(ref=AccountRef(SAVER), label="Credit union saver"))

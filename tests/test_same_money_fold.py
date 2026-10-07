@@ -31,21 +31,21 @@ from pathlib import Path
 
 import pytest
 
-from obdi.accounts import AccountBinding, AccountMap
 from obdi.balance_anchors import effective_opening
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
-from obdi.identity import content_key
-from obdi.ingest import import_file, reconcile_batch
+from obdi.ingest.accounts import AccountBinding, AccountMap
+from obdi.ingest.identity import content_key
+from obdi.ingest.pipeline import import_file, reconcile_batch
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.same_money_fold import fold_same_money, plan_same_money
+from obdi.ingest.space_attribution import fold_space_copies
+from obdi.ingest.statement_membership import Membership
+from obdi.ingest.store import Store
 from obdi.period_reconciliation import (
     PeriodKind,
     gather_evidence,
     period_reconciliation,
 )
-from obdi.rebuild import rebuild_from_raw
-from obdi.same_money_fold import fold_same_money, plan_same_money
-from obdi.space_attribution import fold_space_copies
-from obdi.statement_membership import Membership
-from obdi.store import Store
 from test_period_reconciliation import (
     ACCOUNT,
     MONEY_FIGURE,
@@ -510,7 +510,7 @@ class TestTheFoldIsDerivedAndReversible:
         rebuild: the same two rows are folded as by arrival."""
         import json
 
-        from obdi.providers import truelayer
+        from obdi.ingest.providers import truelayer
 
         hold_statements(store, tmp_path)
         records = [

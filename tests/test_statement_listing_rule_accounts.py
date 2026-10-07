@@ -64,6 +64,7 @@ from obdi.balance_anchors import (
     effective_opening,
     record_stated_anchor,
 )
+from obdi.ingest.store import Store
 from obdi.protection import tested_days as days_offered
 from obdi.standing_data import (
     ADDS_UP,
@@ -71,7 +72,6 @@ from obdi.standing_data import (
     NOTHING_TO_CHECK_AGAINST,
 )
 from obdi.statement_listing_measure import Link, statement_listing_report
-from obdi.store import Store
 from statement_span_world import Spend, feed, statement
 from test_statement_listing_measure import (
     FAMILIES,

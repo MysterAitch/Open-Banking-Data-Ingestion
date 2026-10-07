@@ -41,6 +41,7 @@ from .core.page_times import (
 )
 from .core.plural import plural
 from .fetch_gaps import FetchReport
+from .ingest.rebuild_hold import RebuildInProgress
 from .overview import (
     ALERT_CONDITIONS,
     ARCHIVED,
@@ -57,7 +58,6 @@ from .overview import (
     AccountOverview,
     Overview,
 )
-from .rebuild_hold import RebuildInProgress
 from .standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,

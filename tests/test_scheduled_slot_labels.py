@@ -25,8 +25,8 @@ from obdi.cli import (
     main,
     scheduled_pull_skip_reason,
 )
-from obdi.pull import STARLING_CONNECTION, PullResult
-from obdi.store import Store
+from obdi.ingest.pull import STARLING_CONNECTION, PullResult
+from obdi.ingest.store import Store
 
 ADDRESS = "198.51.100.7"
 NOW = datetime(2026, 10, 4, 12, 0, 0, tzinfo=UTC)

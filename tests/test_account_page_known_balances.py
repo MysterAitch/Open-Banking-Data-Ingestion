@@ -29,7 +29,7 @@ import httpx
 import pytest
 
 from obdi.balance_anchors import record_stated_anchor
-from obdi.store import Store
+from obdi.ingest.store import Store
 from served_store import environment_for, served_store
 from test_ledger import land, txn
 

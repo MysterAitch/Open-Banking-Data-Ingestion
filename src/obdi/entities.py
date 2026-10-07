@@ -21,7 +21,7 @@ from .entity_tokens import (
     is_method_only,
     tokens_of,
 )
-from .identity import normalise_description
+from .ingest.identity import normalise_description
 
 #: The rules that can join two shapes into one proposed group, said once here and by name
 #: everywhere else. OPENING_WORDS: they begin with the same two or more words. SAME_WORDS: once

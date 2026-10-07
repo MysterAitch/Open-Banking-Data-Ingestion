@@ -19,12 +19,12 @@ from fetch_gaps_world import (
     load_household,
     santander_statements,
 )
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.fetch_gaps import GapKind, fetch_report, gather_evidence
-from obdi.ingest import import_file
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.store import Store
+from obdi.ingest.synthetic_pdf import build_pdf
 from obdi.standing_data import standings_for
-from obdi.store import Store
-from obdi.synthetic_pdf import build_pdf
 
 D = date
 TODAY = D(2026, 10, 5)

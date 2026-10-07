@@ -69,8 +69,8 @@ from .core.page_words import (
 )
 from .core.plural import agree, word
 from .core.plural import plural as _plural
-from .feed_item_shape import MIN_COMPARABLE, THRESHOLDS, differs
-from .join_basis import COUNT_LABELS, count_sentence, how_words, moment_text, word_text
+from .ingest.feed_item_shape import MIN_COMPARABLE, THRESHOLDS, differs
+from .ingest.join_basis import COUNT_LABELS, count_sentence, how_words, moment_text, word_text
 from .ledger import (
     ANCHOR_QUERIES,
     FAMILY_QUERIES,

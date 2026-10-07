@@ -106,8 +106,10 @@ from obdi.balance_anchors import (
 )
 from obdi.checks_index import CHECKS, IN_ORDER, result_of
 from obdi.core.models import SourceTier, Transaction
-from obdi.identity import content_key
-from obdi.ingest import reconcile_batch
+from obdi.ingest.identity import content_key
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.statement_terms import keep_statement_readings
+from obdi.ingest.store import Store
 from obdi.movement_completeness import MovementCompleteness, movement_completeness
 from obdi.overview import Overview, standing_items_from
 from obdi.protection import tested_days as days_offered
@@ -120,8 +122,6 @@ from obdi.standing_data import (
 )
 from obdi.statement_checks import StatementChecks
 from obdi.statement_listing_measure import statement_checks
-from obdi.statement_terms import keep_statement_readings
-from obdi.store import Store
 from statement_span_world import Spend, feed, statement
 from test_statement_listing_measure import (
     FAMILIES,

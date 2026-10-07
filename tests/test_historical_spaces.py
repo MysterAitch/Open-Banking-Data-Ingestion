@@ -31,7 +31,7 @@ from datetime import date
 
 import pytest
 
-from obdi.spaces import HistoricalSpace, account_for, canonical_ref, historical_spaces
+from obdi.ingest.spaces import HistoricalSpace, account_for, canonical_ref, historical_spaces
 
 BILLS_UID = "b1115000-0000-4000-8000-000000000001"
 RENT_UID = "5e117000-0000-4000-8000-000000000002"
@@ -78,7 +78,7 @@ def store_with_a_deleted_space(tmp_path):
     from datetime import UTC, datetime
 
     from obdi.core.models import RawArtefact
-    from obdi.store import Store
+    from obdi.ingest.store import Store
 
     def landed(source: str, body: dict, name: str) -> RawArtefact:
         return RawArtefact(
@@ -253,7 +253,7 @@ class TestTheCanonicalNameASpaceGets:
     """
 
     def test_TheNameLeads_SoAPersonCanReadIt(self):
-        from obdi.spaces import canonical_ref
+        from obdi.ingest.spaces import canonical_ref
 
         assert canonical_ref("Rent", uid=RENT_UID).startswith("starling-space-rent-")
 
@@ -263,7 +263,7 @@ class TestTheCanonicalNameASpaceGets:
         recognise its own previous declarations to do it - it got that wrong
         immediately, minting a second account for the same Space on the second
         run."""
-        from obdi.spaces import canonical_ref
+        from obdi.ingest.spaces import canonical_ref
 
         assert canonical_ref("Rent", uid=RENT_UID) == canonical_ref(
             "Rent", uid=RENT_UID
@@ -273,7 +273,7 @@ class TestTheCanonicalNameASpaceGets:
         """Delete-and-recreate, and rename-onto-a-dead-name, arrive here
         identically: two distinct uids and one name. A ref built from the name
         alone would hand the second the first's account."""
-        from obdi.spaces import canonical_ref
+        from obdi.ingest.spaces import canonical_ref
 
         assert canonical_ref("Rent", uid=RENT_UID) != canonical_ref(
             "Rent", uid=BILLS_UID
@@ -287,7 +287,7 @@ class TestTheCanonicalNameASpaceGets:
         would be unreadable in every listing. Recorded so the next reader meets
         the trade rather than the surprise.
         """
-        from obdi.spaces import canonical_ref
+        from obdi.ingest.spaces import canonical_ref
 
         before = canonical_ref("Rent", uid=RENT_UID)
         after = canonical_ref("Rent and bills", uid=RENT_UID)
@@ -298,7 +298,7 @@ class TestTheCanonicalNameASpaceGets:
     def test_ASpaceWithNoUsableName_StillGetsADistinctRef(self):
         """A Space whose name is empty or entirely punctuation must not
         collapse onto the bare prefix, or every such Space collides."""
-        from obdi.spaces import canonical_ref
+        from obdi.ingest.spaces import canonical_ref
 
         first = canonical_ref("", uid=RENT_UID)
         second = canonical_ref("***", uid=BILLS_UID)
@@ -310,7 +310,7 @@ class TestTheCanonicalNameASpaceGets:
         """The canonical name is checked at every write door, so a ref this
         produces has to pass that check or the back-fill dies at the door."""
         from obdi.core.namespaces import validate_canonical_name
-        from obdi.spaces import canonical_ref
+        from obdi.ingest.spaces import canonical_ref
 
         for name in ("Rent", "Rent & Bills", "  spaced  out  ", "Holiday 2024", ""):
             validate_canonical_name(canonical_ref(name, uid=RENT_UID))
@@ -327,8 +327,8 @@ class TestReadingItOutOfAStore:
     def test_ItFindsTheDeletedSpace_AndLeavesTheLiveOneAlone(
         self, store_with_a_deleted_space
     ):
-        from obdi.spaces import recover
-        from obdi.store import Store
+        from obdi.ingest.spaces import recover
+        from obdi.ingest.store import Store
 
         with Store(store_with_a_deleted_space) as store:
             found = recover(store)
@@ -350,8 +350,8 @@ class TestReadingItOutOfAStore:
         from datetime import UTC, datetime
 
         from obdi.core.models import RawArtefact
-        from obdi.spaces import recover
-        from obdi.store import Store
+        from obdi.ingest.spaces import recover
+        from obdi.ingest.store import Store
 
         main_category = "ma1n0000-0000-4000-8000-00000000000a"
         path = tmp_path / "with-accounts.sqlite3"
@@ -404,8 +404,8 @@ class TestReadingItOutOfAStore:
         self, tmp_path
     ):
         """Every other provider's store must survive this being run."""
-        from obdi.spaces import recover
-        from obdi.store import Store
+        from obdi.ingest.spaces import recover
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "empty.sqlite3") as store:
             assert recover(store) == []
@@ -424,7 +424,7 @@ class TestTheCommand:
         self, store_with_a_deleted_space, monkeypatch, capsys
     ):
         from obdi.cli import main
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_CONNECTION_STORE", "")
         assert main(["--db", str(store_with_a_deleted_space), "recover-spaces"]) == 0
@@ -440,7 +440,7 @@ class TestTheCommand:
         self, store_with_a_deleted_space, monkeypatch
     ):
         from obdi.cli import main
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_CONNECTION_STORE", "")
         # Declaring also binds, so the apply needs somewhere to record the binding.
@@ -482,7 +482,7 @@ class TestTheCommand:
 
         from obdi.cli import main
         from obdi.core.models import RawArtefact
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         second_rent = "2nd7e117-0000-4000-8000-000000000009"
         path = tmp_path / "two-rents.sqlite3"
@@ -528,7 +528,7 @@ class TestTheCommand:
         """The back-fill is expected to be re-run, and a second account for the
         same Space would split its history in two."""
         from obdi.cli import main
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_CONNECTION_STORE", "")
         monkeypatch.setenv(

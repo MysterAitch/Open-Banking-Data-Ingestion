@@ -18,9 +18,9 @@ import pytest
 
 from obdi.actual_push import ActualAccountBinding, build_envelope
 from obdi.core.jsontypes import rows as json_rows
-from obdi.providers import starling
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
+from obdi.ingest.providers import starling
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 
 ACCOUNT = "starling:cat-1"
 
@@ -174,7 +174,7 @@ class TestAnIdentityOnceGivenIsKept:
         a live pull reloads it from the store for each one. The two must
         number identically, or a deploy's rebuild renames what the scheduler
         named."""
-        import obdi.rebuild as rebuild_mod
+        import obdi.ingest.rebuild as rebuild_mod
 
         results = {}
         for label in ("cached", "reloading"):

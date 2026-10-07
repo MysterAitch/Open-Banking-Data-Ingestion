@@ -41,10 +41,10 @@ from obdi import web
 from obdi.callback import render_page
 from obdi.cli import build_web_config
 from obdi.core.models import RawArtefact
-from obdi.identity import artefact_digest
+from obdi.ingest.identity import artefact_digest
+from obdi.ingest.statement_extraction import keep_extraction
+from obdi.ingest.store import Store
 from obdi.navigation import DESTINATIONS
-from obdi.statement_extraction import keep_extraction
-from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_empty import empty_section, plan_from_audit
 from obdi.web_sections import render_actual
@@ -598,7 +598,7 @@ def test_StatementPeriodsPage_WithValuesShown_DoesNotScrollSideways(
 def family_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """A Starling household whose whole-account balances stop matching the rows,
     with a Space whose reference has no break to wrap at."""
-    from obdi.accounts import AccountRecord, AccountRef
+    from obdi.ingest.accounts import AccountRecord, AccountRef
     from test_family_anchors import STATEMENT, drop_row, feed_rows, import_statement
     from test_space_attribution import BILLS, MAIN, MAP, Household
 
@@ -647,7 +647,7 @@ def family_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 def family_nil_base(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """The family opened at nil, with an early fault and transfers to a Space
     whose rows are not held: every new sentence of the walk on one page."""
-    from obdi.accounts import AccountRecord, AccountRef
+    from obdi.ingest.accounts import AccountRecord, AccountRef
     from test_family_anchors import (
         STATEMENT,
         drop_row,

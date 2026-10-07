@@ -32,8 +32,8 @@ from obdi.actual_push import (
     valid_progress,
 )
 from obdi.cli import queue_actual_empty
-from obdi.connections import ConnectionStore
-from obdi.store import Store
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from obdi.web_empty import (
     EMPTY_PHRASE,

@@ -26,7 +26,7 @@ import sqlite3
 import pytest
 
 import obdi.cli as cli
-from obdi.store import SCHEMA_VERSION, Store, StoreIsNewer
+from obdi.ingest.store import SCHEMA_VERSION, Store, StoreIsNewer
 
 
 @pytest.fixture

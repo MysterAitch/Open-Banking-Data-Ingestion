@@ -17,8 +17,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import date, timedelta
 
+from .ingest.statement_terms import StatementPeriod
 from .statement_span import Known, RowEvidence, describe_account
-from .statement_terms import StatementPeriod
 
 
 def directly_follows(

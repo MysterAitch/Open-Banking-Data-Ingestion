@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import json
 
-from obdi import fingerprint
-from obdi.providers import starling
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
+from obdi.ingest import fingerprint
+from obdi.ingest.providers import starling
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 
 
 def _land_one(store: Store) -> None:
@@ -131,7 +131,7 @@ class TestOnlySuccessfulRebuildsStamp:
             def explode(*args, **kwargs):
                 raise RuntimeError("deliberate")
 
-            monkeypatch.setattr("obdi.rebuild.reconcile_batch", explode)
+            monkeypatch.setattr("obdi.ingest.rebuild.reconcile_batch", explode)
             # A reconcile failure PROPAGATES - and that is what the stamp
             # discipline rests on: both CLI paths stamp after the call
             # returns, so an exception skips the stamp and the next
@@ -192,7 +192,7 @@ class TestTheRebuildStatesItsOutcomeWherePeopleLook:
         def explode(*args, **kwargs):
             raise RuntimeError("deliberate rebuild failure")
 
-        monkeypatch.setattr("obdi.rebuild.reconcile_batch", explode)
+        monkeypatch.setattr("obdi.ingest.rebuild.reconcile_batch", explode)
         start_background_rebuild(db)
         status = self._wait_done(db)
         assert status.get("ok") is False, status

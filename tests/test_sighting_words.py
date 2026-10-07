@@ -34,10 +34,10 @@ import httpx
 import pytest
 
 from obdi.cli import build_web_config
-from obdi.providers import truelayer
-from obdi.rebuild import rebuild_from_raw
-from obdi.stated_words import recorded_words, words_in
-from obdi.store import SCHEMA_VERSION, Store
+from obdi.ingest.providers import truelayer
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.stated_words import recorded_words, words_in
+from obdi.ingest.store import SCHEMA_VERSION, Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from round_up_corpus import SPACE_FEED_ORIGIN, card_payment, land_feed, round_up_of
 from test_family_anchors import FEED_ORIGIN, land_evidence

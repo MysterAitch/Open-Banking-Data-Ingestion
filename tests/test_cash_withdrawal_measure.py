@@ -57,7 +57,9 @@ import pytest
 
 from late_settlement_corpus import ORDERS, Payment, household
 from obdi.account_names import AccountShown, AccountsShown
-from obdi.accounts import (
+from obdi.balance_anchors import effective_opening, record_stated_anchor
+from obdi.exact_rule_measure import exact_rule_report
+from obdi.ingest.accounts import (
     BALANCE_ONLY_KIND,
     CASH_ACCOUNT_KIND,
     AccountBinding,
@@ -66,8 +68,7 @@ from obdi.accounts import (
     is_balance_only,
     is_cash_account,
 )
-from obdi.balance_anchors import effective_opening, record_stated_anchor
-from obdi.cash_withdrawals import (
+from obdi.ingest.cash_withdrawals import (
     DEPOSIT,
     DISAGREED,
     LEG,
@@ -79,12 +80,11 @@ from obdi.cash_withdrawals import (
     description_patterns,
     judge,
 )
-from obdi.exact_rule_measure import exact_rule_report
-from obdi.ingest import reconcile_batch
-from obdi.providers import truelayer
-from obdi.rebuild import parse_artefact_transactions
-from obdi.store import Store
-from obdi.typed_transactions import record_typed_transaction
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.providers import truelayer
+from obdi.ingest.rebuild import parse_artefact_transactions
+from obdi.ingest.store import Store
+from obdi.ingest.typed_transactions import record_typed_transaction
 from obdi.web_accounts import account_form, account_from_form
 from test_family_anchors import land_evidence
 from test_space_attribution import MAIN, MAP, household_map

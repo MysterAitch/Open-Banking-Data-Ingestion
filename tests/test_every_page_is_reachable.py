@@ -25,10 +25,10 @@ import pytest
 
 from home_world import build_scale_world
 from obdi.cli import build_web_config
-from obdi.connections import Connection, ConnectionStore
+from obdi.ingest.connections import Connection, ConnectionStore
+from obdi.ingest.store import Store
+from obdi.ingest.synthetic_pdf import build_pdf
 from obdi.navigation import ALIASES, DESTINATIONS
-from obdi.store import Store
-from obdi.synthetic_pdf import build_pdf
 from section_harness import environment, keep, serve_config
 from test_navigation import get_routes
 

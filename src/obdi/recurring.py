@@ -70,8 +70,8 @@ from statistics import median_low
 
 from .core.models import Transaction, TransactionStatus
 from .entities import shape_of
+from .ingest.stated_words import words_in
 from .payment_methods import METHODS
-from .stated_words import words_in
 
 #: Fewest occurrences that make a series. Two is a coincidence of a payee and a gap.
 MIN_OCCURRENCES = 3

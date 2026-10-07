@@ -32,7 +32,7 @@ import pytest
 from large_store_corpus import MAIN, LargeStore, cached_large_store
 from large_store_pages import copy_of, serving
 from obdi.core.models import BASIS_OWN_ID
-from obdi.join_basis import (
+from obdi.ingest.join_basis import (
     SightingView,
     StatedMoment,
     StatedWord,
@@ -43,7 +43,7 @@ from obdi.join_basis import (
     join_counts_of_bases,
     sighting_views,
 )
-from obdi.store import SightingDetail, Store
+from obdi.ingest.store import SightingDetail, Store
 
 LEDGER = f"/ledger?ref={MAIN}"
 CARD = "/ledger?ref=card-1"
@@ -283,7 +283,7 @@ class TestTheAccountPagesOverTheLargeStore:
     def test_MainAccountPage_AfterTheStoreChanges_ReadsTheOpeningAgainThenHoldsIt(
         self, large, tmp_path
     ):
-        from obdi.ingest import reconcile_batch
+        from obdi.ingest.pipeline import reconcile_batch
         from test_ledger import txn
 
         with serving(copy_of(large, tmp_path / "copy"), tmp_path) as served:

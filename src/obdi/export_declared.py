@@ -40,7 +40,7 @@ from .core.buildinfo import describe as build_identifier
 from .core.namespaces import MANUAL_SOURCE
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle at runtime, types only
-    from .store import Store
+    from .ingest.store import Store
 
 
 @dataclass(frozen=True)
@@ -130,7 +130,7 @@ def _stated_balances(store: Store) -> list[dict[str, object]]:
     the export reads. `balance_minor` is signed in the store's own convention,
     so money owed is negative.
     """
-    from .store import ACCOUNT_BALANCE_ASSET_PREFIX, ACCOUNT_BALANCE_KIND
+    from .ingest.store import ACCOUNT_BALANCE_ASSET_PREFIX, ACCOUNT_BALANCE_KIND
 
     rows = store.connection.execute(
         "SELECT asset_id, observed_at, value_minor, currency FROM valuations "
@@ -156,7 +156,7 @@ def _typed_transactions(store: Store) -> list[dict[str, object]]:
     minted at entry and survives a rebuild, because they have no content
     identity of their own to be matched by.
     """
-    from .typed_transactions import typed_entries
+    from .ingest.typed_transactions import typed_entries
 
     refs = [
         str(row[0])

@@ -51,11 +51,11 @@ from late_settlement_corpus import (
     household,
     late_settlement_payments,
 )
-from obdi import matching
 from obdi.exact_rule_measure import exact_rule_report
-from obdi.ingest import import_file
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
+from obdi.ingest import matching
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from test_absorbed_rows import second_export
 from test_consecutive_days_nothing_joined import ORDERS, repeat_the_feed
 from test_settlement_measurement import bakery_week

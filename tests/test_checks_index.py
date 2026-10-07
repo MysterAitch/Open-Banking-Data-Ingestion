@@ -16,6 +16,7 @@ import pytest
 
 from obdi import web_destinations
 from obdi.checks_index import CHECKS, CheckResult, result_of
+from obdi.ingest.rebuild_hold import RebuildHold
 from obdi.navigation import PAGE_NAMES
 from obdi.overview import (
     HOUSEKEEPING,
@@ -25,7 +26,6 @@ from obdi.overview import (
     AttentionItem,
     Overview,
 )
-from obdi.rebuild_hold import RebuildHold
 
 WHEN = datetime(2026, 10, 1, 12, 30, tzinfo=UTC)
 

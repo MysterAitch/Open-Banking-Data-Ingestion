@@ -35,12 +35,12 @@ from urllib.parse import quote
 from .account_names import AccountShown, AccountsShown
 from .alerts import consent_rung
 from .bank_balances import BANK_SOURCE
-from .connections import Connection, ConnectionStore
 from .core.page_times import date_with_age
 from .core.plural import plural
+from .ingest.connections import Connection, ConnectionStore
+from .ingest.pull import STARLING_CONNECTION
 from .navigation import account_address
 from .overview import NOW, SOON
-from .pull import STARLING_CONNECTION
 from .todo import Control, Todo
 from .web_overview import actual_line, serial, todo_row_html
 from .web_scheduler import SECTION_ID, scheduler_section

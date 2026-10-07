@@ -43,8 +43,8 @@ from datetime import date
 import pytest
 
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
+from obdi.ingest.store import Store
 from obdi.movement_completeness import check_chains, movement_completeness
-from obdi.store import Store
 from round_up_corpus import main_feed, space_arrival, space_feed
 from test_space_attribution import BILLS, HOLIDAY, MAIN, MAP
 from test_space_blind_rows_and_internal_legs import (

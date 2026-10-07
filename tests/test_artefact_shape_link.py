@@ -24,9 +24,9 @@ import httpx
 import pytest
 
 from obdi.cli import build_web_config
-from obdi.ingest import import_file
-from obdi.store import Store
-from obdi.synthetic import build_world, write_corpus
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.store import Store
+from obdi.ingest.synthetic import build_world, write_corpus
 from obdi.web import AuthorisationSession, ConnectionHandler
 
 SEED = 20260812

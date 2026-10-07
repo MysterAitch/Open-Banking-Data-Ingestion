@@ -40,9 +40,9 @@ from obdi.clearing import cleared_by, cleared_entity_ids
 from obdi.core.models import Transaction, TransactionStatus
 from obdi.core.namespaces import CLEARING_SOURCES, SOURCES
 from obdi.core.page_times import marks_removed
+from obdi.ingest.store import Store
 from obdi.ledger import build_ledger
 from obdi.movement_completeness import MISSING, MovementCompleteness, RowCountFault
-from obdi.store import Store
 from round_up_corpus import rows_the_provider_makes
 from test_balance_anchors import ACCOUNT, everyday
 from test_ledger import land, txn

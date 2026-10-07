@@ -35,7 +35,8 @@ from datetime import date
 
 import pytest
 
-from obdi.accounts import (
+from obdi.core.errors import DataError
+from obdi.ingest.accounts import (
     AccountId,
     AccountRecord,
     AccountRef,
@@ -45,8 +46,7 @@ from obdi.accounts import (
     mint_account_id,
     read_registry_file,
 )
-from obdi.core.errors import DataError
-from obdi.store import SCHEMA_VERSION, Store
+from obdi.ingest.store import SCHEMA_VERSION, Store
 
 SCHEMA_HISTORY = pathlib.Path(__file__).resolve().parent / "schema_history"
 
@@ -335,7 +335,7 @@ class TestTheTwoIdentifiersStayDistinctTypes:
         assert hints["stable_id"] is AccountId
 
     def test_TheAccountMap_AnswersInCanonicalNames(self):
-        from obdi.accounts import AccountMap
+        from obdi.ingest.accounts import AccountMap
 
         assert typing.get_type_hints(AccountMap.resolve)["return"] is AccountRef
         assert typing.get_type_hints(AccountMap.record)["ref"] is AccountRef
@@ -346,7 +346,7 @@ def _land_a_statement(store: Store) -> None:
 
     Amounts and names are invented; nothing here is anyone's money.
     """
-    from obdi.providers.truelayer import artefact_for
+    from obdi.ingest.providers.truelayer import artefact_for
 
     body = json.dumps(
         {
@@ -392,7 +392,7 @@ class TestDeclaredAccountsSurviveARebuild:
     """
 
     def test_DeclaredAccounts_WhenTheStoreIsRebuiltFromRaw_AreUntouched(self, store):
-        from obdi.rebuild import rebuild_from_raw
+        from obdi.ingest.rebuild import rebuild_from_raw
 
         store.declare_account(FULL_RECORD)
         store.declare_account(FEEDLESS_RECORD)
@@ -413,8 +413,8 @@ class TestDeclaredAccountsSurviveARebuild:
         ever re-derive it.
         """
         from obdi.core.models import SourceTier, Transaction
-        from obdi.ingest import reconcile_batch
-        from obdi.rebuild import rebuild_from_raw
+        from obdi.ingest.pipeline import reconcile_batch
+        from obdi.ingest.rebuild import rebuild_from_raw
 
         store.declare_account(FULL_RECORD)
         _land_a_statement(store)
@@ -832,8 +832,8 @@ class TestWhatReadsTheRegistry:
         """Rows before the account opened have to explain themselves. The
         guard reads the registry, so it goes quiet the moment the registry
         stops being found - which is the regression this holds."""
-        from obdi.accounts import lifecycle_breach
         from obdi.cli import _account_map
+        from obdi.ingest.accounts import lifecycle_breach
 
         monkeypatch.delenv("OBDI_ACCOUNT_MAP", raising=False)
         store.declare_account(

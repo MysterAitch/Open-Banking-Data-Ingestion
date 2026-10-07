@@ -31,8 +31,8 @@ from typing import ClassVar
 import pytest
 
 from obdi.balance_anchors import effective_opening
-from obdi.family_anchors import families_of
 from obdi.fault_explanation import SourceSearch, _SourceSearch
+from obdi.ingest.family_anchors import families_of
 from test_export_cuts import HEALTHY, build
 from test_export_dating import render
 from test_space_attribution import AGGREGATOR, FEED, MAIN, MAP, Household, pay

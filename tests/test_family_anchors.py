@@ -45,19 +45,23 @@ from datetime import date
 
 import pytest
 
-from obdi.accounts import (
+from obdi.actual_push import opening_balances
+from obdi.balance_anchors import FAMILY, effective_opening, record_stated_anchor
+from obdi.balance_anchors import STATEMENT as STATEMENT_BASIS
+from obdi.core.models import TransactionStatus
+from obdi.ingest.accounts import (
     BALANCE_ONLY_KIND,
     AccountBinding,
     AccountMap,
     AccountRecord,
     AccountRef,
 )
-from obdi.actual_push import opening_balances
-from obdi.balance_anchors import FAMILY, effective_opening, record_stated_anchor
-from obdi.balance_anchors import STATEMENT as STATEMENT_BASIS
-from obdi.core.models import TransactionStatus
-from obdi.family_anchors import OPENED, Families, families_of, family_anchors
-from obdi.ingest import import_file, reconcile_batch
+from obdi.ingest.family_anchors import OPENED, Families, families_of, family_anchors
+from obdi.ingest.pipeline import import_file, reconcile_batch
+from obdi.ingest.providers import starling, truelayer
+from obdi.ingest.rebuild import parse_artefact_transactions, rebuild_from_raw
+from obdi.ingest.store import Store
+from obdi.ingest.typed_transactions import record_typed_transaction
 from obdi.ledger import (
     ANCHOR_QUERIES,
     FAMILY_DISCOVERY_QUERIES,
@@ -68,11 +72,7 @@ from obdi.ledger import (
     STATEMENT_CHECK_QUERIES,
     build_ledger,
 )
-from obdi.providers import starling, truelayer
-from obdi.rebuild import parse_artefact_transactions, rebuild_from_raw
 from obdi.replay import ActualAccountBinding
-from obdi.store import Store
-from obdi.typed_transactions import record_typed_transaction
 from test_space_attribution import (
     BILLS,
     FEED,

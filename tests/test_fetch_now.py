@@ -26,15 +26,17 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi import leases
-from obdi.accounts import AccountMap
-from obdi.asked_coverage import (
+from obdi.cli import _pull as cli_pull
+from obdi.cli import pull_trigger_label, rebuild_in_progress_note, standing_trigger_label
+from obdi.ingest import leases
+from obdi.ingest.accounts import AccountMap
+from obdi.ingest.asked_coverage import (
     ATTENDED_HEAL_ASKS_PER_CONNECTION,
     HEAL_ASKS_PER_CONNECTION,
     canonical_resolver,
     coverage_by_account,
 )
-from obdi.attended_fetch import (
+from obdi.ingest.attended_fetch import (
     FETCH_NOW_TRIGGER,
     PressRefused,
     read_presses,
@@ -42,11 +44,9 @@ from obdi.attended_fetch import (
     start_press,
     write_status,
 )
-from obdi.cli import _pull as cli_pull
-from obdi.cli import pull_trigger_label, rebuild_in_progress_note, standing_trigger_label
-from obdi.connections import ConnectionStore
-from obdi.pull import PullResult, pull_truelayer
-from obdi.store import Store
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.pull import PullResult, pull_truelayer
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler, ExtendableAccount, WebConfig
 from test_asked_coverage import (
     AUTHORISED,

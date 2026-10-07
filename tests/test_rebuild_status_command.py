@@ -31,7 +31,7 @@ import sqlite3
 
 import pytest
 
-from obdi.store import Store
+from obdi.ingest.store import Store
 
 FAILED = {
     "kind": "rebuild",

@@ -53,17 +53,17 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from obdi.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
 from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
-from obdi.family_anchors import families_of
-from obdi.identity import content_key
-from obdi.ingest import import_file, pair_transfers_across_store, reconcile_batch
-from obdi.providers import starling, truelayer
-from obdi.rebuild import parse_artefact_transactions
-from obdi.space_attribution import fold_space_copies
-from obdi.store import Store
-from obdi.synthetic import build_world, write_corpus
+from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.identity import content_key
+from obdi.ingest.pipeline import import_file, pair_transfers_across_store, reconcile_batch
+from obdi.ingest.providers import starling, truelayer
+from obdi.ingest.rebuild import parse_artefact_transactions
+from obdi.ingest.space_attribution import fold_space_copies
+from obdi.ingest.store import Store
+from obdi.ingest.synthetic import build_world, write_corpus
 
 MAIN = "starling-personal"
 SPACES = (
@@ -788,7 +788,7 @@ def cached_large_store(*, waited: float = 1500.0, faithful: bool = False) -> Lar
     import hashlib
     import time
 
-    from obdi.store import SCHEMA_VERSION
+    from obdi.ingest.store import SCHEMA_VERSION
 
     digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
     form = "-faithful" if faithful else ""

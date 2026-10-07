@@ -15,8 +15,8 @@ import httpx
 import pytest
 
 from obdi.account_names import AccountShown, AccountsShown, accounts_shown, code_html
-from obdi.accounts import AccountRecord, AccountRef
-from obdi.store import Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
 from page_walk import invented, served, walked_pages  # noqa: F401
 
 NAMES = accounts_shown(

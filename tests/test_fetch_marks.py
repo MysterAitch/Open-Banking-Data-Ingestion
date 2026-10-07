@@ -28,8 +28,8 @@ from obdi.fetch_marks import (
     remove_mark,
     scope_exit_day,
 )
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import SCHEMA_VERSION, Store
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import SCHEMA_VERSION, Store
 
 VIRGIN_HOLE = (D(2026, 6, 5), D(2026, 7, 4))
 HOLE_NOTHING = (D(2026, 3, 11), D(2026, 4, 10))
@@ -163,7 +163,7 @@ class TestBeforeTheSourcesHistory:
 class TestNotOpen:
     def test_Mark_WhenAfterTheDeclaredClosingDay_IsSupportedByTheDeclaredDates(self, db):
         with Store(db) as store:
-            from obdi.accounts import AccountRecord, AccountRef
+            from obdi.ingest.accounts import AccountRecord, AccountRef
 
             store.declare_account(AccountRecord(
                 ref=AccountRef("card-quiet"), label="Quiet card", closed=D(2026, 3, 1)))

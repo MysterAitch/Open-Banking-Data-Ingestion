@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from obdi.agreement import Standing, standing_of
 from obdi.balance_anchors import effective_opening
-from obdi.family_anchors import Families
+from obdi.ingest.family_anchors import Families
+from obdi.ingest.store import Store
 from obdi.movement_completeness import MovementCompleteness, movement_completeness
 from obdi.standing_data import AccountStanding, statement_checks_for, verification_of
-from obdi.store import Store
 
 _REPORTS: dict[int, tuple[Store, MovementCompleteness]] = {}
 

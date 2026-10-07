@@ -19,10 +19,11 @@ from pathlib import Path
 
 import pytest
 
-from obdi import leases
 from obdi.alerts import Finding
 from obdi.cli import _await_scheduled_clearance, collect_alert_findings, main
-from obdi.connections import ConnectionStore
+from obdi.ingest import leases
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.store import Store
 from obdi.overview import _alert_item
 from obdi.scheduler_status import (
     CYCLE_STEPS,
@@ -36,7 +37,6 @@ from obdi.scheduler_status import (
     status_path,
     strip_sentence,
 )
-from obdi.store import Store
 from obdi.web import _scheduler_row
 from obdi.web_scheduler import scheduler_section
 

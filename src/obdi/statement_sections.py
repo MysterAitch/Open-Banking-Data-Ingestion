@@ -29,7 +29,6 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .accounts import AccountMap
 from .core.errors import DataError
 from .core.models import Transaction
 from .core.namespaces import validate_canonical_name
@@ -41,15 +40,16 @@ from .coverage import (
     assignment_corroboration,
     assignment_doubt,
 )
-from .declined_items import void_declined_items
-from .ingest import ImportSummary, MatcherPreview, preview_reconcile, reconcile_batch
-from .parsers.pdf_statements import PdfStatementParser, SectionReading
-from .parsers.uk_banks import detect
+from .ingest.accounts import AccountMap
+from .ingest.declined_items import void_declined_items
+from .ingest.parsers.pdf_statements import PdfStatementParser, SectionReading
+from .ingest.parsers.uk_banks import detect
+from .ingest.pipeline import ImportSummary, MatcherPreview, preview_reconcile, reconcile_batch
+from .ingest.same_money_fold import fold_same_money
+from .ingest.space_attribution import fold_space_copies
+from .ingest.store import Store
 from .protection import recheck
 from .review_settlement import settle_review_flags
-from .same_money_fold import fold_same_money
-from .space_attribution import fold_space_copies
-from .store import Store
 
 
 def masked(text: str) -> str:
@@ -152,7 +152,7 @@ def check_assignment(
     found = agreements(held + incoming, sibling_accounts=account_map.accounts_by_source())
     previews: list[MatcherPreview] = []
     # Imported here: `family_anchors` reaches the store's readers, which reach `ingest`.
-    from .family_anchors import families_of
+    from .ingest.family_anchors import families_of
 
     def preview() -> MatcherPreview:
         if not previews:
@@ -337,7 +337,7 @@ def assign_section(
     )
     summary = ImportSummary(artefact_new=False)
     # Imported here: `family_anchors` reaches the store's readers, which reach `ingest`.
-    from .family_anchors import families_of
+    from .ingest.family_anchors import families_of
 
     reconcile_batch(
         store,

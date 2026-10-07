@@ -320,8 +320,8 @@ class TestAgainstTheRealStore:
     """
 
     def test_Coverage_AfterACrossSourceMerge_CreditsBothSources(self, tmp_path):
-        from obdi.ingest import reconcile_batch
-        from obdi.store import Store
+        from obdi.ingest.pipeline import reconcile_batch
+        from obdi.ingest.store import Store
 
         def real(source, source_id=None):
             return Transaction(
@@ -351,8 +351,8 @@ class TestAgainstTheRealStore:
             assert by_source["truelayer"].count == 1
 
     def test_Agreement_AfterACrossSourceMerge_ReportsAgreementNotDisagreement(self, tmp_path):
-        from obdi.ingest import reconcile_batch
-        from obdi.store import Store
+        from obdi.ingest.pipeline import reconcile_batch
+        from obdi.ingest.store import Store
 
         def real(source, day, amount, source_id=None):
             return Transaction(
@@ -388,8 +388,8 @@ class TestAgainstTheRealStore:
             )
 
     def test_Gaps_AfterACrossSourceMerge_DoesNotInventMissingMonths(self, tmp_path):
-        from obdi.ingest import reconcile_batch
-        from obdi.store import Store
+        from obdi.ingest.pipeline import reconcile_batch
+        from obdi.ingest.store import Store
 
         def real(source, month, source_id=None):
             return Transaction(

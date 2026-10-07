@@ -69,7 +69,7 @@ from .core.masking import Structural
 from .core.models import Transaction
 from .core.namespaces import CASH_LEG_SOURCE
 from .core.page_words import REMOVE_PROTECTION
-from .store import FOLDED_SIGHTING_PREFIX, Store
+from .ingest.store import FOLDED_SIGHTING_PREFIX, Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
     import sqlite3
@@ -423,7 +423,7 @@ def recheck(
     written into the history is permanent, as is the heal that follows it. `finished_rebuild`
     is the rebuild's own final pass, which runs under its own lease over the finished layer.
     """
-    from .rebuild_hold import hold_for
+    from .ingest.rebuild_hold import hold_for
 
     if not finished_rebuild and hold_for(store.path) is not None:
         return []

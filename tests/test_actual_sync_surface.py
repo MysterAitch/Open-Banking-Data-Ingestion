@@ -14,8 +14,8 @@ from http.server import HTTPServer
 import httpx
 
 from obdi import web
-from obdi.connections import ConnectionStore
 from obdi.core.namespaces import QUEUE_KINDS
+from obdi.ingest.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 
@@ -468,8 +468,8 @@ class TestRebuildBanner:
     refused."""
 
     def test_Index_WhileTheRebuildLeaseIsHeld_BannersTheMidReplayStore(self, tmp_path):
-        from obdi import leases
         from obdi.cli import rebuild_in_progress_note
+        from obdi.ingest import leases
 
         db_path = tmp_path / "obdi.sqlite3"
         leases.acquire(

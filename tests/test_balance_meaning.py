@@ -50,9 +50,9 @@ from obdi.balance_meaning import (
     WHOLE,
 )
 from obdi.balance_meaning import MAIN as READ_AS_MAIN
-from obdi.family_anchors import families_of
-from obdi.identity import content_key
-from obdi.store import Store
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.identity import content_key
+from obdi.ingest.store import Store
 from test_family_anchors import (
     EXPORT_ROWS,
     STATEMENT,
@@ -159,7 +159,7 @@ class TestAnExportWhoseBalanceIsTheMainAccountsOwn:
         # The measured old behaviour: the same export compared with the family's rows.
         import_export(home.store, tmp_path, MAIN_ONLY_ROWS)
         from obdi.balance_anchors import walk_family
-        from obdi.family_anchors import FamilyAnchor, FamilyAnchors
+        from obdi.ingest.family_anchors import FamilyAnchor, FamilyAnchors
 
         members = {
             ref: home.store.transactions_for_account(ref)

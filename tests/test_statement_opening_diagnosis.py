@@ -29,10 +29,10 @@ from datetime import date
 
 import pytest
 
-from obdi.family_anchors import Families
+from obdi.ingest.family_anchors import Families
+from obdi.ingest.statement_terms import keep_statement_readings
+from obdi.ingest.store import Store
 from obdi.statement_opening_measure import OpeningDiagnosis, statement_opening_report
-from obdi.statement_terms import keep_statement_readings
-from obdi.store import Store
 from statement_span_world import Spend, statement
 
 D = date

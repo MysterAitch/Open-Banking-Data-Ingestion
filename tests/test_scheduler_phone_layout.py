@@ -21,10 +21,10 @@ from pathlib import Path
 import pytest
 
 from obdi.cli import _await_scheduled_clearance, collect_alert_findings
-from obdi.connections import ConnectionStore
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.store import Store
 from obdi.overview import build_overview
 from obdi.scheduler_status import CYCLE_STEPS, read_record
-from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from test_scheduler_status import (  # noqa: F401 - the autouse fixture applies to this module too
     Clock,

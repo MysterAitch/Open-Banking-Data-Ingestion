@@ -77,8 +77,8 @@ from datetime import UTC, date, datetime, timedelta
 
 from .core.models import Transaction, TransactionStatus
 from .core.plural import plural as _plural
-from .spaces import LISTING_SOURCE
-from .store import FOLDED_SIGHTING_PREFIX, Store
+from .ingest.spaces import LISTING_SOURCE
+from .ingest.store import FOLDED_SIGHTING_PREFIX, Store
 
 #: The source whose dating places rows for these balances: the bank's own feed.
 BANK_SOURCE = "starling"

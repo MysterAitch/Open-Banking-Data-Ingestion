@@ -20,7 +20,7 @@ from datetime import date
 import pytest
 
 from obdi.balance_anchors import record_stated_anchor, stated_anchors
-from obdi.store import SCHEMA_VERSION, Store, StoreIsNewer
+from obdi.ingest.store import SCHEMA_VERSION, Store, StoreIsNewer
 from test_balance_anchors import ACCOUNT, everyday
 
 DAY = date(2026, 3, 10)

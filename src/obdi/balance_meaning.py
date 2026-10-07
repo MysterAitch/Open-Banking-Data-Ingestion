@@ -59,7 +59,7 @@ from datetime import date
 from itertools import accumulate, pairwise
 
 from .core.models import TransactionStatus
-from .store import FOLDED_SIGHTING_PREFIX, Store
+from .ingest.store import FOLDED_SIGHTING_PREFIX, Store
 
 #: The share of discriminating steps a reading must explain to be adopted.
 READING_THRESHOLD = 0.9

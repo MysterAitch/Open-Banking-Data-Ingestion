@@ -20,8 +20,8 @@ import pytest
 
 from coverage_page_world import repeated_lines
 from obdi.account_names import AccountShown, AccountsShown
-from obdi.accounts import AccountRecord, AccountRef
-from obdi.store import Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
 from obdi.web_statements import statements_body
 from page_dom import Node, elements, parse
 from test_kept_statements_page import (

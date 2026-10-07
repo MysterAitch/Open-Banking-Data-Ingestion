@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.accounts import AccountMap
-from obdi.connections import Connection, ConnectionStore
-from obdi.providers.truelayer import TrueLayerError
-from obdi.pull import pull_truelayer
-from obdi.store import Store
+from obdi.ingest.accounts import AccountMap
+from obdi.ingest.connections import Connection, ConnectionStore
+from obdi.ingest.providers.truelayer import TrueLayerError
+from obdi.ingest.pull import pull_truelayer
+from obdi.ingest.store import Store
 
 
 def _connection():
@@ -41,8 +41,8 @@ def provider(monkeypatch):
     def fake_balance(_token, _account_id, **_kwargs):
         return [], b"{}"
 
-    monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
-    monkeypatch.setattr("obdi.pull.truelayer.fetch_balance", fake_balance)
+    monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_accounts", fake_accounts)
+    monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_balance", fake_balance)
     return monkeypatch
 
 
@@ -58,7 +58,7 @@ class TestAttemptsAreRecorded:
                 description="SCA exemption has expired.",
             )
 
-        provider.setattr("obdi.pull.truelayer.fetch_transactions", refuse)
+        provider.setattr("obdi.ingest.pull.truelayer.fetch_transactions", refuse)
 
         with Store(tmp_path / "s.sqlite3") as store:
             with pytest.raises(TrueLayerError):
@@ -87,7 +87,7 @@ class TestAttemptsAreRecorded:
         def succeed(_token, _account_id, **_kwargs):
             return [], b'{"results": [], "status": "Succeeded"}', "from=2026-05-01&to=2026-08-02"
 
-        provider.setattr("obdi.pull.truelayer.fetch_transactions", succeed)
+        provider.setattr("obdi.ingest.pull.truelayer.fetch_transactions", succeed)
 
         with Store(tmp_path / "s.sqlite3") as store:
             pull_truelayer(
@@ -162,7 +162,7 @@ class TestScaWindowLengthIsLearnt:
                 ),
             )
 
-        provider.setattr("obdi.pull.truelayer.fetch_transactions", refuse)
+        provider.setattr("obdi.ingest.pull.truelayer.fetch_transactions", refuse)
 
         with Store(tmp_path / "s.sqlite3") as store:
             with pytest.raises(TrueLayerError):
@@ -195,7 +195,7 @@ class TestRebindCarriesEveryLayer:
         from datetime import date
 
         from obdi.cli import _earliest_asked
-        from obdi.providers.truelayer import artefact_for
+        from obdi.ingest.providers.truelayer import artefact_for
 
         map_path = tmp_path / "accounts.json"
         map_path.write_text(
@@ -253,8 +253,8 @@ class TestStarlingInstrumentationParity:
     def test_Pull_LandsEveryPayloadKind_AndLedgersTheFeedAsk(
         self, tmp_path, monkeypatch
     ):
-        from obdi.providers.starling import Category
-        from obdi.pull import pull_starling
+        from obdi.ingest.providers.starling import Category
+        from obdi.ingest.pull import pull_starling
 
         def fake_accounts(_token, **_kwargs):
             return (
@@ -281,10 +281,10 @@ class TestStarlingInstrumentationParity:
                 "changesSince=2016-08-04T00:00:00Z",
             )
 
-        monkeypatch.setattr("obdi.pull.starling.fetch_accounts", fake_accounts)
-        monkeypatch.setattr("obdi.pull.starling.fetch_categories", fake_categories)
-        monkeypatch.setattr("obdi.pull.starling.fetch_balance", fake_balance)
-        monkeypatch.setattr("obdi.pull.starling.fetch_feed", fake_feed)
+        monkeypatch.setattr("obdi.ingest.pull.starling.fetch_accounts", fake_accounts)
+        monkeypatch.setattr("obdi.ingest.pull.starling.fetch_categories", fake_categories)
+        monkeypatch.setattr("obdi.ingest.pull.starling.fetch_balance", fake_balance)
+        monkeypatch.setattr("obdi.ingest.pull.starling.fetch_feed", fake_feed)
 
         with Store(tmp_path / "s.sqlite3") as store:
             pull_starling(
@@ -317,8 +317,8 @@ class TestStarlingInstrumentationParity:
 
 class TestOneRefusedCategoryDoesNotStarveTheRest:
     def test_Pull_ContinuesPastARefusedFeed_AndNotesIt(self, tmp_path, monkeypatch):
-        from obdi.providers.starling import Category, StarlingError
-        from obdi.pull import pull_starling
+        from obdi.ingest.providers.starling import Category, StarlingError
+        from obdi.ingest.pull import pull_starling
 
         def fake_accounts(_token, **_kwargs):
             return (
@@ -343,12 +343,12 @@ class TestOneRefusedCategoryDoesNotStarveTheRest:
                 raise StarlingError("Starling call failed (HTTP 429): slow down", status=429)
             return [], b'{"feedItems": []}', "changesSince=2016-08-04T00:00:00Z"
 
-        monkeypatch.setattr("obdi.pull.starling.fetch_accounts", fake_accounts)
-        monkeypatch.setattr("obdi.pull.starling.fetch_categories", fake_categories)
+        monkeypatch.setattr("obdi.ingest.pull.starling.fetch_accounts", fake_accounts)
+        monkeypatch.setattr("obdi.ingest.pull.starling.fetch_categories", fake_categories)
         monkeypatch.setattr(
-            "obdi.pull.starling.fetch_balance", lambda *_a, **_k: b"{}"
+            "obdi.ingest.pull.starling.fetch_balance", lambda *_a, **_k: b"{}"
         )
-        monkeypatch.setattr("obdi.pull.starling.fetch_feed", fake_feed)
+        monkeypatch.setattr("obdi.ingest.pull.starling.fetch_feed", fake_feed)
 
         with Store(tmp_path / "s.sqlite3") as store:
             result = pull_starling(store, "token", account_map=AccountMap())
@@ -368,7 +368,7 @@ class TestReconnectDriftIsDetected:
     silently unless the two latest accounts payloads are compared."""
 
     def _land_accounts(self, store, payload_bytes):
-        from obdi.providers.truelayer import artefact_for
+        from obdi.ingest.providers.truelayer import artefact_for
 
         store.land_artefact(
             artefact_for(
@@ -454,10 +454,10 @@ class TestRecurringDeclarationsLandOnDeepPulls:
             regular_calls.append(kind)
             return b'{"results": []}'
 
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_transactions", fake_transactions)
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_balance", lambda *a, **k: ([], b"{}"))
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_regulars", fake_regulars)
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_accounts", fake_accounts)
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_transactions", fake_transactions)
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_balance", lambda *a, **k: ([], b"{}"))
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_regulars", fake_regulars)
 
     def test_DeepPull_LandsBothDeclarationKinds(self, tmp_path, monkeypatch):
         calls: list[str] = []
@@ -530,10 +530,10 @@ class TestCardsLandAndParse:
                 "from=2026-05-04&to=2026-08-02",
             )
 
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_cards", fake_cards)
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_accounts", fake_accounts)
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_cards", fake_cards)
         monkeypatch.setattr(
-            "obdi.pull.truelayer.fetch_card_transactions", fake_card_txns
+            "obdi.ingest.pull.truelayer.fetch_card_transactions", fake_card_txns
         )
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -595,9 +595,9 @@ class TestCardDeepHistory:
                 "from=2024-04-01&to=2024-06-01",
             )
 
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_accounts", fake_accounts)
         monkeypatch.setattr(
-            "obdi.pull.truelayer.fetch_card_transactions", fake_card_txns
+            "obdi.ingest.pull.truelayer.fetch_card_transactions", fake_card_txns
         )
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -627,7 +627,7 @@ class TestCardDeepHistory:
 
         import pytest
 
-        from obdi.providers.truelayer import TrueLayerError
+        from obdi.ingest.providers.truelayer import TrueLayerError
 
         def fake_accounts(_token, **_kwargs):
             return ([], b'{"results": []}')
@@ -638,9 +638,9 @@ class TestCardDeepHistory:
             error.code = "invalid_date_range"
             raise error
 
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_accounts", fake_accounts)
         monkeypatch.setattr(
-            "obdi.pull.truelayer.fetch_card_transactions", refusing_card_txns
+            "obdi.ingest.pull.truelayer.fetch_card_transactions", refusing_card_txns
         )
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -670,7 +670,7 @@ class TestCardsFromLayerZero:
     def test_CardList_ReadsFromTheLandedArtefact(self, tmp_path):
         import json as _json
 
-        from obdi.providers.truelayer import artefact_for
+        from obdi.ingest.providers.truelayer import artefact_for
 
         body = _json.dumps(
             {
@@ -722,7 +722,7 @@ class TestCardSignVerification:
     def test_MissingTransactionType_RefusesInsteadOfNegatingOnTrust(self):
         import pytest
 
-        from obdi.providers.truelayer import TrueLayerError, to_card_transaction
+        from obdi.ingest.providers.truelayer import TrueLayerError, to_card_transaction
 
         with pytest.raises(TrueLayerError, match="refusing to guess"):
             to_card_transaction(self._record(transaction_type=""), account_id="c")
@@ -730,13 +730,13 @@ class TestCardSignVerification:
     def test_UnrecognisedTransactionType_RefusesToo(self):
         import pytest
 
-        from obdi.providers.truelayer import TrueLayerError, to_card_transaction
+        from obdi.ingest.providers.truelayer import TrueLayerError, to_card_transaction
 
         with pytest.raises(TrueLayerError, match="FEE"):
             to_card_transaction(self._record(transaction_type="FEE"), account_id="c")
 
     def test_VerifiedDebit_StillNegatesToOutflow(self):
-        from obdi.providers.truelayer import to_card_transaction
+        from obdi.ingest.providers.truelayer import to_card_transaction
 
         transaction = to_card_transaction(self._record(), account_id="c")
 
@@ -754,7 +754,7 @@ class TestCardPayloadStatusGuard:
     def test_NonFinalCardWindow_RaisesInsteadOfLandingEmptiness(self):
         import pytest
 
-        from obdi.providers import truelayer
+        from obdi.ingest.providers import truelayer
 
         class Client:
             def get(self, url, headers=None, params=None):
@@ -768,7 +768,7 @@ class TestCardPayloadStatusGuard:
     def test_NonFinalCardList_RaisesToo(self):
         import pytest
 
-        from obdi.providers import truelayer
+        from obdi.ingest.providers import truelayer
 
         class Client:
             def get(self, url, headers=None, params=None):
@@ -780,7 +780,7 @@ class TestCardPayloadStatusGuard:
             truelayer.fetch_cards("tok", client=Client())
 
     def test_SucceededWindow_ReturnsTheBody(self):
-        from obdi.providers import truelayer
+        from obdi.ingest.providers import truelayer
 
         class Client:
             def get(self, url, headers=None, params=None):
@@ -827,7 +827,7 @@ class TestConnectionRenameAcrossTheStore:
     def test_Rename_MovesOurLabels_AndLeavesProviderEvidenceAlone(self, tmp_path):
         """The connection name is obdi's labelling, so it moves; the
         account-level refs are the provider's own identifiers and must not."""
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             self._seed(store, "starling")
@@ -851,7 +851,7 @@ class TestConnectionRenameAcrossTheStore:
     def test_RenameOfAnUnusedName_ReportsZeroesRatherThanClaimingSuccess(
         self, tmp_path
     ):
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             moved = store.rename_connection("never-used", "still-unused")
@@ -863,7 +863,7 @@ class TestStarlingConnectionIdMigration:
     def test_HistoricalStarlingRows_MoveToTheFirstPartyId(self, tmp_path):
         """The bare id was available to any TrueLayer connection name;
         the first-party path takes an id nothing else can be given."""
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         db = tmp_path / "s.sqlite3"
         with Store(db) as store:
@@ -894,7 +894,7 @@ class TestStarlingConnectionIdMigration:
         """The migration is scoped to starling SOURCES on purpose: a
         person's TrueLayer connection that happens to carry the old name
         is a different actor and must keep its rows."""
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         db = tmp_path / "s.sqlite3"
         with Store(db) as store:

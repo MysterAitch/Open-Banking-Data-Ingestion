@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
-from obdi.store import Store
+from obdi.ingest.store import Store
 
 _ENVIRONMENT = (
     "OBDI_CONNECTION_STORE",

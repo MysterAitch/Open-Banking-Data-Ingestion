@@ -52,8 +52,8 @@ from obdi.core.date_window import (
     length,
     named,
 )
+from obdi.ingest.store import Store
 from obdi.position import Position, read_position
-from obdi.store import Store
 from obdi.web_position import render_position
 from position_window_household import CARD, TODAY, window_household
 from test_position_chart_axis import eight_years, tick_labels, tick_xs

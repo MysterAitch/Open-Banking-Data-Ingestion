@@ -49,7 +49,7 @@ from dataclasses import dataclass
 from .core.masking import Structural
 from .core.models import TransactionStatus
 from .core.namespaces import CLEARING_SOURCES
-from .store import Store
+from .ingest.store import Store
 
 
 def cleared_by(sources: Iterable[str], status: str) -> tuple[str, ...]:

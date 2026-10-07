@@ -27,7 +27,7 @@ import json
 
 import pytest
 
-from obdi.store import Store
+from obdi.ingest.store import Store
 
 
 def _store_with_hand_work(path) -> dict[str, str]:
@@ -39,9 +39,9 @@ def _store_with_hand_work(path) -> dict[str, str]:
     assertion afterwards passes vacuously. The first version of this file did
     exactly that.
     """
-    from obdi.accounts import AccountRecord
     from obdi.cli import replay_single_artefact
-    from obdi.providers.truelayer import artefact_for
+    from obdi.ingest.accounts import AccountRecord
+    from obdi.ingest.providers.truelayer import artefact_for
 
     body = json.dumps(
         {
@@ -128,7 +128,7 @@ class TestExportingWhatCannotBeFetchedAgain:
         content identity survives it, so an export taken before still lines up
         with the store afterwards."""
         from obdi.export_declared import export_declared
-        from obdi.rebuild import rebuild_from_raw
+        from obdi.ingest.rebuild import rebuild_from_raw
 
         store_path = tmp_path / "store.sqlite3"
         _store_with_hand_work(store_path)

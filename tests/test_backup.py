@@ -19,10 +19,10 @@ from pathlib import Path
 
 import pytest
 
-from obdi.backup import BackupRefused, take_backup, verify_copy
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest import reconcile_batch
-from obdi.store import TABLE_NAMES, Store
+from obdi.ingest.backup import BackupRefused, take_backup, verify_copy
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.store import TABLE_NAMES, Store
 
 
 def _txn(index: int, *, prefix: str = "row") -> Transaction:
@@ -256,7 +256,7 @@ class TestCheckingABackupTakenLongAgo:
 
         _store_with_work(live, rows=40, prefix="months-of-later-work")
 
-        from obdi.backup import inspect_backup
+        from obdi.ingest.backup import inspect_backup
 
         found = inspect_backup(copy)
 
@@ -278,7 +278,7 @@ class TestCheckingABackupTakenLongAgo:
         copy = tmp_path / "archive.sqlite3"
         take_backup(live, copy)
 
-        from obdi.backup import inspect_backup
+        from obdi.ingest.backup import inspect_backup
 
         described = inspect_backup(copy).describe()
 
@@ -304,7 +304,7 @@ class TestCheckingABackupTakenLongAgo:
         older.commit()
         older.close()
 
-        from obdi.backup import inspect_backup
+        from obdi.ingest.backup import inspect_backup
 
         found = inspect_backup(copy)
 
@@ -318,7 +318,7 @@ class TestCheckingABackupTakenLongAgo:
         rubbish = tmp_path / "not-a-database.sqlite3"
         rubbish.write_bytes(b"this is not a database")
 
-        from obdi.backup import inspect_backup
+        from obdi.ingest.backup import inspect_backup
 
         with pytest.raises(BackupRefused) as refusal:
             inspect_backup(rubbish)
@@ -330,7 +330,7 @@ class TestCheckingABackupTakenLongAgo:
     ) -> None:
         missing = tmp_path / "never-taken.sqlite3"
 
-        from obdi.backup import inspect_backup
+        from obdi.ingest.backup import inspect_backup
 
         with pytest.raises(BackupRefused) as refusal:
             inspect_backup(missing)
@@ -514,7 +514,7 @@ class TestACopyTakenWhileTheStoreIsBeingWritten:
         # Evidence rather than a verdict: "the source advanced" is unactionable,
         # while the table and the amount let a reader judge whether the writer
         # was the expected one.
-        from obdi import backup as backup_module
+        from obdi.ingest import backup as backup_module
 
         live = tmp_path / "store.sqlite3"
         _store_with_work(live, rows=10)

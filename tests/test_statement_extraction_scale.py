@@ -28,8 +28,8 @@ from pathlib import Path
 import httpx
 
 from obdi.cli import build_web_config
-from obdi.parsers import pdf_statements
-from obdi.rebuild import rebuild_from_raw
+from obdi.ingest.parsers import pdf_statements
+from obdi.ingest.rebuild import rebuild_from_raw
 from served_store import served_store
 from test_bring_in_assign import credit_union, santander
 from test_statement_extraction_stored import Reads, keep, reads, root, store

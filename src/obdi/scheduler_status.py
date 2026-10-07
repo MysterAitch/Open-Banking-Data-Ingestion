@@ -49,7 +49,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .attended_fetch import short_reason, write_json_atomic
+from .ingest.attended_fetch import short_reason, write_json_atomic
 
 STATUS_FILE = "scheduler-status.json"
 HEARTBEAT_FILE = "scheduler-heartbeat.json"

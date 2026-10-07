@@ -73,10 +73,10 @@ from late_settlement_corpus import (
     household,
     late_settlement_payments,
 )
-from obdi.ingest import import_file
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from obdi.movement_completeness import check_rows
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
 from test_movement_chains import canonical
 from test_space_attribution import MAIN, MAP
 from test_space_blind_rows_and_internal_legs import order_id, sources, walk_differences

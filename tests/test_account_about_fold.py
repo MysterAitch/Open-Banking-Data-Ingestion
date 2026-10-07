@@ -31,7 +31,7 @@ from account_about_world import (
     words,
 )
 from obdi.account_about import date_bases
-from obdi.accounts import ARCHIVE_BASIS_PREFIX, AccountRecord, AccountRef
+from obdi.ingest.accounts import ARCHIVE_BASIS_PREFIX, AccountRecord, AccountRef
 from page_dom import Node, elements, parse
 
 

@@ -24,9 +24,9 @@ from obdi.actual_push import (
     queued_requests,
 )
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest import reconcile_batch
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.store import Store
 from obdi.replay import ActualAccountBinding
-from obdi.store import Store
 
 
 def _seed(store: Store, account_id: str, entity: str) -> None:
@@ -502,7 +502,7 @@ class TestDuplicateIdentityGuard:
         import pytest
 
         from obdi.actual_push import ActualAccountBinding, build_envelope
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             for entity, source_id in (("e-1", "sid-1"), ("e-2", "sid-2")):

@@ -20,7 +20,7 @@ import os
 
 import pytest
 
-from obdi.store import Store
+from obdi.ingest.store import Store
 
 
 def _configured(prefixes: tuple[str, ...]) -> dict[str, str]:

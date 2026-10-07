@@ -22,7 +22,7 @@ import pytest
 from actual_states import NOW as ACTUAL_NOW
 from actual_states import STATES
 from obdi.account_names import AccountShown, AccountsShown
-from obdi.connections import Connection, ConnectionStore
+from obdi.ingest.connections import Connection, ConnectionStore
 from obdi.web_sections import render_connections
 from page_dom import Node, elements, parse
 

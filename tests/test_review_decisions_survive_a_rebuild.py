@@ -25,13 +25,13 @@ import json
 
 import pytest
 
-from obdi.store import Store
+from obdi.ingest.store import Store
 
 
 def _land_and_derive(store_path, description: str = "COFFEE SHOP") -> str:
     """One transaction in the store, through the ordinary doors, and its id."""
     from obdi.cli import replay_single_artefact
-    from obdi.providers.truelayer import artefact_for
+    from obdi.ingest.providers.truelayer import artefact_for
 
     body = json.dumps(
         {
@@ -68,7 +68,7 @@ def _land_and_derive(store_path, description: str = "COFFEE SHOP") -> str:
 
 class TestWhatARebuildIsAllowedToDiscard:
     def test_ARowSomebodyHasAlreadyJudged_IsStillJudgedAfterARebuild(self, tmp_path):
-        from obdi.rebuild import rebuild_from_raw
+        from obdi.ingest.rebuild import rebuild_from_raw
 
         store_path = tmp_path / "store.sqlite3"
         entity = _land_and_derive(store_path)
@@ -102,7 +102,7 @@ class TestWhatARebuildIsAllowedToDiscard:
         evidence. Keeping it across a rebuild would preserve doubts that the
         rules have since learned to settle, and the queue would only ever grow.
         """
-        from obdi.rebuild import rebuild_from_raw
+        from obdi.ingest.rebuild import rebuild_from_raw
 
         store_path = tmp_path / "store.sqlite3"
         entity = _land_and_derive(store_path)

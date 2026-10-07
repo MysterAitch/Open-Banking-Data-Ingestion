@@ -37,6 +37,9 @@ import pytest
 from obdi import cli
 from obdi.alerts import DERIVED_FINDING_PREFIXES, Finding, process
 from obdi.cli import build_web_config, collect_alert_findings, main
+from obdi.ingest.rebuild import RebuildReport
+from obdi.ingest.rebuild_hold import RebuildEpoch, abandoned_for, epoch_for, hold_for
+from obdi.ingest.store import Store
 from obdi.movement_completeness import movement_completeness
 from obdi.overview import (
     DERIVED_ALERT_CONDITIONS,
@@ -47,10 +50,7 @@ from obdi.overview import (
     build_overview,
 )
 from obdi.protection import recheck
-from obdi.rebuild import RebuildReport
-from obdi.rebuild_hold import RebuildEpoch, abandoned_for, epoch_for, hold_for
 from obdi.standing_data import KeyedMemo
-from obdi.store import Store
 from round_up_corpus import main_feed, space_feed
 from section_harness import environment, serve_config
 from test_alert_wiring import NOW as ALERT_NOW
@@ -71,7 +71,7 @@ RESUMES = "they resume when the rebuild finishes"
 @contextmanager
 def rebuild_underway(db: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """The lease and the status file as a live rebuild holds them, until the block ends."""
-    import obdi.rebuild as rebuild_module
+    import obdi.ingest.rebuild as rebuild_module
 
     reached, release = threading.Event(), threading.Event()
 

@@ -26,10 +26,10 @@ from datetime import date
 
 import pytest
 
-from obdi.backup import BackupRefused, take_backup
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest import reconcile_batch
-from obdi.store import Store
+from obdi.ingest.backup import BackupRefused, take_backup
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.store import Store
 
 
 def _store_with_rows(path, count: int = 3) -> None:
@@ -57,7 +57,7 @@ def _store_with_rows(path, count: int = 3) -> None:
 
 class TestBringingAStoreBackFromACopy:
     def test_ABackup_RestoredToAFreshPath_HoldsWhatTheStoreHeld(self, tmp_path):
-        from obdi.restore import restore_backup
+        from obdi.ingest.restore import restore_backup
 
         live = tmp_path / "store.sqlite3"
         _store_with_rows(live, 3)
@@ -73,7 +73,7 @@ class TestBringingAStoreBackFromACopy:
             assert len(store.all_transactions()) == 3
 
     def test_ARestore_OntoAnExistingStore_RefusesRatherThanOverwriting(self, tmp_path):
-        from obdi.restore import restore_backup
+        from obdi.ingest.restore import restore_backup
 
         live = tmp_path / "store.sqlite3"
         _store_with_rows(live, 3)
@@ -95,7 +95,7 @@ class TestBringingAStoreBackFromACopy:
         # The bad-day rule. Restoring the wrong backup is a mistake somebody will
         # make, and it is recoverable only while the store they overwrote still
         # exists somewhere they can find without knowing to look.
-        from obdi.restore import restore_backup
+        from obdi.ingest.restore import restore_backup
 
         live = tmp_path / "store.sqlite3"
         _store_with_rows(live, 5)
@@ -121,7 +121,7 @@ class TestBringingAStoreBackFromACopy:
         A sidecar that travelled with its database is a fact nothing else can
         produce.
         """
-        from obdi.restore import restore_backup
+        from obdi.ingest.restore import restore_backup
 
         live = tmp_path / "store.sqlite3"
         _store_with_rows(live, 3)
@@ -143,7 +143,7 @@ class TestBringingAStoreBackFromACopy:
             assert travelled.read_bytes() == b"stale sidecar"
 
     def test_ABackupThatCannotBeTrusted_IsRefusedBeforeAnythingIsTouched(self, tmp_path):
-        from obdi.restore import restore_backup
+        from obdi.ingest.restore import restore_backup
 
         live = tmp_path / "store.sqlite3"
         _store_with_rows(live, 3)
@@ -163,7 +163,7 @@ class TestBringingAStoreBackFromACopy:
         this release can use: a backup taken before a schema change has to come
         forward through the migration ladder, and a restore that stopped at
         copying would leave that to be discovered by the first pull instead."""
-        from obdi.restore import restore_backup
+        from obdi.ingest.restore import restore_backup
 
         live = tmp_path / "store.sqlite3"
         _store_with_rows(live, 3)
@@ -179,7 +179,7 @@ class TestBringingAStoreBackFromACopy:
         assert version and str(version[0]) == str(result.schema_version)
 
     def test_TheResult_SaysWhatLandedRatherThanThatItWorked(self, tmp_path):
-        from obdi.restore import restore_backup
+        from obdi.ingest.restore import restore_backup
 
         live = tmp_path / "store.sqlite3"
         _store_with_rows(live, 3)

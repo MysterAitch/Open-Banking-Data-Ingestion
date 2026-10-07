@@ -30,11 +30,15 @@ import httpx
 import pytest
 
 from obdi.account_names import accounts_shown
-from obdi.accounts import AccountMap, AccountRecord, AccountRef
 from obdi.cli import main as cli_main
 from obdi.core.models import RawArtefact
 from obdi.export_declared import export_declared
-from obdi.identity import artefact_digest
+from obdi.ingest.accounts import AccountMap, AccountRecord, AccountRef
+from obdi.ingest.identity import artefact_digest
+from obdi.ingest.providers import starling
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.space_attribution import space_parents
+from obdi.ingest.store import Store
 from obdi.known_accounts import (
     declare_known_accounts,
     plan_parents,
@@ -42,10 +46,6 @@ from obdi.known_accounts import (
     set_space_parents,
 )
 from obdi.navigation import DESTINATIONS
-from obdi.providers import starling
-from obdi.rebuild import rebuild_from_raw
-from obdi.space_attribution import space_parents
-from obdi.store import Store
 from test_ledger import land, txn
 from test_space_attribution import BILLS, BINDINGS, HOLIDAY, LANDER, MAIN, PROVIDER_MAP
 
@@ -391,7 +391,7 @@ class TestTheExportKeepsAnAccountsDates:
         assert exported["parent-one"]["opened_on"] == ""
 
     def test_Dates_SurviveABackupAndItsRestoreAsTheyWereExported(self, tmp_path):
-        from obdi.backup import take_backup
+        from obdi.ingest.backup import take_backup
 
         with Store(tmp_path / "e.sqlite3") as opened:
             opened.declare_account(

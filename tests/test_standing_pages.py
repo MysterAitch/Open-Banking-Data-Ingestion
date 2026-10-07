@@ -18,11 +18,11 @@ import pytest
 from obdi.agreement import standing_of
 from obdi.balance_anchors import STATED, STATEMENT, Anchor, derive_opening, record_stated_anchor
 from obdi.cli import build_web_config
+from obdi.ingest.store import Store
 from obdi.movement_completeness import MovementCompleteness
 from obdi.overview import STALE_AGREEMENT_DAYS, build_overview, standing_items_from
 from obdi.protection import press
 from obdi.standing_data import AccountStanding, standings_for
-from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_overview import overview_html
 from test_balance_anchors import ACCOUNT, everyday

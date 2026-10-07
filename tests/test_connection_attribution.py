@@ -13,8 +13,8 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
-from obdi.providers import starling, truelayer
-from obdi.store import Store
+from obdi.ingest.providers import starling, truelayer
+from obdi.ingest.store import Store
 
 
 class TestNewLandingsCarryTheirConnection:
@@ -154,7 +154,7 @@ class TestTheDisplayHalf:
         from datetime import date
 
         from obdi.core.models import SourceTier, Transaction, TransactionStatus
-        from obdi.ingest import reconcile_batch
+        from obdi.ingest.pipeline import reconcile_batch
 
         store = Store(tmp_path / "s.sqlite3")
         for source, connection, digest in (
@@ -258,11 +258,11 @@ class TestSiblingHeavyDigests_DoNotExplodeTheWitnessMap:
         from datetime import UTC, datetime
 
         from obdi.core.models import RawArtefact, Transaction
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             payload = b"{}"
-            from obdi.identity import artefact_digest
+            from obdi.ingest.identity import artefact_digest
 
             digest = artefact_digest(payload)
             # One digest, many sibling rows - differing only by origin -

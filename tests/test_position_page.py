@@ -21,13 +21,13 @@ from types import MappingProxyType
 import httpx
 import pytest
 
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
 from obdi.cli import build_web_config
 from obdi.core.masking import MASKED_TOTAL
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
+from obdi.ingest.valuations import Asset, AssetKind, record_observation
 from obdi.position import AccountInput, AssetInput, Observation, build_position
-from obdi.store import Store
-from obdi.valuations import Asset, AssetKind, record_observation
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_position import render_position
 from page_dom import elements, parse
@@ -698,7 +698,7 @@ class TestTheChartsProvisionalEdgeCases:
 
 class TestAnUnwiredDeployment:
     def test_Page_SaysNothingIsWiredAndStillResolvesLikeEveryStripDestination(self, tmp_path):
-        from obdi.connections import ConnectionStore
+        from obdi.ingest.connections import ConnectionStore
         from obdi.web import WebConfig
 
         config = WebConfig(

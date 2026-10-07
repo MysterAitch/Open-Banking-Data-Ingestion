@@ -28,8 +28,8 @@ from typing import Any
 
 import pytest
 
+from obdi.ingest.store import Store
 from obdi.position import read_position
-from obdi.store import Store
 from obdi.web_position import render_position
 from obdi.web_sections import render_connections
 from position_window_household import TODAY, window_household

@@ -45,11 +45,11 @@ import pytest
 from coverage_page_world import repeated_lines
 from credit_union_documents import Move, document, pdf, section
 from fetch_gaps_world import MONTHS, _pounds, ordinal
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.cli import build_web_config
-from obdi.parsers.credit_union_pdf import section_key
-from obdi.store import Store
-from obdi.synthetic_pdf import build_pdf
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.parsers.credit_union_pdf import section_key
+from obdi.ingest.store import Store
+from obdi.ingest.synthetic_pdf import build_pdf
 from page_dom import Node, elements, parse
 from section_harness import serve_config
 from served_store import served_store

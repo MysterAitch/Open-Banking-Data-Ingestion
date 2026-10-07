@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from obdi.connections import ConnectionStore
+from obdi.ingest.connections import ConnectionStore
 from obdi.recurring import HABIT, PULLED, RecurringFindings, Series
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 

@@ -19,9 +19,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from obdi.connections import ConnectionStore
 from obdi.core.models import SourceTier, Transaction
 from obdi.coverage import agreements, transpositions
+from obdi.ingest.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 ACCOUNT = "starling-personal"

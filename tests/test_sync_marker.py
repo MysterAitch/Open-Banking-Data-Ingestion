@@ -29,11 +29,12 @@ from pathlib import Path
 import httpx
 import pytest
 
-from obdi import leases, web, web_actual
+from obdi import web, web_actual
 from obdi.actual_push import build_marker_envelope
 from obdi.cli import queue_actual_marker
-from obdi.connections import ConnectionStore
 from obdi.core.namespaces import QUEUE_KINDS
+from obdi.ingest import leases
+from obdi.ingest.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 A = "02 Oct 20:41Z obdi marker"

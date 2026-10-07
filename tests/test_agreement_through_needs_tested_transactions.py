@@ -35,10 +35,10 @@ from obdi.agreement import (
     standing_of,
 )
 from obdi.balance_anchors import STATED, STATEMENT, Anchor, derive_opening, effective_opening
-from obdi.family_anchors import OPENED, families_of
+from obdi.ingest.family_anchors import OPENED, families_of
+from obdi.ingest.store import Store
 from obdi.protection import ProtectionRefused, press
 from obdi.protection import tested_days as days_a_protection_may_reach
-from obdi.store import Store
 from test_balance_anchors import ACCOUNT, everyday
 from test_ledger import txn
 

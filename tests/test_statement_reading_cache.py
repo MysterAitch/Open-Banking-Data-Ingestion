@@ -21,22 +21,22 @@ from pathlib import Path
 
 import pytest
 
-import obdi.statement_shape as statement_shape
-import obdi.statement_terms as statement_terms
+import obdi.ingest.statement_shape as statement_shape
+import obdi.ingest.statement_terms as statement_terms
 from card_chain_corpus import CLOSINGS, build_card
-from obdi.accounts import AccountRecord, AccountRef
-from obdi.parsers import pdf_statements
-from obdi.parsers.statement_reading import (
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.parsers import pdf_statements
+from obdi.ingest.parsers.statement_reading import (
     RateWindow,
     StatementReading,
     StatementRow,
     reading_from_json,
     reading_to_json,
 )
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.same_money_fold import fold_same_money
+from obdi.ingest.store import SCHEMA_VERSION, Store
 from obdi.period_reconciliation import gather_evidence, period_reconciliation
-from obdi.rebuild import rebuild_from_raw
-from obdi.same_money_fold import fold_same_money
-from obdi.store import SCHEMA_VERSION, Store
 
 STATEMENTS = len(CLOSINGS)
 

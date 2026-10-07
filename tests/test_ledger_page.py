@@ -23,9 +23,9 @@ import httpx
 import pytest
 
 from obdi.cli import build_web_config
-from obdi.connections import ConnectionStore
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.store import Store
 from obdi.ledger import build_ledger
-from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from test_account_pages import assert_tap_targets_are_thumb_sized
 from test_ledger import (
@@ -483,7 +483,7 @@ class TestAccountsThatAreNotHealthyEmptyOnes:
         assert "not an empty account" in response.text
 
     def test_AccountWithNoRows_SaysItHoldsNothingAtAll(self, tmp_path):
-        from obdi.accounts import AccountRecord, AccountRef
+        from obdi.ingest.accounts import AccountRecord, AccountRef
 
         path = tmp_path / "empty.sqlite3"
         with Store(path) as store:

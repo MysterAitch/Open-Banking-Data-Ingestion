@@ -17,9 +17,9 @@ import httpx
 import pytest
 
 from obdi.account_names import accounts_shown
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.cli import build_web_config
-from obdi.store import Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_accounts import ACCOUNT_KINDS, picker_options
 from test_balance_anchors import everyday

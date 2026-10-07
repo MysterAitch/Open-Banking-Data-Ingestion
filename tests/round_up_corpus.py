@@ -40,9 +40,9 @@ import pathlib
 from typing import Any
 
 from obdi.core.models import Transaction, TransactionStatus
-from obdi.ingest import import_file
-from obdi.providers import starling
-from obdi.store import Store
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.providers import starling
+from obdi.ingest.store import Store
 from test_export_cuts import Row, export_lines
 from test_family_anchors import FEED_ORIGIN, land_evidence
 from test_space_attribution import MAIN, MAP

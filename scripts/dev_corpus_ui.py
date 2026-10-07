@@ -54,7 +54,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
-from obdi.synthetic import build_world, write_corpus  # noqa: E402
+from obdi.ingest.synthetic import build_world, write_corpus  # noqa: E402
 
 #: Fixed on purpose - see the module docstring. Changing it means re-granting
 #: browser permissions, so it is plumbing rather than a per-run choice.
@@ -219,8 +219,8 @@ def seed_position(store_path: Path) -> None:
     from datetime import date
 
     from obdi.balance_anchors import record_stated_anchor
-    from obdi.store import Store
-    from obdi.valuations import Asset, AssetKind, record_observation
+    from obdi.ingest.store import Store
+    from obdi.ingest.valuations import Asset, AssetKind, record_observation
 
     with Store(store_path) as store:
         record_stated_anchor(store, "synthetic-current", "2026-03-31", "2310.45")

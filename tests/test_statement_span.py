@@ -37,6 +37,8 @@ from datetime import date, timedelta
 
 import pytest
 
+from obdi.ingest.statement_terms import StatementPeriod, keep_statement_readings
+from obdi.ingest.store import Store
 from obdi.statement_span import (
     HOLE_CADENCES,
     Bound,
@@ -53,8 +55,6 @@ from obdi.statement_span import (
     months_between,
     statement_spans,
 )
-from obdi.statement_terms import StatementPeriod, keep_statement_readings
-from obdi.store import Store
 from statement_span_world import Spend, feed, statement
 
 D = date

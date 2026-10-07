@@ -51,8 +51,8 @@ class TestProbedAnchorFromAskedWindows:
         import json as _json
 
         from obdi.cli import _earliest_asked
-        from obdi.providers.truelayer import artefact_for
-        from obdi.store import Store
+        from obdi.ingest.providers.truelayer import artefact_for
+        from obdi.ingest.store import Store
 
         map_path = tmp_path / "accounts.json"
         map_path.write_text(
@@ -94,7 +94,7 @@ class TestProbedAnchorFromAskedWindows:
 
     def test_EarliestAsked_WhenNothingLanded_IsNone(self, tmp_path):
         from obdi.cli import _earliest_asked
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             assert _earliest_asked(store, "halifax-spare") is None
@@ -106,8 +106,8 @@ class TestFreshnessFromAskedWindows:
 
     def test_LatestAsked_ReadsTheNewestWindowEnd_AndWhenItLanded(self, tmp_path):
         from obdi.cli import _latest_asked
-        from obdi.providers.truelayer import artefact_for
-        from obdi.store import Store
+        from obdi.ingest.providers.truelayer import artefact_for
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             store.land_artefact(
@@ -134,7 +134,7 @@ class TestFreshnessFromAskedWindows:
 
     def test_LatestAsked_WhenNothingLanded_IsNone(self, tmp_path):
         from obdi.cli import _latest_asked
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             covered, landed = _latest_asked(store, "halifax-current")

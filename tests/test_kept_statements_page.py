@@ -23,9 +23,9 @@ import pytest
 
 from obdi.cli import build_web_config
 from obdi.core.models import RawArtefact
-from obdi.identity import artefact_digest
-from obdi.statement_extraction import keep_extraction
-from obdi.store import Store
+from obdi.ingest.identity import artefact_digest
+from obdi.ingest.statement_extraction import keep_extraction
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_pdf_import import BROKEN, SANTANDER_AS_WRITTEN, UNKNOWN_BANK
 from test_statement_shape import build_pdf
@@ -280,7 +280,7 @@ class TestTheKeptStatementsPage:
     def test_KeptStatements_ViewedTwice_AsksTheParserOncePerStatement(
         self, serve, one_of_each, monkeypatch
     ):
-        from obdi.parsers import uk_banks
+        from obdi.ingest.parsers import uk_banks
 
         calls: list[int] = []
         real = uk_banks.detect
@@ -561,7 +561,7 @@ class TestOnlyKeptStatementsAreServedAndAssigned:
     def test_StatementShape_ForAPdfImportedToAnAccount_IsServedButOffersNoAssignForm(
         self, serve, db, tmp_path
     ):
-        from obdi.ingest import import_file
+        from obdi.ingest.pipeline import import_file
 
         path = tmp_path / "imported.pdf"
         path.write_bytes(SANTANDER_AS_WRITTEN)

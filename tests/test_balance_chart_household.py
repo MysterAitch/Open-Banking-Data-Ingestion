@@ -20,14 +20,14 @@ import obdi.balance_anchors as balance_anchors
 from obdi.balance_anchors import STATED, Anchor, derive_opening
 from obdi.balance_chart import build_balance_chart
 from obdi.core.models import Transaction, TransactionStatus
-from obdi.family_anchors import families_of
 from obdi.fault_structure import (
     EXPLAINED,
     TRANSIENT,
     UNHELD,
     account_report,
 )
-from obdi.sighting_placement import SightingPlacement
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.sighting_placement import SightingPlacement
 from test_balance_chart_pages import Parsed
 from test_export_dating import (
     MAIN,
@@ -186,7 +186,7 @@ class TestTheLedgerPageSummarisesTheStructure:
 class TestTheAccountsOwnBalances:
     def rows(self) -> list[Transaction]:
         from obdi.core.models import SourceTier
-        from obdi.identity import content_key
+        from obdi.ingest.identity import content_key
 
         def row(day: int, minor: int) -> Transaction:
             when = date(2026, 3, day)

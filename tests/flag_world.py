@@ -24,11 +24,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from obdi.accounts import AccountRecord, AccountRef
-from obdi.ingest import import_file
-from obdi.providers import starling, truelayer
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.providers import starling, truelayer
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 
 EVERYDAY = "everyday"
 BAKERY = "bakery"
@@ -101,8 +101,8 @@ def add_unsettled_pair(db: Path) -> None:
     from datetime import date
 
     from obdi.core.models import SourceTier, Transaction
-    from obdi.identity import content_key
-    from obdi.ingest import reconcile_batch
+    from obdi.ingest.identity import content_key
+    from obdi.ingest.pipeline import reconcile_batch
 
     with Store(db) as store:
         for uid in ("late-1", "late-2"):

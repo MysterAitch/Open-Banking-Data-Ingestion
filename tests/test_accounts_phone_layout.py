@@ -15,9 +15,9 @@ from datetime import date
 
 import pytest
 
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.cli import build_web_config
-from obdi.store import Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_ledger import land, txn
 from test_phone_layout import (

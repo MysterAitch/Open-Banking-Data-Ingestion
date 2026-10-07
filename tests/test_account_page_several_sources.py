@@ -28,7 +28,7 @@ import pytest
 
 from obdi.balance_anchors import STATEMENT, disregard_balance, remove_stated_anchor
 from obdi.cli import build_web_config
-from obdi.store import Store
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_disregarded_balances import ACCOUNT, DAY, DIFFERENT, SOURCE, world
 

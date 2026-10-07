@@ -39,8 +39,8 @@ import pytest
 from obdi import web
 from obdi.actual_push import build_audit_envelope, build_prune_envelope
 from obdi.cli import queue_actual_prune
-from obdi.connections import ConnectionStore
-from obdi.store import Store
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from obdi.web_prune import (
     STATIC_ROWS,

@@ -25,7 +25,7 @@ import pytest
 
 from obdi.cli import build_web_config
 from obdi.core import outbound
-from obdi.store import Store
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 
 REPO = Path(__file__).resolve().parent.parent

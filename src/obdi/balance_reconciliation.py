@@ -37,8 +37,8 @@ from datetime import date, timedelta
 from .core.errors import DataError
 from .core.money import format_amount, parse_amount
 from .core.plural import plural
-from .providers import truelayer
-from .store import Store
+from .ingest.providers import truelayer
+from .ingest.store import Store
 
 #: How many dates of each kind a rendering names before it only counts.
 EXAMPLES_SHOWN = 3

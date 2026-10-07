@@ -40,8 +40,8 @@ from card_two_ids_corpus import (
 )
 from obdi.agreement import AGREES, HELD_MOVEMENT, standing_of
 from obdi.balance_anchors import effective_opening
+from obdi.ingest.store import Store
 from obdi.movement_completeness import check_rows, movement_completeness
-from obdi.store import Store
 
 ORDERS = [("statements", "aggregator"), ("aggregator", "statements")]
 SHAPES = [(False, False), (False, True), (True, False), (True, True)]

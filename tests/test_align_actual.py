@@ -38,7 +38,7 @@ from obdi.actual_push import (
 )
 from obdi.cli import queue_actual_align
 from obdi.core.namespaces import QUEUE_KINDS
-from obdi.store import Store
+from obdi.ingest.store import Store
 from obdi.web_prune import align_plan, counts_from_audit
 from test_orphan_classes import classed, total_counts
 from test_prune_clear import account, audit, ordinary, page_of, serve  # noqa: F401

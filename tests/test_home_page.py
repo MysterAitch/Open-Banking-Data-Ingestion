@@ -16,6 +16,7 @@ import pytest
 import home_world as world
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening, record_stated_anchor
+from obdi.ingest.store import Store
 from obdi.movement_completeness import MovementCompleteness
 from obdi.overview import (
     _KINDS,
@@ -28,7 +29,6 @@ from obdi.overview import (
     build_overview,
 )
 from obdi.protection import press
-from obdi.store import Store
 from obdi.web_overview import (
     arrange,
     band_phrase,

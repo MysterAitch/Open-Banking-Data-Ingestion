@@ -27,9 +27,9 @@ import pytest
 
 from obdi.alerts import Finding, process
 from obdi.cli import collect_alert_findings, main
-from obdi.connections import Connection, ConnectionStore
-from obdi.identity_health import identity_health
-from obdi.store import Store
+from obdi.ingest.connections import Connection, ConnectionStore
+from obdi.ingest.identity_health import identity_health
+from obdi.ingest.store import Store
 
 NOW = datetime(2026, 2, 1, 12, 0, tzinfo=UTC)
 
@@ -218,7 +218,7 @@ class TestASilentSingleSourceFeedReachesTheAlert:
         Reporting it would be a finding nothing could ever clear."""
         from datetime import date
 
-        from obdi.accounts import AccountRecord, AccountRef
+        from obdi.ingest.accounts import AccountRecord, AccountRef
 
         _schedule_truelayer(tmp_path, monkeypatch)
         with Store(_db(tmp_path)) as store:
@@ -243,7 +243,7 @@ class TestASilentSingleSourceFeedReachesTheAlert:
         closing date that has not arrived."""
         from datetime import date
 
-        from obdi.accounts import AccountRecord, AccountRef
+        from obdi.ingest.accounts import AccountRecord, AccountRef
 
         _schedule_truelayer(tmp_path, monkeypatch)
         with Store(_db(tmp_path)) as store:

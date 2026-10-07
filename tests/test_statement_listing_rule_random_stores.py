@@ -35,9 +35,9 @@ import pytest
 
 from listing_rule_reading import app_reading, movement_of, shown_balances_are_stated_or_named
 from obdi.balance_anchors import AnchorRefused, record_stated_anchor
-from obdi.family_anchors import Families
+from obdi.ingest.family_anchors import Families
+from obdi.ingest.store import Store
 from obdi.standing_data import ADDS_UP
-from obdi.store import Store
 from statement_span_world import Spend, feed, statement
 
 D = date

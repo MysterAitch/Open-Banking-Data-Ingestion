@@ -23,11 +23,11 @@ import pytest
 
 from obdi.balance_anchors import FAMILY, OPENED, effective_opening
 from obdi.core.models import Transaction, TransactionStatus
-from obdi.family_anchors import families_of
 from obdi.fault_explanation import Lookalike, _nearest, explain_walk
-from obdi.ingest import import_file, pair_transfers_across_store
-from obdi.sighting_placement import SightingPlacement
-from obdi.store import Store
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.pipeline import import_file, pair_transfers_across_store
+from obdi.ingest.sighting_placement import SightingPlacement
+from obdi.ingest.store import Store
 from test_export_dating import render
 from test_family_anchors import CSV_HEADER, land_evidence, leg
 from test_space_attribution import BILLS, FEED, MAIN, MAP, Household, pay
@@ -790,7 +790,7 @@ class TestTheExplanationsOnThePage:
 def put_walk(readings, rows, placement=None):
     """A walk written by hand, for the tests that need a source other than the export."""
     from obdi.balance_anchors import FamilyReading, FamilyWalk
-    from obdi.family_anchors import FamilyAnchor, OpeningEvidence
+    from obdi.ingest.family_anchors import FamilyAnchor, OpeningEvidence
 
     nil = FamilyAnchor(date(2026, 9, 1), 0, "opened")
     walk = FamilyWalk(

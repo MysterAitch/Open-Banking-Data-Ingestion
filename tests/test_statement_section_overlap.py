@@ -32,9 +32,9 @@ import pytest
 
 from credit_union_documents import Move, document, pdf, section
 from obdi.balance_anchors import effective_opening
-from obdi.parsers.credit_union_pdf import section_key
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
+from obdi.ingest.parsers.credit_union_pdf import section_key
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from section_harness import (
     config,
     environment,

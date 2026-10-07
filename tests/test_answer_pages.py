@@ -18,10 +18,10 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import record_stated_anchor
 from obdi.cli import build_web_config, replay_single_artefact
-from obdi.store import Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_balance_anchors import ACCOUNT, everyday
 
@@ -232,7 +232,7 @@ class TestStatedBalancesEndOnTheLedger:
 
 
 def _truelayer_artefact(store: Store, account_ref: str) -> int:
-    from obdi.providers.truelayer import artefact_for
+    from obdi.ingest.providers.truelayer import artefact_for
 
     body = json.dumps(
         {

@@ -17,8 +17,8 @@ from typing import ClassVar
 
 from obdi.categorise import apply_rules, load_rules, uncategorised_summary
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest import reconcile_batch
-from obdi.store import Store
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.store import Store
 
 
 def txn(day: int, amount: int, desc: str, *, source_id: str) -> Transaction:
@@ -72,7 +72,7 @@ class TestTheAnnotationStore:
             assert store.annotations("category")[entity] == ("Subscriptions", "rule:v2")
 
     def test_Annotations_SurviveARebuild_AndReattach(self, tmp_path):
-        from obdi.rebuild import rebuild_from_raw
+        from obdi.ingest.rebuild import rebuild_from_raw
 
         with Store(tmp_path / "s.sqlite3") as store:
             # Land through a real artefact so the rebuild has raw to replay.
@@ -86,7 +86,7 @@ class TestTheAnnotationStore:
             from datetime import datetime
 
             from obdi.core.models import RawArtefact
-            from obdi.identity import artefact_digest
+            from obdi.ingest.identity import artefact_digest
 
             store.land_artefact(
                 RawArtefact(

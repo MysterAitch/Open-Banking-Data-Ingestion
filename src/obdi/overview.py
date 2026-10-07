@@ -31,23 +31,23 @@ from urllib.parse import quote
 
 from . import scheduler_status
 from .account_names import AccountsShown, accounts_shown
-from .accounts import is_balance_only
 from .agreement import held_sentence
 from .alerts import Finding
-from .asked_coverage import coverage_by_account, describe_spans
 from .core.models import TransactionStatus
 from .core.namespaces import CASH_LEG_SOURCE
 from .core.plural import plural as _plural
 from .coverage import SILENT_FEED_DAYS
 from .fetch_marks import awaited_set_aside_for
-from .rebuild_hold import RebuildInProgress
+from .ingest.accounts import is_balance_only
+from .ingest.asked_coverage import coverage_by_account, describe_spans
+from .ingest.rebuild_hold import RebuildInProgress
+from .ingest.store import Store
 from .scheduler_status import STEPS
-from .store import Store
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
-    from .identity_health import IdentityHealth
+    from .ingest.identity_health import IdentityHealth
+    from .ingest.rebuild_hold import RebuildHold
     from .movement_completeness import MovementCompleteness
-    from .rebuild_hold import RebuildHold
     from .standing_data import AccountStanding
 
 #: Where a person goes to act on each kind of attention item. Declared once,
@@ -530,7 +530,7 @@ def _uncovered_span_items(
 
 
 def _identity_items(store: Store) -> list[AttentionItem]:
-    from .identity_health import identity_health
+    from .ingest.identity_health import identity_health
 
     return identity_items_from(identity_health(store))
 
@@ -861,7 +861,7 @@ def _review_items(store: Store) -> list[AttentionItem]:
 
 
 def _space_items(store: Store) -> list[AttentionItem]:
-    from .spaces import account_for, recover
+    from .ingest.spaces import account_for, recover
 
     already = {str(record.ref) for record in store.declared_accounts()}
     waiting = [

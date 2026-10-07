@@ -33,9 +33,9 @@ from coverage_timeline_world import (
     land_long,
 )
 from obdi.account_page import read_account, strip_html
+from obdi.ingest.statement_terms import keep_statement_readings
+from obdi.ingest.store import Store
 from obdi.ledger import build_ledger
-from obdi.statement_terms import keep_statement_readings
-from obdi.store import Store
 from served_store import environment_for, served_store
 
 WINDOW_START = TODAY - timedelta(days=364)

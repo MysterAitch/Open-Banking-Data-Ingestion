@@ -44,10 +44,10 @@ import pytest
 
 from consecutive_days_corpus import AMOUNT, consecutive_payments
 from late_settlement_corpus import Payment, household
+from obdi.ingest.providers import starling
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from obdi.movement_completeness import check_rows
-from obdi.providers import starling
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
 from round_up_corpus import main_feed
 from test_absorbed_rows import ALL_THREE, arrive, second_export
 from test_family_anchors import FEED_ORIGIN

@@ -21,8 +21,8 @@ from obdi.categorise import (
     uncategorised_summary,
 )
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest import pair_transfers_across_store, reconcile_batch
-from obdi.store import Store
+from obdi.ingest.pipeline import pair_transfers_across_store, reconcile_batch
+from obdi.ingest.store import Store
 
 CURRENT = "starling-personal"
 SAVINGS = "starling-holiday-fund"

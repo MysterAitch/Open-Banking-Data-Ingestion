@@ -41,7 +41,8 @@ import pytest
 
 from card_chain_corpus import CARD, CLOSINGS, build_card
 from obdi.core.models import RawArtefact
-from obdi.ingest import artefact_digest, import_file
+from obdi.ingest.pipeline import artefact_digest, import_file
+from obdi.ingest.store import Store
 from obdi.movement_completeness import (
     COLLAPSED,
     DATED_LATER,
@@ -50,7 +51,6 @@ from obdi.movement_completeness import (
     check_rows,
     movement_completeness,
 )
-from obdi.store import Store
 from round_up_corpus import card_payment, main_feed, space_feed
 from test_export_cuts import Row, export_lines
 from test_space_attribution import MAIN, MAP
@@ -331,7 +331,7 @@ class TestRowsAStatementLists:
     def test_RowsListed_WhenEveryStatementRowIsHeld_NoFaultAndNoDocumentIsReadAgain(
         self, tmp_path, monkeypatch
     ):
-        import obdi.statement_shape as statement_shape
+        import obdi.ingest.statement_shape as statement_shape
 
         with Store(tmp_path / "card.sqlite3") as store:
             build_card(store, tmp_path)

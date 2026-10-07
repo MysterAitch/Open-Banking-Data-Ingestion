@@ -25,12 +25,12 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening, record_stated_anchor
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
 from obdi.movement_completeness import MovementCompleteness
 from obdi.protection import press
-from obdi.store import Store
 from test_balance_anchors import everyday
 
 MET = (("2026-03-05", "1000.00"), ("2026-03-10", "980.00"), ("2026-03-20", "952.00"))

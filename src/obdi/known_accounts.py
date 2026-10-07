@@ -41,17 +41,17 @@ from dataclasses import dataclass, replace
 from datetime import date
 
 from .account_names import AccountsShown
-from .accounts import AccountMap, AccountRecord, AccountRef
 from .core.namespaces import UK_CARD_STATEMENT_SOURCE, validate_canonical_name
-from .overview import held_by_account
-from .rebuild import _resolve_ref
-from .space_attribution import (
+from .ingest.accounts import AccountMap, AccountRecord, AccountRef
+from .ingest.rebuild import _resolve_ref
+from .ingest.space_attribution import (
     provider_mains_by_space_uid,
     provider_space_claims,
     provider_space_parents,
 )
-from .spaces import ref_carries_uid
-from .store import Store
+from .ingest.spaces import ref_carries_uid
+from .ingest.store import Store
+from .overview import held_by_account
 
 SPACE_KIND = "starling-space"
 CARD_KIND = "credit-card"

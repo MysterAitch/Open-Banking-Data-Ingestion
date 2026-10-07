@@ -18,7 +18,6 @@ from datetime import date
 
 import pytest
 
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.core.masking import (
     MASKED_TOTAL,
     Disclosed,
@@ -27,8 +26,10 @@ from obdi.core.masking import (
     structural_field_names,
 )
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
-from obdi.identity import content_key
-from obdi.ingest import pair_transfers_across_store, reconcile_batch
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.identity import content_key
+from obdi.ingest.pipeline import pair_transfers_across_store, reconcile_batch
+from obdi.ingest.store import Store
 from obdi.ledger import (
     ANCHOR_QUERIES,
     QUERIES_PER_PAGE,
@@ -48,7 +49,6 @@ from obdi.replay import (
     build_payload,
     withheld_reason,
 )
-from obdi.store import Store
 
 #: Chosen so that no figure derived from them can appear by coincidence.
 PRIVATE_MINOR = 73913

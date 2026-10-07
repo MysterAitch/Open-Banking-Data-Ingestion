@@ -23,8 +23,8 @@ from datetime import date
 import pytest
 
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest import reconcile_batch
-from obdi.store import Store
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.store import Store
 
 
 def _one_transaction(store: Store) -> str:
@@ -100,7 +100,7 @@ class TestWhereLostHandWorkIsReported:
         )
 
     def test_Doctor_WhenAnAnnotationPointsAtNothing_ReportsItAsAFault(self, tmp_path):
-        from obdi.doctor import collision_checks
+        from obdi.ingest.doctor import collision_checks
 
         db = tmp_path / "store.sqlite3"
         with Store(db) as store:
@@ -119,7 +119,7 @@ class TestWhereLostHandWorkIsReported:
         # Reported at zero as well. A check that only speaks up when it finds
         # something leaves the reader unable to tell "nothing is lost" from
         # "nothing looked" - which is the whole distinction this count exists for.
-        from obdi.doctor import collision_checks
+        from obdi.ingest.doctor import collision_checks
 
         db = tmp_path / "store.sqlite3"
         with Store(db) as store:

@@ -18,12 +18,12 @@ import pytest
 
 from obdi.core.models import Transaction
 from obdi.core.money import AmountParseError, parse_amount
-from obdi.parsers.base import ParseError
-from obdi.parsers.uk_banks import StarlingCsvParser
-from obdi.providers.starling import StarlingError
-from obdi.providers.starling import to_transaction as starling_txn
-from obdi.providers.truelayer import TrueLayerError
-from obdi.providers.truelayer import to_transaction as truelayer_txn
+from obdi.ingest.parsers.base import ParseError
+from obdi.ingest.parsers.uk_banks import StarlingCsvParser
+from obdi.ingest.providers.starling import StarlingError
+from obdi.ingest.providers.starling import to_transaction as starling_txn
+from obdi.ingest.providers.truelayer import TrueLayerError
+from obdi.ingest.providers.truelayer import to_transaction as truelayer_txn
 from obdi.replay import ReplayError, to_actual_transaction
 
 

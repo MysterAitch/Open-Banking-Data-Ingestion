@@ -14,9 +14,9 @@ from __future__ import annotations
 import json
 import time
 
-from obdi.providers import starling, truelayer
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
+from obdi.ingest.providers import starling, truelayer
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 
 
 def _feed(store: Store, uid: str, items: list[dict], cycle: int = 0) -> None:
@@ -99,7 +99,7 @@ class TestTheCachedRebuildIsIndistinguishableFromReloading:
                 self._build_corpus(store)
                 if label == "reloading":
                     # Force the pre-cache behaviour: every batch reloads.
-                    import obdi.rebuild as rebuild_mod
+                    import obdi.ingest.rebuild as rebuild_mod
 
                     original = rebuild_mod.reconcile_batch
 

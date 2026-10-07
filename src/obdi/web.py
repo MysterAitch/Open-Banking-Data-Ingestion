@@ -44,7 +44,6 @@ from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from . import entity_actions, values_sitting
 from .account_names import AccountShown, AccountsShown, accounts_shown, code_html
-from .accounts import AccountRecord, ArchiveOutcome
 from .actual_audit import (
     NAMED_DIFFERENCES as _AUDIT_NAMED_DIFFERENCES,
 )
@@ -60,11 +59,8 @@ from .actual_audit import (
 from .actual_push import NothingQueued, valid_progress
 from .actual_verdict import APPLIER_STALE_SECONDS
 from .alerts import consent_rung
-from .asked_coverage import Hole, describe_spans
-from .attended_fetch import PRESS_KIND, PressRefused
 from .balance_chart import BalanceChart
 from .callback import render_page
-from .connections import ConnectionStore, build_connection
 from .core.classification import redact_summary
 from .core.errors import DataError
 from .core.logs import say
@@ -88,32 +84,36 @@ from .core.secrets import SecretError, read_secret
 from .core.timings import Timings
 from .coverage import DoubtReport, SourceCoverage
 from .coverage_timeline import AccountTimeline
-from .doctor import shape_problems
 from .entities import EntitiesView
 from .fetch_gaps import FetchReport
 from .fetch_marks import MarkSet, MarkWorld
-from .ingest import MatcherPreview
+from .ingest.accounts import AccountRecord, ArchiveOutcome
+from .ingest.asked_coverage import Hole, describe_spans
+from .ingest.attended_fetch import PRESS_KIND, PressRefused
+from .ingest.connections import ConnectionStore, build_connection
+from .ingest.doctor import shape_problems
+from .ingest.pipeline import MatcherPreview
+from .ingest.providers.truelayer import build_auth_link, exchange_code
+from .ingest.space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesPress
+from .ingest.space_windows import RANGE_REFUSAL_MARK
+from .ingest.spaces import RECOVERY_BOUND, ArchiveNote
+from .ingest.statement_extraction import not_yet_extracted_words
+from .ingest.statement_shape import ShapeReport
+from .ingest.store import Store
+from .ingest.upload_script import UPLOAD_SCRIPT
 from .known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, ParentPlan
 from .ledger import LedgerData
 from .navigation import answering, current_route, page_name
 from .overview import Overview
 from .period_reconciliation import PeriodReport
 from .position import Position
-from .providers.truelayer import build_auth_link, exchange_code
 from .reader_findings import Findings, findings_html, findings_of
 from .recurring import RecurringFindings
 from .review_flags import FlagQueue, Outcome
-from .space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesPress
-from .space_windows import RANGE_REFUSAL_MARK
-from .spaces import RECOVERY_BOUND, ArchiveNote
 from .standing_data import AccountStanding
-from .statement_extraction import not_yet_extracted_words
 from .statement_listing_measure import StatementListingReport
 from .statement_listing_page import statement_listing_html
 from .statement_sections import section_token
-from .statement_shape import ShapeReport
-from .store import Store
-from .upload_script import UPLOAD_SCRIPT
 from .web_accounts import (
     DOUBT_ACK_FIELD,
     NEW_ACCOUNT_FIELD,
@@ -5048,7 +5048,7 @@ class ConnectionHandler(
         columns: bool = True,
         timings: Timings | None = None,
     ) -> ShapeReport:
-        from .statement_shape import shape_report
+        from .ingest.statement_shape import shape_report
 
         with tempfile.TemporaryDirectory() as scratch:
             # Written to a temporary file because the readers take a path,

@@ -22,9 +22,9 @@ from obdi.fetch_gaps import (
     closings_after,
     gaps_for_account,
 )
+from obdi.ingest.statement_terms import keep_statement_readings, statement_periods
+from obdi.ingest.store import Store
 from obdi.overview import standing_items_from, statement_awaited
-from obdi.statement_terms import keep_statement_readings, statement_periods
-from obdi.store import Store
 
 D = date
 

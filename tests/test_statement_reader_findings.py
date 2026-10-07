@@ -27,9 +27,9 @@ import httpx
 import pytest
 
 from credit_union_documents import Move, document, pdf, section
-from obdi.identity import artefact_digest
+from obdi.ingest.identity import artefact_digest
+from obdi.ingest.store import Store
 from obdi.statement_sections import read_sections
-from obdi.store import Store
 from page_dom import Node, elements, parse
 from section_harness import UNASSIGNED, config, environment, keep, serve_config
 

@@ -38,7 +38,7 @@ from fetch_marks_world import (
 from obdi.account_names import accounts_shown
 from obdi.bring_in import files_wanted, wanted_heading
 from obdi.cli import build_web_config
-from obdi.store import Store
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_bring_in import BringInData, Evidence, render_bring_in
 from obdi.web_marks import evidence_text, verdict_clauses

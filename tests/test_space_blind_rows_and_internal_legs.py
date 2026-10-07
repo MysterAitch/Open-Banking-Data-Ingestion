@@ -51,12 +51,12 @@ import pytest
 
 from obdi.balance_anchors import effective_opening
 from obdi.core.models import Transaction, TransactionStatus
-from obdi.family_anchors import families_of
-from obdi.ingest import import_file
-from obdi.matching import CandidateIndex, resolve
-from obdi.providers import truelayer
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.matching import CandidateIndex, resolve
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.providers import truelayer
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from round_up_corpus import (
     SPACE_FEED_ORIGIN,
     card_payment,

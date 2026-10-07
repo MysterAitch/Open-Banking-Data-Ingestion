@@ -28,10 +28,10 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.connections import ConnectionStore
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.store import Store
 from obdi.movement_completeness import ChainFault, MovementCompleteness, movement_completeness
 from obdi.overview import NOW, build_overview
-from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from round_up_corpus import main_feed, space_feed
 from test_export_cuts import Row

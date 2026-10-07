@@ -29,9 +29,9 @@ from datetime import date
 
 import pytest
 
-from obdi.parsers.base import ParseError
-from obdi.parsers.capital_one_pdf import read_statement
-from obdi.parsers.pdf_statements import (
+from obdi.ingest.parsers.base import ParseError
+from obdi.ingest.parsers.capital_one_pdf import read_statement
+from obdi.ingest.parsers.pdf_statements import (
     PDF_PARSERS,
     CapitalOneCreditCardPdfParser,
     pdf_parser_for,

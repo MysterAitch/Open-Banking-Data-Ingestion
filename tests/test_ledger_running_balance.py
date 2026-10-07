@@ -27,9 +27,9 @@ import pytest
 from obdi.balance_anchors import BANK, Anchor, record_stated_anchor
 from obdi.core.masking import MASKED_TOTAL
 from obdi.core.models import TransactionStatus
+from obdi.ingest.store import Store
 from obdi.ledger import build_ledger
 from obdi.row_balances import balances_after
-from obdi.store import Store
 from obdi.web_ledger import render_ledger
 from page_dom import elements, parse
 from test_ledger import land, txn

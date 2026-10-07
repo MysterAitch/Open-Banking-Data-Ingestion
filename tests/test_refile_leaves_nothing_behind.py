@@ -29,11 +29,11 @@ import json
 
 import pytest
 
-from obdi.store import Store
+from obdi.ingest.store import Store
 
 
 def _land_under(store: Store, account_ref: str) -> None:
-    from obdi.providers.truelayer import artefact_for
+    from obdi.ingest.providers.truelayer import artefact_for
 
     body = json.dumps(
         {
@@ -150,7 +150,7 @@ class TestTheSequenceThePageInstructs:
     """
 
     def test_RefilingThenRebuilding_KeepsTheCategoryOnTheCorrectedRow(self, tmp_path):
-        from obdi.rebuild import rebuild_from_raw
+        from obdi.ingest.rebuild import rebuild_from_raw
 
         store_path = tmp_path / "store.sqlite3"
         with Store(store_path) as store:

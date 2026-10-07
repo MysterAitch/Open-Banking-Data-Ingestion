@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 from obdi.cli import main
 from obdi.core.models import RawArtefact
-from obdi.store import Store
+from obdi.ingest.store import Store
 
 
 def _land(store, *, source, digest, payload, origin, meta=""):

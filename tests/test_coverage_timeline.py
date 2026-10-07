@@ -22,7 +22,7 @@ from obdi import coverage_timeline as ct
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening
 from obdi.fetch_gaps import gaps_for_account
-from obdi.store import Store
+from obdi.ingest.store import Store
 
 
 def d(text: str) -> date:

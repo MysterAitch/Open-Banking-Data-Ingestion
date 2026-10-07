@@ -42,19 +42,19 @@ from urllib.parse import quote
 import httpx
 import pytest
 
-from obdi.accounts import (
+from obdi.cli import build_web_config, collect_alert_findings
+from obdi.core.masking import structural_field_names
+from obdi.core.models import RawArtefact, TransactionStatus
+from obdi.ingest.accounts import (
     ARCHIVE_BASIS_PREFIX,
     AccountRecord,
     AccountRef,
     LimitWindow,
 )
-from obdi.cli import build_web_config, collect_alert_findings
-from obdi.core.masking import structural_field_names
-from obdi.core.models import RawArtefact, TransactionStatus
-from obdi.ingest import pair_transfers_across_store
+from obdi.ingest.pipeline import pair_transfers_across_store
+from obdi.ingest.spaces import ArchiveNote
+from obdi.ingest.store import Store
 from obdi.ledger import Ledger
-from obdi.spaces import ArchiveNote
-from obdi.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_accounts import archive_controls
 from page_dom import Node, elements, parse
@@ -223,7 +223,7 @@ def lab(make_lab) -> Lab:
 
 class TestTheBasisWordingHasOneOwner:
     def test_InferredBasis_BeginsWithThePrefixTheArchiveRulesRecognise(self):
-        from obdi.spaces import SpaceListing
+        from obdi.ingest.spaces import SpaceListing
 
         space = SpaceListing(
             uid="u", parent_uid="p", first_listed=LISTING_ONE, last_listed=LISTING_ONE,

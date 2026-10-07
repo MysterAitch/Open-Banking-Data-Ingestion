@@ -28,10 +28,10 @@ from urllib.parse import urlencode
 
 import pytest
 
-from obdi import asked_coverage
 from obdi.account_names import accounts_shown
-from obdi.accounts import AccountMap
-from obdi.asked_coverage import (
+from obdi.ingest import asked_coverage
+from obdi.ingest.accounts import AccountMap
+from obdi.ingest.asked_coverage import (
     HEAL_ASKS_PER_CONNECTION,
     Hole,
     asked_days,
@@ -39,11 +39,11 @@ from obdi.asked_coverage import (
     describe_spans,
     heal_plan,
 )
-from obdi.connections import Connection, ConnectionStore
+from obdi.ingest.connections import Connection, ConnectionStore
+from obdi.ingest.providers.truelayer import TrueLayerError
+from obdi.ingest.pull import pull_truelayer
+from obdi.ingest.store import Store
 from obdi.overview import build_overview
-from obdi.providers.truelayer import TrueLayerError
-from obdi.pull import pull_truelayer
-from obdi.store import Store
 from obdi.web import ExtendableAccount, _extend_rows
 
 AUTHORISED = date(2026, 8, 4)
@@ -109,14 +109,14 @@ class Bank:
         self.account_asks: list[tuple[str, date, date]] = []
         self.explicit_card_asks: list[tuple[str, date, date]] = []
         self.explicit_account_asks: list[tuple[str, date, date]] = []
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", self._accounts)
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_accounts", self._accounts)
         monkeypatch.setattr(
-            "obdi.pull.truelayer.fetch_balance", lambda *a, **k: ([], b"{}")
+            "obdi.ingest.pull.truelayer.fetch_balance", lambda *a, **k: ([], b"{}")
         )
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_transactions", self._transactions)
-        monkeypatch.setattr("obdi.pull.truelayer.fetch_cards", self._cards)
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_transactions", self._transactions)
+        monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_cards", self._cards)
         monkeypatch.setattr(
-            "obdi.pull.truelayer.fetch_card_transactions", self._card_transactions
+            "obdi.ingest.pull.truelayer.fetch_card_transactions", self._card_transactions
         )
 
     def _accounts(self, _token, **_kw):

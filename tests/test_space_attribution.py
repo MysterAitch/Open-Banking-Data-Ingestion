@@ -27,26 +27,31 @@ from typing import ClassVar
 
 import pytest
 
-from obdi.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.balance_anchors import effective_opening, record_stated_anchor
 from obdi.balance_reconciliation import balance_reconciliation
 from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from obdi.coverage import agreements
-from obdi.identity import artefact_digest, content_key
-from obdi.identity_health import identity_health
-from obdi.ingest import ImportSummary, import_file, pair_transfers_across_store, reconcile_batch
-from obdi.ledger import build_ledger
-from obdi.overview import held_by_account
-from obdi.position import read_position
-from obdi.providers import starling, truelayer
-from obdi.rebuild import (
+from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
+from obdi.ingest.identity import artefact_digest, content_key
+from obdi.ingest.identity_health import identity_health
+from obdi.ingest.pipeline import (
+    ImportSummary,
+    import_file,
+    pair_transfers_across_store,
+    reconcile_batch,
+)
+from obdi.ingest.providers import starling, truelayer
+from obdi.ingest.rebuild import (
     parse_artefact_transactions,
     rebuild_from_raw,
     resolve_artefact_ref,
 )
+from obdi.ingest.space_attribution import fold_space_copies, plan_folds, space_parents
+from obdi.ingest.store import Store
+from obdi.ledger import build_ledger
+from obdi.overview import held_by_account
+from obdi.position import read_position
 from obdi.replay import ActualAccountBinding, build_payload, withheld_reason
-from obdi.space_attribution import fold_space_copies, plan_folds, space_parents
-from obdi.store import Store
 
 MAIN = "starling-personal"
 BILLS = "starling-space-bills"

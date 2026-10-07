@@ -35,7 +35,6 @@ from itertools import pairwise
 
 import pytest
 
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.balance_anchors import (
     STATED,
     STATEMENT,
@@ -45,7 +44,8 @@ from obdi.balance_anchors import (
 )
 from obdi.balance_chart import BalanceChart, build_balance_chart, chart_of_opening
 from obdi.core.models import Transaction
-from obdi.store import Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
 from obdi.web_balance_chart import EDGE, PIXELS_PER_DAY, render_balance_chart
 from page_dom import Node, elements, parse
 from test_ledger import land, txn

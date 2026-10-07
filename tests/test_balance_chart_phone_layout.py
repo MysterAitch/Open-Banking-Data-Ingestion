@@ -27,7 +27,7 @@ import pytest
 import invented_balance_account as inv
 import obdi.web_balance_chart as web_balance_chart
 from obdi.balance_chart import BalanceChart, empty_chart
-from obdi.connections import ConnectionStore
+from obdi.ingest.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from test_phone_layout import _assert_fits, _measure
 

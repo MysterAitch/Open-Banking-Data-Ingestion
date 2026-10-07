@@ -32,15 +32,15 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from obdi.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.balance_anchors import effective_opening
-from obdi.family_anchors import families_of
-from obdi.ingest import import_file, pair_transfers_across_store
-from obdi.providers import starling
-from obdi.pull import STARLING_CONNECTION, pull_starling
-from obdi.rebuild import rebuild_from_raw
-from obdi.space_windows import CLOSED_SPACE_EMPTY, CLOSED_SPACE_MARK, CLOSED_SPACE_RETRY_DAYS
-from obdi.store import Store
+from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.pipeline import import_file, pair_transfers_across_store
+from obdi.ingest.providers import starling
+from obdi.ingest.pull import STARLING_CONNECTION, pull_starling
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.space_windows import CLOSED_SPACE_EMPTY, CLOSED_SPACE_MARK, CLOSED_SPACE_RETRY_DAYS
+from obdi.ingest.store import Store
 
 MAIN = "starling-personal"
 BILLS = "starling-space-bills"
@@ -460,7 +460,7 @@ class TestTheDoorRunsTheSameFoldsAsTheOthers:
     def test_Pull_AfterTheClosedSpacesRowsLand_RunsTheSameMoneyFoldAndTheReviewSettlement(
         self, store, monkeypatch
     ):
-        import obdi.pull as pull_module
+        import obdi.ingest.pull as pull_module
 
         Provider(monkeypatch, "history")
         first_pull_names_the_space(store)

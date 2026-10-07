@@ -25,13 +25,13 @@ from pathlib import Path
 
 import pytest
 
-from obdi import ingest
-from obdi.accounts import AccountRecord, AccountRef
-from obdi.ingest import import_file
-from obdi.rebuild import rebuild_from_raw
+from obdi.ingest import pipeline as ingest
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from obdi.review_report import SETTLED_CLASSES, FlagClass, assess_flags, review_report
 from obdi.review_settlement import SettleReport, settle_review_flags
-from obdi.store import Store
 
 D = date
 NIL_CARD = "nil-lines"

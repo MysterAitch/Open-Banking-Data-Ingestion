@@ -18,8 +18,8 @@ from datetime import date
 
 from obdi.categorise import apply_rules, uncategorised_summary
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest import reconcile_batch
-from obdi.store import Store
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.store import Store
 
 
 def txn(day: int, amount: int, desc: str, *, source_id: str) -> Transaction:

@@ -34,7 +34,8 @@ from flag_balance_world import (
 )
 from obdi.agreement import DEFINES, MET, UNMET, Known
 from obdi.balance_anchors import effective_opening, remove_stated_anchor
-from obdi.rebuild import rebuild_from_raw
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from obdi.review_flags import answer_two_payments, answered_lines, fingerprint_of
 from obdi.review_report import (
     GAP_AFTER,
@@ -49,7 +50,6 @@ from obdi.review_report import (
     review_report,
 )
 from obdi.review_settlement import settle_review_flags
-from obdi.store import Store
 
 D = date
 
@@ -331,7 +331,7 @@ class TestSettlingThem:
 
     def test_Settlement_WhenARowIsImportedLater_ClosesTheFlagThatNewRowRaises(self, tmp_path):
         """The door a person's file comes in by settles on its own, with no rebuild."""
-        from obdi.ingest import import_file
+        from obdi.ingest.pipeline import import_file
 
         build_balance_world(tmp_path, accounts=["single"], rebuild=False)
         extra = tmp_path / "extra.qif"
@@ -450,8 +450,8 @@ class TestCost:
     PAIRS = 20
 
     def _account(self, tmp_path, name: str, pairs: int):
-        from obdi.accounts import AccountRecord, AccountRef
-        from obdi.ingest import import_file
+        from obdi.ingest.accounts import AccountRecord, AccountRef
+        from obdi.ingest.pipeline import import_file
 
         root = tmp_path / name
         root.mkdir()

@@ -36,8 +36,8 @@ from fetch_marks_world import (
 )
 from obdi.fetch_gaps import GapKind
 from obdi.fetch_marks import MarkKind, remove_mark
+from obdi.ingest.store import Store
 from obdi.overview import standing_items_from
-from obdi.store import Store
 
 VIRGIN = (D(2026, 6, 5), D(2026, 7, 4))
 

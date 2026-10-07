@@ -45,18 +45,18 @@ from late_settlement_corpus import (
     household,
     late_settlement_payments,
 )
-from obdi import ingest
 from obdi.exact_rule_measure import NAMED_PAIRS, exact_rule_report
-from obdi.ingest import import_file
-from obdi.matching import (
+from obdi.ingest import pipeline as ingest
+from obdi.ingest.matching import (
     REFUSED_CONTRADICTED,
     REFUSED_KIND,
     REFUSED_OTHER_ID,
     REFUSED_SAME_SOURCE,
     REFUSED_SEVERAL,
 )
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from test_space_attribution import MAIN, MAP
 from test_space_blind_rows_and_internal_legs import order_id
 

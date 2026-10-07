@@ -14,7 +14,7 @@ from .core.plural import plural
 from .entities import OWNER_NAME, EntityRefused
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
-    from .store import Store
+    from .ingest.store import Store
 
 MERGE = "merge"
 SPLIT = "split"

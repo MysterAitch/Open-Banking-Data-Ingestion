@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.doctor import rebuild_check
+from obdi.ingest.doctor import rebuild_check
 
 EMPTY_FAILURE = {
     "ok": 0,
@@ -107,7 +107,7 @@ class TestTheCheckReachesTheCommand:
 
     @pytest.fixture
     def store_whose_last_rebuild_failed(self, tmp_path, monkeypatch):
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_CONNECTION_STORE", str(tmp_path / "c.json"))
         monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(tmp_path / "a.json"))
@@ -150,7 +150,7 @@ class TestTheCheckReachesTheCommand:
         replay.
         """
         from obdi import cli
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_CONNECTION_STORE", str(tmp_path / "c.json"))
         monkeypatch.setenv("OBDI_ACCOUNT_MAP", str(tmp_path / "a.json"))
@@ -192,7 +192,7 @@ class TestTheCheckReachesTheCommand:
         same answer.
         """
         from obdi import cli
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         def refuse(self, limit: int = 10) -> list[dict[str, object]]:
             raise RuntimeError("the rebuild history could not be read")

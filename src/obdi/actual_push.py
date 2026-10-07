@@ -26,7 +26,8 @@ from .balance_anchors import effective_opening, unitemised_for_store
 from .clearing import cleared_entity_ids
 from .core.models import Transaction
 from .core.plural import plural, word
-from .family_anchors import Families
+from .ingest.family_anchors import Families
+from .ingest.store import Store
 from .replay import (
     ActualAccountBinding,
     OpeningBalance,
@@ -36,7 +37,6 @@ from .replay import (
     history_imported_ids,
     unbound_accounts,
 )
-from .store import Store
 
 # Version 3 added `transfers` and `opening_balances` beside `accounts`. The
 # applier refuses any version it does not know, so a change here ships with

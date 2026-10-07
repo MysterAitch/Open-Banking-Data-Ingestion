@@ -16,7 +16,7 @@ import httpx
 import pytest
 
 from obdi.callback import render_page
-from obdi.connections import ConnectionStore
+from obdi.ingest.connections import ConnectionStore
 from obdi.navigation import (
     ALIASES,
     DESTINATIONS,

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import json
 
-from obdi.accounts import AccountMap
-from obdi.connections import Connection, ConnectionStore
-from obdi.pull import pull_truelayer
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
+from obdi.ingest.accounts import AccountMap
+from obdi.ingest.connections import Connection, ConnectionStore
+from obdi.ingest.pull import pull_truelayer
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 
 
 def _connection():
@@ -42,9 +42,9 @@ def _fake_provider(monkeypatch, records):
         body = json.dumps({"results": records, "status": "Succeeded"}).encode()
         return records, body, "from=2026-05-04&to=2026-08-02"
 
-    monkeypatch.setattr("obdi.pull.truelayer.fetch_accounts", fake_accounts)
-    monkeypatch.setattr("obdi.pull.truelayer.fetch_transactions", fake_transactions)
-    monkeypatch.setattr("obdi.pull.truelayer.fetch_balance", lambda *a, **k: ([], b"{}"))
+    monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_accounts", fake_accounts)
+    monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_transactions", fake_transactions)
+    monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_balance", lambda *a, **k: ([], b"{}"))
 
 
 class TestRebuildFromRaw:
@@ -162,7 +162,7 @@ class TestStarlingReplay:
     def _feed_artefact(self, account_ref, items):
         import json as _json
 
-        from obdi.providers.starling import artefact_for
+        from obdi.ingest.providers.starling import artefact_for
 
         body = _json.dumps({"feedItems": items}).encode("utf-8")
         return artefact_for(
@@ -185,8 +185,8 @@ class TestStarlingReplay:
         }
 
     def test_StarlingFeedArtefacts_ReplayIntoTransactions(self, tmp_path):
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             store.land_artefact(
@@ -211,8 +211,8 @@ class TestStarlingReplay:
     def test_PoisonArtefact_IsRecordedAndSkipped_TheRestReplays(self, tmp_path):
         """One non-GBP item once aborted the whole rebuild mid-loop -
         after the wipe. It must cost exactly its own artefact, loudly."""
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             store.land_artefact(
@@ -241,9 +241,9 @@ class TestRebuildProgress:
         to anyone watching the page."""
         import json as _json
 
-        from obdi.providers.starling import artefact_for
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.providers.starling import artefact_for
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         calls = []
         with Store(tmp_path / "s.sqlite3") as store:
@@ -267,8 +267,8 @@ class TestRebuildProgress:
         assert [c[0] for c in calls] == sorted(c[0] for c in calls)
 
     def test_FailingProgressCallback_NeverBreaksTheRebuild(self, tmp_path):
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         def explode(done, total, report):
             raise RuntimeError("reporting must never break the work")
@@ -287,9 +287,9 @@ class TestRebuildReconciliation:
     def test_VanishedAndNewAccounts_AreNamedInTheReport(self, tmp_path):
         import json as _json
 
-        from obdi.providers.starling import artefact_for
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.providers.starling import artefact_for
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             store.connection.execute(
@@ -336,9 +336,9 @@ class TestRebuildReconciliation:
     def test_FaithfulReplay_SaysSo(self, tmp_path):
         import json as _json
 
-        from obdi.providers.starling import artefact_for
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.providers.starling import artefact_for
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             body = _json.dumps(
@@ -398,10 +398,10 @@ class TestRebuildAppliesTheMap:
         ).encode("utf-8")
 
     def test_QualifiedRefs_ResolveThroughTheMap(self, tmp_path):
-        from obdi.accounts import AccountBinding, AccountMap
-        from obdi.providers.starling import artefact_for
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.accounts import AccountBinding, AccountMap
+        from obdi.ingest.providers.starling import artefact_for
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         bound = AccountMap(
             [
@@ -434,10 +434,10 @@ class TestRebuildAppliesTheMap:
         raw ref and once under the canonical. Resolution plus tier-1
         identity must yield ONE row under the canonical, not two rows
         under two names.'''
-        from obdi.accounts import AccountBinding, AccountMap
-        from obdi.providers.starling import artefact_for
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.accounts import AccountBinding, AccountMap
+        from obdi.ingest.providers.starling import artefact_for
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         bound = AccountMap(
             [
@@ -476,9 +476,9 @@ class TestRebuildAppliesTheMap:
     def test_UnboundRefs_StayQualified_AndKeepTheirBindBoxEligibility(
         self, tmp_path
     ):
-        from obdi.providers.starling import artefact_for
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.providers.starling import artefact_for
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             store.land_artefact(
@@ -507,7 +507,7 @@ class TestStarlingFeedIdentityFromOrigin:
     def _feed(self, store, *, label, account_uid, category_uid, item_uid, minor):
         import json as _json
 
-        from obdi.providers.starling import artefact_for
+        from obdi.ingest.providers.starling import artefact_for
 
         body = _json.dumps(
             {
@@ -540,7 +540,7 @@ class TestStarlingFeedIdentityFromOrigin:
     def _accounts_artefact(self, store, account_uid, default_category):
         import json as _json
 
-        from obdi.providers.starling import artefact_for
+        from obdi.ingest.providers.starling import artefact_for
 
         body = _json.dumps(
             {
@@ -561,8 +561,8 @@ class TestStarlingFeedIdentityFromOrigin:
     def test_MislabelledBlobArtefact_ReplaysUnderItsTrueAccounts(self, tmp_path):
         '''Two feeds for two different Spaces, both landed under ONE lying
         label. Identity from origin splits them back apart.'''
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             self._feed(
@@ -594,9 +594,9 @@ class TestStarlingFeedIdentityFromOrigin:
         ]
 
     def test_MainAccountFeed_KeysByAccountUid_ViaDefaultCategory(self, tmp_path):
-        from obdi.accounts import AccountBinding, AccountMap
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.accounts import AccountBinding, AccountMap
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         bound = AccountMap(
             [
@@ -629,8 +629,8 @@ class TestStarlingFeedIdentityFromOrigin:
         '''The raw-ref artefact and the blob-labelled artefact carry the
         same feed item; origin identity puts both under one account and
         tier-1 identity keeps one row.'''
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             self._feed(
@@ -668,7 +668,7 @@ class TestRecordCountMetadata:
     def _feed(self, store, uid, items):
         import json as _json
 
-        from obdi.providers.starling import artefact_for
+        from obdi.ingest.providers.starling import artefact_for
 
         body = _json.dumps(
             {
@@ -708,8 +708,8 @@ class TestRecordCountMetadata:
         tenth. The per-artefact yield is still landed, as metadata about
         what came OUT rather than as the measure of what went in.
         """
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             self._feed(store, "uid-1", 3)
@@ -737,7 +737,7 @@ class TestCardReplay:
     def _card_artefact(self, records):
         import json as _json
 
-        from obdi.providers.truelayer import artefact_for
+        from obdi.ingest.providers.truelayer import artefact_for
 
         return artefact_for(
             _json.dumps({"results": records}).encode("utf-8"),
@@ -759,8 +759,8 @@ class TestCardReplay:
         }
 
     def test_CardRows_ReplayNegated_PurchasesOut_PaymentsIn(self, tmp_path):
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             store.land_artefact(
@@ -784,8 +784,8 @@ class TestCardReplay:
         '''A DEBIT arriving negative means the statement convention this
         mapping was verified against has changed - the artefact is
         recorded as a problem, never guessed at.'''
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             store.land_artefact(
@@ -806,7 +806,7 @@ class TestSingleArtefactReplay:
     def _land_card(self, store):
         import json as _json
 
-        from obdi.providers.truelayer import artefact_for
+        from obdi.ingest.providers.truelayer import artefact_for
 
         record = {
             "amount": 9.99,
@@ -833,7 +833,7 @@ class TestSingleArtefactReplay:
 
     def test_Replay_LandsRows_AndIsIdempotent(self, tmp_path, monkeypatch):
         from obdi.cli import replay_single_artefact
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
         db = tmp_path / "s.sqlite3"
@@ -859,8 +859,8 @@ class TestSingleArtefactReplay:
         import pytest
 
         from obdi.cli import replay_single_artefact
-        from obdi.providers.truelayer import artefact_for
-        from obdi.store import Store
+        from obdi.ingest.providers.truelayer import artefact_for
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
         db = tmp_path / "s.sqlite3"
@@ -884,8 +884,8 @@ class TestSingleArtefactReplay:
         import pytest
 
         from obdi.cli import replay_single_artefact
-        from obdi.leases import acquire
-        from obdi.store import Store
+        from obdi.ingest.leases import acquire
+        from obdi.ingest.store import Store
 
         locks = tmp_path / "locks"
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
@@ -911,7 +911,7 @@ class TestRebuildKnowsTheSizeOfTheJobBeforeStartingIt:
     def _feed(self, store, uid, items):
         import json as _json
 
-        from obdi.providers.starling import artefact_for
+        from obdi.ingest.providers.starling import artefact_for
 
         body = _json.dumps(
             {
@@ -940,8 +940,8 @@ class TestRebuildKnowsTheSizeOfTheJobBeforeStartingIt:
         )
 
     def _rebuild(self, tmp_path, sizes, capture):
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             for index, count in enumerate(sizes):
@@ -1020,7 +1020,7 @@ class TestProgressMovesWithinAnArtefactNotOnlyBetweenThem:
     def _feed(self, store, uid, items):
         import json as _json
 
-        from obdi.providers.starling import artefact_for
+        from obdi.ingest.providers.starling import artefact_for
 
         body = _json.dumps(
             {
@@ -1051,8 +1051,8 @@ class TestProgressMovesWithinAnArtefactNotOnlyBetweenThem:
     def test_ProgressAdvancesRecordByRecord_WhileOneArtefactIsReplaying(
         self, tmp_path
     ):
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         seen = []
         with Store(tmp_path / "s.sqlite3") as store:
@@ -1076,8 +1076,8 @@ class TestProgressMovesWithinAnArtefactNotOnlyBetweenThem:
         into the completed total would report progress that a crash takes
         back. records_done moves only when an artefact is finished.
         """
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         pairs = []
         with Store(tmp_path / "s.sqlite3") as store:
@@ -1111,7 +1111,7 @@ class TestEveryApiSourceHasExactlyOneReplayRole:
 
     def test_TheTransactionalAndSkipSets_PartitionTheApiNamespace(self):
         from obdi.core.namespaces import API_SOURCES
-        from obdi.rebuild import _NON_TRANSACTIONAL, _TRANSACTIONAL
+        from obdi.ingest.rebuild import _NON_TRANSACTIONAL, _TRANSACTIONAL
 
         assert _TRANSACTIONAL <= API_SOURCES
         assert _TRANSACTIONAL | _NON_TRANSACTIONAL == API_SOURCES
@@ -1128,9 +1128,9 @@ class TestEveryApiSourceHasExactlyOneReplayRole:
         """
         import json
 
-        from obdi.providers import starling
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.providers import starling
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
             store.land_artefact(

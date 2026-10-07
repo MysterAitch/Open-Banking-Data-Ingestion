@@ -32,14 +32,14 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
-from . import matching
-from .accounts import AccountMap
 from .cash_withdrawal_measure import CashWithdrawalReport, cash_withdrawal_report
 from .core.models import MatchTier, Transaction, TransactionStatus
 from .core.plural import agree, plural
-from .family_anchors import families_of
-from .feed_statuses import RowWithNoRowStatus, feed_sighted_accounts, rows_with_no_row_status
-from .matching import (
+from .ingest import matching
+from .ingest.accounts import AccountMap
+from .ingest.family_anchors import families_of
+from .ingest.feed_statuses import RowWithNoRowStatus, feed_sighted_accounts, rows_with_no_row_status
+from .ingest.matching import (
     REFUSALS,
     CandidateIndex,
     plan_settlement,
@@ -48,12 +48,12 @@ from .matching import (
     second_row_verdicts,
     settlement_candidates,
 )
-from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS, feed_uid_of, stated_link_of
-from .rebuild import _starling_defaults, parse_artefact_transactions, resolve_artefact_ref
-from .space_attribution import space_parents
-from .stated_times import settlement_days
+from .ingest.payment_links import AGGREGATORS, FIRST_PARTY_FEEDS, feed_uid_of, stated_link_of
+from .ingest.rebuild import _starling_defaults, parse_artefact_transactions, resolve_artefact_ref
+from .ingest.space_attribution import space_parents
+from .ingest.stated_times import settlement_days
+from .ingest.store import FOLDED_SIGHTING_PREFIX, Store
 from .statement_opening_measure import StatementOpeningReport, statement_opening_report
-from .store import FOLDED_SIGHTING_PREFIX, Store
 
 _FEED_ARTEFACT = "starling-feed"
 _AGGREGATOR_ARTEFACTS = ("truelayer-booked", "truelayer-pending", "truelayer-card-booked")
@@ -628,7 +628,7 @@ def pair_figures(store: Store, account_map: AccountMap) -> list[PairFigures]:
     is not counted as refused. A pair refused by two guards, or by one for each of two records,
     is counted under each reason, so the reasons add up to more than the pairs where they overlap.
     """
-    from .family_anchors import families_of
+    from .ingest.family_anchors import families_of
 
     records: dict[str, dict[tuple[str, str], Transaction]] = defaultdict(dict)
     rows = store.connection.execute(
@@ -751,7 +751,7 @@ def settlement_figures(
     would change. Every artefact that listed a row counts, so a second file listing it again
     cannot hide where the first put it.
     """
-    from .family_anchors import families_of
+    from .ingest.family_anchors import families_of
 
     held = _read_held(store)
     blind = families_of(store, account_map).blind_in
@@ -932,7 +932,7 @@ def _sightings_by_entity(store: Store, account: str) -> dict[str, list[_Sighting
     A sighting copied onto a Space row by a fold, and any sighting by a pending snapshot
     (which never re-dates a settled row, `ingest._reconcile`), is left out.
     """
-    from .arrival_order import arrival_instant
+    from .ingest.arrival_order import arrival_instant
 
     order = {
         str(row["digest"]): (arrival_instant(row["fetched_at"]), int(row["rowid"]))

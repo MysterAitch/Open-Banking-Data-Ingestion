@@ -33,11 +33,11 @@ from .coverage_timeline import (
     kind_of_source,
 )
 from .fetch_gaps import FetchReport
+from .ingest.rebuild_hold import RebuildInProgress
 from .ledger import Ledger
 from .navigation import account_address
 from .overview import HOUSEKEEPING, AccountOverview, Overview
 from .protection import ProtectionView
-from .rebuild_hold import RebuildInProgress
 from .standing_data import (
     DOES_NOT_ADD_UP,
     NOTHING_TO_CHECK_AGAINST,

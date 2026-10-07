@@ -27,9 +27,10 @@ from flag_world import (
 )
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening, record_stated_anchor
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from obdi.movement_completeness import MovementCompleteness
 from obdi.protection import press
-from obdi.rebuild import rebuild_from_raw
 from obdi.review_flags import (
     FlagRefused,
     answer_one_payment,
@@ -40,7 +41,6 @@ from obdi.review_flags import (
     undo,
 )
 from obdi.review_report import live_neighbours
-from obdi.store import Store
 
 
 @pytest.fixture
@@ -223,7 +223,7 @@ class TestTwoPaymentsIsRememberedAcrossARebuild:
 
 class TestTheAnsweredListIsTheLastTwenty:
     def test_AnsweredList_AfterTwentyOneAnswers_ListsTheNewestTwentyAndNotTheFirst(self, tmp_path):
-        from obdi.ingest import import_file
+        from obdi.ingest.pipeline import import_file
 
         path = tmp_path / "bulk.csv"
         path.write_text(

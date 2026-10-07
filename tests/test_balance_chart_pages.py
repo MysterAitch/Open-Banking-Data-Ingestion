@@ -26,7 +26,7 @@ import pytest
 import fault_structure_corpus as corpus
 from obdi.balance_anchors import FamilyReading, FamilyWalk
 from obdi.balance_chart import BalanceChart, chart_of_walk, empty_chart
-from obdi.connections import ConnectionStore
+from obdi.ingest.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from obdi.web_balance_chart import (
     MAX_PIXELS_PER_DAY,

@@ -14,8 +14,8 @@ import httpx
 import pytest
 
 from obdi.account_names import accounts_shown
-from obdi.connections import ConnectionStore, build_connection
-from obdi.spaces import RECOVERY_BOUND
+from obdi.ingest.connections import ConnectionStore, build_connection
+from obdi.ingest.spaces import RECOVERY_BOUND
 from obdi.web import (
     AuthorisationSession,
     ConnectionHandler,
@@ -660,7 +660,7 @@ class TestExtendingHistoryFromThePage:
         assert "Instant Saver" not in page
 
     def test_Extend_Refusal_StatesTheWindowThatWasAsked(self, tmp_path):
-        from obdi.providers.truelayer import TrueLayerError
+        from obdi.ingest.providers.truelayer import TrueLayerError
 
         def refuse(**_):
             exc = TrueLayerError(
@@ -751,7 +751,7 @@ class TestExtendingHistoryFromThePage:
         assert "probed back to 2020-08-05" in page
 
     def test_Extend_ProviderErrorParts_AreRenderedSeparately_NotAsOneJsonBlob(self, tmp_path):
-        from obdi.providers.truelayer import TrueLayerError
+        from obdi.ingest.providers.truelayer import TrueLayerError
 
         def refuse(**_):
             raise TrueLayerError(
@@ -787,7 +787,7 @@ class TestExtendingHistoryFromThePage:
         assert "error_description" in page.split("Full provider response", 1)[1]
 
     def test_Extend_OtherProviderErrors_DoNotClaimTheScaRemedy(self, tmp_path):
-        from obdi.providers.truelayer import TrueLayerError
+        from obdi.ingest.providers.truelayer import TrueLayerError
 
         def refuse(**_):
             raise TrueLayerError(
@@ -1277,7 +1277,7 @@ class TestDangerZone:
         import time
 
         from obdi.cli import rebuild_status_for, start_background_rebuild
-        from obdi.store import Store as _Store
+        from obdi.ingest.store import Store as _Store
 
         db = tmp_path / "s.sqlite3"
         with _Store(db):
@@ -1296,9 +1296,9 @@ class TestDangerZone:
         assert "replayed" in str(status.get("summary", ""))
 
     def test_RunningRebuild_RefusesASecondStart(self, tmp_path, monkeypatch):
-        from obdi import leases
         from obdi.cli import start_background_rebuild
-        from obdi.store import Store as _Store
+        from obdi.ingest import leases
+        from obdi.ingest.store import Store as _Store
 
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
         db = tmp_path / "s.sqlite3"
@@ -1315,7 +1315,7 @@ class TestDangerZone:
         import json as _json
 
         from obdi.cli import start_background_rebuild
-        from obdi.store import Store as _Store
+        from obdi.ingest.store import Store as _Store
 
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
         db = tmp_path / "s.sqlite3"
@@ -1966,9 +1966,9 @@ class TestBindingFromThePage:
         the chosen canonical and the map records the binding."""
         import json as _json
 
-        from obdi.accounts import AccountMap
         from obdi.cli import _apply_bind
-        from obdi.store import Store as _Store
+        from obdi.ingest.accounts import AccountMap
+        from obdi.ingest.store import Store as _Store
 
         db = tmp_path / "s.sqlite3"
         with _Store(db) as store:
@@ -2004,9 +2004,9 @@ class TestBindingFromThePage:
         but the rows still sit under the qualified ref. Re-pressing Bind
         (same name or a new one) must move the stranded rows, not no-op
         because the map already resolves."""
-        from obdi.accounts import AccountBinding, AccountMap
         from obdi.cli import _apply_bind
-        from obdi.store import Store as _Store
+        from obdi.ingest.accounts import AccountBinding, AccountMap
+        from obdi.ingest.store import Store as _Store
 
         db = tmp_path / "s.sqlite3"
         with _Store(db) as store:
@@ -2048,9 +2048,9 @@ class TestBindingFromThePage:
         the cure - and the map must stay untouched."""
         import pytest
 
-        from obdi.accounts import AccountMap
         from obdi.cli import _apply_bind
-        from obdi.store import Store as _Store
+        from obdi.ingest.accounts import AccountMap
+        from obdi.ingest.store import Store as _Store
 
         db = tmp_path / "s.sqlite3"
         with _Store(db) as store:

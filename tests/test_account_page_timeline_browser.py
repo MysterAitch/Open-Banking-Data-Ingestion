@@ -11,8 +11,8 @@ import pytest
 
 import obdi.web_ledger as web_ledger
 from coverage_timeline_world import CARD, MAIN, build_card, build_main
-from obdi.statement_terms import keep_statement_readings
-from obdi.store import Store
+from obdi.ingest.statement_terms import keep_statement_readings
+from obdi.ingest.store import Store
 from served_store import environment_for, served_store
 from test_account_page_timeline import _Fixed
 

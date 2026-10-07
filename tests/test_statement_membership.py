@@ -28,11 +28,11 @@ import pytest
 
 from obdi.balance_anchors import STATED, STATEMENT, Anchor, derive_opening, effective_opening
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest import import_file
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.statement_membership import statement_membership
+from obdi.ingest.statement_terms import statement_balances
+from obdi.ingest.store import Store
 from obdi.period_reconciliation import PeriodKind, period_reconciliation
-from obdi.statement_membership import statement_membership
-from obdi.statement_terms import statement_balances
-from obdi.store import Store
 from test_period_reconciliation import (
     ACCOUNT,
     P2,

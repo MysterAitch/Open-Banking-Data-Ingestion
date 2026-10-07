@@ -48,8 +48,8 @@ from datetime import date, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from .ingest.store import Store
 from .statement_span import STATEMENT_SOURCES, RowEvidence
-from .store import Store
 
 if TYPE_CHECKING:  # pragma: no cover - typing only; fetch_gaps imports this module
     from .fetch_gaps import FetchGap
@@ -311,7 +311,11 @@ def gather_world(
 ) -> MarkWorld:
     """Read the rows, statements, declared dates, and the aggregator's reach. Costs a walk of the
     store: keep the result."""
-    from .statement_terms import held_statement_readings, statement_balances, statement_periods
+    from .ingest.statement_terms import (
+        held_statement_readings,
+        statement_balances,
+        statement_periods,
+    )
 
     rows: dict[str, list[tuple[date, str]]] = {}
     sightings = store.transactions_by_sighting()

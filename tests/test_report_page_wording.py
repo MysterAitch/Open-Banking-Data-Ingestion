@@ -16,8 +16,8 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.connections import ConnectionStore
-from obdi.rebuild import RebuildReport
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.rebuild import RebuildReport
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 
@@ -255,9 +255,9 @@ class TestARebuildSaysWhichProblemsRepeatedAndWhatTheyCost:
     ):
         import json
 
-        from obdi.providers.starling import artefact_for
-        from obdi.rebuild import rebuild_from_raw
-        from obdi.store import Store
+        from obdi.ingest.providers.starling import artefact_for
+        from obdi.ingest.rebuild import rebuild_from_raw
+        from obdi.ingest.store import Store
 
         def poison(reference: str):
             # The refusal names the item, so two artefacts only repeat each

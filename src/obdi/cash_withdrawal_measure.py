@@ -27,8 +27,11 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date
 
-from .accounts import AccountRecord
-from .cash_withdrawals import (
+from .core.models import Transaction, TransactionStatus
+from .core.namespaces import CASH_LEG_SOURCE
+from .core.plural import agree, plural
+from .ingest.accounts import AccountRecord
+from .ingest.cash_withdrawals import (
     AFTER_CLOSE,
     AGGREGATOR_CASH,
     DEPOSIT,
@@ -47,11 +50,8 @@ from .cash_withdrawals import (
     feed_excludes_cash,
     read_candidates,
 )
-from .core.models import Transaction, TransactionStatus
-from .core.namespaces import CASH_LEG_SOURCE
-from .core.plural import agree, plural
-from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS
-from .store import Store
+from .ingest.payment_links import AGGREGATORS, FIRST_PARTY_FEEDS
+from .ingest.store import Store
 
 _CARD_ARTEFACT = "truelayer-card-booked"
 _CREDIT_CARD_KIND = "credit-card"

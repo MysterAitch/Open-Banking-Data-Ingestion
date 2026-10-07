@@ -24,8 +24,8 @@ import pytest
 from obdi import values_sitting
 from obdi.cli import build_web_config
 from obdi.entities import EntitiesView, view_of
-from obdi.ingest import import_file
-from obdi.store import Store
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.store import Store
 from obdi.web_entities import render_entities
 from page_dom import elements, parse
 from section_harness import environment, serve_config
@@ -372,7 +372,7 @@ class TestRenaming:
 def transfer_world(tmp_path, monkeypatch):
     """Two accounts and two transfers between them (four legs, the shapes "transfer to savings"
     and "from current"), beside one ordinary payee that is not a leg."""
-    from obdi.ingest import pair_transfers_across_store
+    from obdi.ingest.pipeline import pair_transfers_across_store
 
     current = tmp_path / "current.csv"
     savings = tmp_path / "savings.csv"

@@ -49,8 +49,8 @@ import pytest
 
 import obdi.web_ledger as web_ledger
 from obdi.core.models import Transaction
-from obdi.identity import content_key
-from obdi.store import Store
+from obdi.ingest.identity import content_key
+from obdi.ingest.store import Store
 from page_dom import Node, elements, parse
 from served_store import environment_for, served_store
 from test_space_attribution import AGGREGATOR, BILLS, FEED, MAIN, Household, pay

@@ -21,17 +21,17 @@ from typing import TYPE_CHECKING, Generic, TypeVar, cast
 from .agreement import Standing, held_sentence, standing_line, standing_of
 from .balance_anchors import EffectiveOpening, effective_opening
 from .core.models import Transaction
-from .family_anchors import Families
+from .ingest.family_anchors import Families
+from .ingest.store import Store
 from .protection import check_span
 from .statement_checks import StatementChecks
-from .store import Store
 
 #: What an account is read with where nothing says which accounts are Spaces: none are.
 NO_FAMILIES = Families({}, {}, {})
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
+    from .ingest.rebuild_hold import RebuildEpoch
     from .movement_completeness import MovementCompleteness
-    from .rebuild_hold import RebuildEpoch
 
 T = TypeVar("T")
 

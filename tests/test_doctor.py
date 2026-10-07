@@ -14,7 +14,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from obdi.doctor import CheckResult, run_checks
+from obdi.ingest.doctor import CheckResult, run_checks
 
 
 class TestConfigurationThatIsSimplyAbsent:
@@ -218,7 +218,7 @@ class TestAskingTheProviderDirectly:
     def test_LiveCheck_WhenTheProviderAcceptsTheGrant_ReportsValid(
         self, monkeypatch, tmp_path
     ):
-        from obdi.doctor import live_checks
+        from obdi.ingest.doctor import live_checks
 
         self._configured(monkeypatch, tmp_path)
         client = httpx.Client(
@@ -234,7 +234,7 @@ class TestAskingTheProviderDirectly:
     def test_LiveCheck_WhenTheProviderSaysInvalidClient_FailsNamingTheSecret(
         self, monkeypatch, tmp_path
     ):
-        from obdi.doctor import live_checks
+        from obdi.ingest.doctor import live_checks
 
         self._configured(monkeypatch, tmp_path)
         client = httpx.Client(
@@ -251,7 +251,7 @@ class TestAskingTheProviderDirectly:
     def test_LiveCheck_WhenOnlyTheScopeIsRefused_ReportsTheSecretAsProven(
         self, monkeypatch, tmp_path
     ):
-        from obdi.doctor import live_checks
+        from obdi.ingest.doctor import live_checks
 
         self._configured(monkeypatch, tmp_path)
         client = httpx.Client(
@@ -270,7 +270,7 @@ class TestAskingTheProviderDirectly:
     def test_LiveCheck_WhenTheNetworkFails_SaysInconclusiveRatherThanGuessing(
         self, monkeypatch, tmp_path
     ):
-        from obdi.doctor import live_checks
+        from obdi.ingest.doctor import live_checks
 
         self._configured(monkeypatch, tmp_path)
 
@@ -289,12 +289,12 @@ class TestCollisionChecksReadTheLiveStore:
     """Validators refuse new mistakes; they cannot un-write old ones."""
 
     def _store(self, tmp_path):
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         return Store(tmp_path / "s.sqlite3")
 
     def test_UndeclaredSourceInEvidence_IsReported(self, tmp_path):
-        from obdi.doctor import collision_checks
+        from obdi.ingest.doctor import collision_checks
 
         with self._store(tmp_path) as store:
             store.record_attempt(
@@ -312,7 +312,7 @@ class TestCollisionChecksReadTheLiveStore:
         assert "monzo-openbanking" in results["sources are registered"].detail
 
     def test_AConnectionSharingAFirstPartyId_IsReportedWithItsCure(self, tmp_path):
-        from obdi.doctor import collision_checks
+        from obdi.ingest.doctor import collision_checks
 
         with self._store(tmp_path) as store:
             results = {
@@ -325,7 +325,7 @@ class TestCollisionChecksReadTheLiveStore:
         assert "rename-connection" in check.detail
 
     def test_ACoherentStore_PassesEveryCollisionCheck(self, tmp_path):
-        from obdi.doctor import collision_checks
+        from obdi.ingest.doctor import collision_checks
 
         with self._store(tmp_path) as store:
             store.record_attempt(

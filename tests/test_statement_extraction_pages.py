@@ -25,14 +25,14 @@ from pathlib import Path
 import httpx
 import pytest
 
-import obdi.statement_extraction as statement_extraction
-import obdi.statement_terms as statement_terms
+import obdi.ingest.statement_extraction as statement_extraction
+import obdi.ingest.statement_terms as statement_terms
 from obdi.bring_in_preview import preview_html
 from obdi.cli import build_web_config
-from obdi.parsers import pdf_statements
-from obdi.rebuild import rebuild_from_raw
-from obdi.statement_shape import shape_of_extraction, shape_report
-from obdi.store import Store
+from obdi.ingest.parsers import pdf_statements
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.statement_shape import shape_of_extraction, shape_report
+from obdi.ingest.store import Store
 from served_store import served_store
 from test_bring_in_assign import (
     PLANTED_PAYEE,

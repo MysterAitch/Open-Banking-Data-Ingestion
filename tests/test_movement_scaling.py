@@ -19,10 +19,10 @@ import pathlib
 import time
 from datetime import date, timedelta
 
+from obdi.ingest.providers import starling
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from obdi.movement_completeness import check_rows, movement_completeness
-from obdi.providers import starling
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
 from round_up_corpus import SPACE_FEED_ORIGIN
 from test_family_anchors import FEED_ORIGIN, land_evidence
 from test_space_attribution import MAP
@@ -128,7 +128,7 @@ class TestTheChecksOverAPolledFeed:
     def test_RowsListed_WhenEveryArtefactIsListedBefore_ParsesNoPayloadAgain(
         self, tmp_path, monkeypatch
     ):
-        import obdi.rebuild as rebuild
+        import obdi.ingest.rebuild as rebuild
 
         with build(tmp_path, 12) as store:
             check_rows(store, canonical)

@@ -25,13 +25,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening, record_stated_anchor
 from obdi.core.models import Transaction
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
 from obdi.movement_completeness import MovementCompleteness
 from obdi.protection import press
-from obdi.store import Store
 from test_ledger import land, txn
 
 EVERYDAY = "everyday-card"

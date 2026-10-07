@@ -42,8 +42,8 @@ from urllib.parse import parse_qsl, urlencode
 
 from .core.date_window import Unit, WindowSpec, length, resolve
 from .core.errors import DataError
+from .ingest.store import Store
 from .ledger import LedgerWindow
-from .store import Store
 from .window_control import (
     BETWEEN,
     OTHER_LENGTH,

@@ -39,8 +39,8 @@ from obdi.agreement import (
     Known,
     derive_agreement,
 )
+from obdi.ingest.store import Store
 from obdi.movement_completeness import check_rows
-from obdi.store import Store
 
 ORDERS = [("statements", "aggregator"), ("aggregator", "statements")]
 SHAPES = [(False, False), (False, True), (True, False), (True, True)]

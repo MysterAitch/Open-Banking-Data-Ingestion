@@ -54,11 +54,9 @@ from .bring_in_dry_run import (
     dry_run_fold,
     values_page_body,
 )
-from .bring_in_guess import Guess, GuessBasis, guess_account, section_guess
 from .bring_in_outcome import coverage, new_transactions, open_flags_by_account, sentences
 from .bring_in_preview import preview_html, second_witness_html, unreadable_html
 from .callback import render_page
-from .connections import Connection, ConnectionStore
 from .core.namespaces import UNASSIGNED_ACCOUNT
 from .core.page_times import clock_text, instant_of, local_day, span_phrase
 from .core.plural import plural
@@ -66,10 +64,12 @@ from .coverage_timeline import EXPORT, STATEMENT, AccountTimeline
 from .fetch_gaps import FetchReport, GapKind
 from .fetch_marks import AGGREGATOR
 from .fetch_reasons import gap_lines
-from .ingest import MatcherPreview
+from .ingest.bring_in_guess import Guess, GuessBasis, guess_account, section_guess
+from .ingest.connections import Connection, ConnectionStore
+from .ingest.pipeline import MatcherPreview
+from .ingest.pull import STARLING_CONNECTION
+from .ingest.rebuild_hold import RebuildInProgress
 from .overview import AccountOverview, Overview
-from .pull import STARLING_CONNECTION
-from .rebuild_hold import RebuildInProgress
 from .standing_data import AccountStanding
 from .todo import account_page, wanted_days
 from .trust import Trust, month_marks, trust_of
@@ -87,7 +87,7 @@ from .web_overview import _age_words, _whole_dates
 from .web_statements import kept_count, names_found_words
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
-    from .statement_shape import ShapeReport
+    from .ingest.statement_shape import ShapeReport
     from .web import WebConfig
 
 _esc = html.escape

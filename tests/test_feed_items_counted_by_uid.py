@@ -49,13 +49,13 @@ from typing import Any
 import pytest
 
 from obdi.core.models import RawArtefact
-from obdi.family_anchors import families_of
-from obdi.ingest import reconcile_batch
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.providers import starling
+from obdi.ingest.rebuild import parse_artefact_transactions, rebuild_from_raw
+from obdi.ingest.space_attribution import fold_space_copies
+from obdi.ingest.store import Store
 from obdi.movement_completeness import check_rows
-from obdi.providers import starling
-from obdi.rebuild import parse_artefact_transactions, rebuild_from_raw
-from obdi.space_attribution import fold_space_copies
-from obdi.store import Store
 from round_up_corpus import card_payment
 from test_family_anchors import FEED_ORIGIN, land_evidence
 from test_movement_rows_listed import canonical

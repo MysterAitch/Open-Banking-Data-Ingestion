@@ -16,10 +16,10 @@ from pathlib import Path
 import obdi.web_coverage_timeline as page
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening, known_account
-from obdi.connections import ConnectionStore
 from obdi.coverage_timeline import AccountTimeline, build_account_timeline
 from obdi.fetch_gaps import gaps_for_account
-from obdi.store import Store
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 

@@ -18,9 +18,9 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.cli import build_web_config
-from obdi.store import Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 
 PAYEE = "Quillfeather Lutherie"

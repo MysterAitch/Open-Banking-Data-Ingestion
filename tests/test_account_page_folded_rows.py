@@ -27,7 +27,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from obdi.store import Store
+from obdi.ingest.store import Store
 from served_store import environment_for, served_store
 from test_space_attribution import AGGREGATOR, BILLS, FEED, MAIN, Household, pay
 

@@ -70,11 +70,11 @@ from typing import TYPE_CHECKING
 
 from .core.models import Transaction, TransactionStatus
 from .coverage import coverage
-from .parsers.pdf_statements import PDF_PARSERS
-from .statement_terms import StatementPeriod, statement_periods
+from .ingest.parsers.pdf_statements import PDF_PARSERS
+from .ingest.statement_terms import StatementPeriod, statement_periods
 
 if TYPE_CHECKING:
-    from .store import Store
+    from .ingest.store import Store
 
 #: The sources whose rows are a statement's own.
 STATEMENT_SOURCES = frozenset(parser.source for parser in PDF_PARSERS) | {"statement"}

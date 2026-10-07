@@ -143,8 +143,8 @@ class TestBindCommand:
 
         from obdi.cli import _account_map, main
         from obdi.core.models import SourceTier, Transaction
-        from obdi.ingest import reconcile_batch
-        from obdi.store import Store
+        from obdi.ingest.pipeline import reconcile_batch
+        from obdi.ingest.store import Store
 
         db = tmp_path / "store.sqlite3"
         monkeypatch.setenv("OBDI_DB_PATH", str(db))

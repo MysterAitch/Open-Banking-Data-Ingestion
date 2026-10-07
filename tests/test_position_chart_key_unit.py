@@ -26,8 +26,8 @@ from html import unescape
 import pytest
 
 from obdi.core.date_window import Resolution
+from obdi.ingest.store import Store
 from obdi.position import Position, read_position
-from obdi.store import Store
 from obdi.web_position import render_position, unit_word
 from position_window_household import CARD, TODAY, window_household
 

@@ -25,12 +25,12 @@ import json
 
 import pytest
 
-from obdi.store import Store
+from obdi.ingest.store import Store
 
 
 def _one_transaction(store_path) -> str:
     from obdi.cli import replay_single_artefact
-    from obdi.providers.truelayer import artefact_for
+    from obdi.ingest.providers.truelayer import artefact_for
 
     body = json.dumps(
         {
@@ -122,7 +122,7 @@ class TestCountingWorkLeftPointingAtNothing:
 
     def test_TheDoctor_NamesWhichTableHoldsTheOrphans(self, tmp_path):
         """A bare count sends the reader looking; the name says where to look."""
-        from obdi.doctor import collision_checks
+        from obdi.ingest.doctor import collision_checks
 
         store_path = tmp_path / "store.sqlite3"
         entity = _one_transaction(store_path)

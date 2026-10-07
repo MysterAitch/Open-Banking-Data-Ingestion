@@ -36,7 +36,6 @@ from urllib.parse import quote
 
 from . import values_sitting
 from .account_names import AccountShown
-from .accounts import BALANCE_ONLY_KIND
 from .callback import render_page
 from .core.date_window import (
     Resolution,
@@ -51,6 +50,7 @@ from .core.logs import say
 from .core.masking import MASKED_TOTAL, Disclosed
 from .core.plural import agree
 from .core.plural import plural as _plural
+from .ingest.accounts import BALANCE_ONLY_KIND
 from .overview import AccountOverview
 from .position import (
     ChartSeries,

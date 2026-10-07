@@ -28,15 +28,15 @@ from pathlib import Path
 
 import pytest
 
-import obdi.statement_columns as statement_columns
-import obdi.statement_extraction as statement_extraction
-import obdi.statement_shape as statement_shape
-import obdi.statement_terms as statement_terms
+import obdi.ingest.statement_columns as statement_columns
+import obdi.ingest.statement_extraction as statement_extraction
+import obdi.ingest.statement_shape as statement_shape
+import obdi.ingest.statement_terms as statement_terms
 from obdi.cli import build_web_config
-from obdi.ingest import import_file
-from obdi.parsers import pdf_statements
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import SCHEMA_VERSION, ExtractionRecord, Store, StoreIsNewer
+from obdi.ingest.parsers import pdf_statements
+from obdi.ingest.pipeline import import_file
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import SCHEMA_VERSION, ExtractionRecord, Store, StoreIsNewer
 from served_store import environment_for
 from test_bring_in_assign import (
     PLANTED_PAYEE,
@@ -299,7 +299,7 @@ class TestTheStoreGrowsTheTable:
     ):
         path = tmp_path / "old.sqlite3"
         with Store(path) as opened:
-            from obdi.accounts import AccountRecord, AccountRef
+            from obdi.ingest.accounts import AccountRecord, AccountRef
 
             opened.declare_account(AccountRecord(ref=AccountRef("witness"), label="Witness"))
         connection = sqlite3.connect(path)

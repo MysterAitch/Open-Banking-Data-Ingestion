@@ -39,20 +39,20 @@ from typing import Any
 import pytest
 
 from late_settlement_corpus import export_text
-from obdi import rebuild
 from obdi.agreement import standing_of
 from obdi.balance_anchors import effective_opening, record_stated_anchor
 from obdi.core.models import TransactionStatus
-from obdi.declined_items import DECLINED_DOUBT, declined_void_entities, void_declined_items
 from obdi.exact_rule_measure import exact_rule_report
-from obdi.feed_statuses import rows_with_no_row_status
-from obdi.ingest import import_file, pair_transfers_across_store
+from obdi.ingest import rebuild
+from obdi.ingest.declined_items import DECLINED_DOUBT, declined_void_entities, void_declined_items
+from obdi.ingest.feed_statuses import rows_with_no_row_status
+from obdi.ingest.pipeline import import_file, pair_transfers_across_store
+from obdi.ingest.providers import starling
+from obdi.ingest.pull import pull_starling
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from obdi.movement_completeness import MovementCompleteness
 from obdi.protection import broken_protections, press, recheck
-from obdi.providers import starling
-from obdi.pull import pull_starling
-from obdi.rebuild import rebuild_from_raw
-from obdi.store import Store
 from round_up_corpus import SPACE_FEED_ORIGIN, card_payment, space_arrival
 from test_absorbed_rows import arrive
 from test_family_anchors import FEED_ORIGIN, land_evidence
@@ -103,7 +103,7 @@ def worlds(tmp_path, monkeypatch) -> Iterator[Callable[..., Store]]:
                     else:
                         with patch.context() as off:
                             off.setattr(
-                                "obdi.declined_items.void_declined_items", lambda store: None
+                                "obdi.ingest.declined_items.void_declined_items", lambda store: None
                             )
                             import_file(store, path, account_id=MAIN, account_map=MAP)
                     continue
@@ -401,7 +401,7 @@ class TestWhatThePassReads:
     def test_Pass_WhenDeclinedAttemptsNeverMadeARow_ReadsOnlyTheBodiesThatHoldOne(
         self, tmp_path, monkeypatch, count
     ):
-        from obdi import feed_statuses
+        from obdi.ingest import feed_statuses
 
         with Store(tmp_path / "scale.sqlite3") as store:
             land_evidence(store)

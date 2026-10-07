@@ -39,14 +39,14 @@ from pathlib import Path
 import httpx
 import pytest
 
-from obdi.accounts import AccountRecord, AccountRef, LimitWindow, RateWindow
 from obdi.balance_anchors import record_stated_anchor
 from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
-from obdi.identity import artefact_digest, content_key
-from obdi.ingest import reconcile_batch
-from obdi.parsers.statement_reading import StatementReading, reading_to_json
-from obdi.store import Store
-from obdi.synthetic_pdf import build_pdf
+from obdi.ingest.accounts import AccountRecord, AccountRef, LimitWindow, RateWindow
+from obdi.ingest.identity import artefact_digest, content_key
+from obdi.ingest.parsers.statement_reading import StatementReading, reading_to_json
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.store import Store
+from obdi.ingest.synthetic_pdf import build_pdf
 from page_dom import Node, elements, parse
 from served_store import environment_for, served_store
 

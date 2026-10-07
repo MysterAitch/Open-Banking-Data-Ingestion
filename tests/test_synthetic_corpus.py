@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from obdi.store import Store
-from obdi.synthetic import build_world, write_corpus
+from obdi.ingest.store import Store
+from obdi.ingest.synthetic import build_world, write_corpus
 
 
 def land(store_path, path, account: str):
@@ -45,7 +45,7 @@ def land(store_path, path, account: str):
     app can actually hold, and it is what makes test_TheCorpus_SurvivesARebuild
     meaningful rather than tautological.
     """
-    from obdi.ingest import import_file
+    from obdi.ingest.pipeline import import_file
 
     with Store(store_path) as store:
         return import_file(store, Path(path), account_id=account)
@@ -195,7 +195,7 @@ class TestWhatTheApplicationDerivesFromIt:
         asserts the survival directly rather than trusting that importing
         through the door is enough - the door could change.
         """
-        from obdi.rebuild import rebuild_from_raw
+        from obdi.ingest.rebuild import rebuild_from_raw
 
         directory, world, _manifest = corpus
         store_path = tmp_path / "store.sqlite3"
@@ -291,7 +291,7 @@ class TestThePatternFeaturesAgainstKnownAnswers:
         halves of the failure are visible: a pairing that misses one, and a
         pairing that invents one out of two unrelated payments that happen to
         offset."""
-        from obdi.ingest import pair_transfers_across_store
+        from obdi.ingest.pipeline import pair_transfers_across_store
 
         directory, world, manifest = corpus
         store_path = tmp_path / "store.sqlite3"
@@ -512,8 +512,8 @@ class TestAFileThatCorroboratesItself:
     """
 
     def _verdicts(self, directory, manifest, name: str = ""):
-        from obdi.parsers.uk_banks import detect
-        from obdi.verification import verify_export
+        from obdi.ingest.parsers.uk_banks import detect
+        from obdi.ingest.verification import verify_export
 
         delivery = next(
             item for item in manifest["deliveries"] if "corroborate itself" in item["fault"]
@@ -592,8 +592,8 @@ class TestTheGeneratedStatements:
         what makes it worth having - a file that cannot be checked against
         anything else can still be checked against its own arithmetic.
         """
-        from obdi.parsers.santander_pdf import read_statement
-        from obdi.statement_shape import pdf_lines
+        from obdi.ingest.parsers.santander_pdf import read_statement
+        from obdi.ingest.statement_shape import pdf_lines
 
         directory, _world, manifest = corpus
         statements = manifest["statements"]
@@ -650,9 +650,9 @@ class TestTheGeneratedStatements:
         own gate reads it at import and refuses. A test that never called that
         door could not tell the two apart.
         """
-        from obdi.parsers.santander_pdf import read_statement
-        from obdi.statement_shape import pdf_lines
-        from obdi.synthetic import _WRAPPED_STATEMENT
+        from obdi.ingest.parsers.santander_pdf import read_statement
+        from obdi.ingest.statement_shape import pdf_lines
+        from obdi.ingest.synthetic import _WRAPPED_STATEMENT
 
         directory, _world, manifest = corpus
 
@@ -699,9 +699,9 @@ class TestTheGeneratedStatements:
         bytes are kept, so a better parser reads them later without the document
         being fetched again.
         """
-        from obdi.parsers.base import ParseError
-        from obdi.parsers.uk_banks import detect
-        from obdi.synthetic import _WRAPPED_STATEMENT
+        from obdi.ingest.parsers.base import ParseError
+        from obdi.ingest.parsers.uk_banks import detect
+        from obdi.ingest.synthetic import _WRAPPED_STATEMENT
 
         directory, _world, manifest = corpus
         intact = manifest["statements"][1]["name"]
@@ -740,9 +740,9 @@ class TestTheGeneratedStatements:
         reconcile" and sent somebody looking for a missing transaction that
         does not exist.
         """
-        from obdi.parsers.santander_pdf import read_statement
-        from obdi.statement_shape import pdf_lines
-        from obdi.synthetic import _MULTIPAGE_STATEMENT
+        from obdi.ingest.parsers.santander_pdf import read_statement
+        from obdi.ingest.statement_shape import pdf_lines
+        from obdi.ingest.synthetic import _MULTIPAGE_STATEMENT
 
         directory, _world, manifest = corpus
 
@@ -1328,8 +1328,8 @@ class TestTheReportAPersonActuallyReads:
         point: a month every source agrees is empty is most likely the truth.
         """
         from obdi.coverage import gaps
-        from obdi.ingest import reconcile_batch
-        from obdi.parsers.uk_banks import detect
+        from obdi.ingest.parsers.uk_banks import detect
+        from obdi.ingest.pipeline import reconcile_batch
 
         directory, _world, manifest = corpus
         second = next(

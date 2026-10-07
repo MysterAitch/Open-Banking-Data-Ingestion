@@ -23,8 +23,8 @@ import threading
 import httpx
 import pytest
 
-from obdi.connections import ConnectionStore
-from obdi.identity import artefact_digest
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.identity import artefact_digest
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from test_statement_shape import build_pdf
 
@@ -203,7 +203,7 @@ class TestTheEndToEndSkipPath:
 
         from obdi.core.models import RawArtefact
         from obdi.core.namespaces import UNASSIGNED_ACCOUNT
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         db = tmp_path / "store.sqlite3"
         digest = artefact_digest(HELD)

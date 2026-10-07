@@ -36,8 +36,8 @@ import json
 from collections import Counter
 from dataclasses import dataclass, field
 
-from .arrival_order import in_arrival_order
-from .store import Store
+from .ingest.arrival_order import in_arrival_order
+from .ingest.store import Store
 
 #: Where a payload keeps its records, in the order the providers use.
 _RECORD_KEYS = ("results", "feedItems", "booked", "pending", "accounts")
@@ -206,7 +206,7 @@ def analyse(store: Store, *, churn_limit: int = 20) -> DuplicationReport:
     replay processes them, so "already seen" here means the same thing it
     would mean during a rebuild.
     """
-    from .rebuild import _NON_TRANSACTIONAL
+    from .ingest.rebuild import _NON_TRANSACTIONAL
 
     seen_bytes: dict[str, set[str]] = {}
     seen_canonical: dict[str, set[str]] = {}

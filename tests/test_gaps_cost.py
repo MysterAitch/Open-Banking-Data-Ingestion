@@ -18,7 +18,7 @@ import pytest
 
 import home_world as world
 from obdi.cli import build_web_config
-from obdi.store import Store
+from obdi.ingest.store import Store
 from served_store import environment_for
 from test_ledger import land, txn
 

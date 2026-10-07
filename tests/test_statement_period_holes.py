@@ -27,11 +27,11 @@ from pathlib import Path
 import pytest
 
 from obdi.fetch_gaps import GapKind, fetch_report, gather_evidence
-from obdi.parsers.pdf_statements import SectionReading
-from obdi.parsers.statement_reading import StatementReading, StatementRow
+from obdi.ingest.parsers.pdf_statements import SectionReading
+from obdi.ingest.parsers.statement_reading import StatementReading, StatementRow
+from obdi.ingest.statement_terms import statement_periods
+from obdi.ingest.store import SectionAssignment, Store
 from obdi.statement_span import HoleReason, Known, statement_spans
-from obdi.statement_terms import statement_periods
-from obdi.store import SectionAssignment, Store
 from statement_span_world import Spend, feed
 
 D = date
@@ -56,7 +56,7 @@ def planted(monkeypatch: pytest.MonkeyPatch, *sections: SectionReading) -> None:
             if account_ref is None or account_ref == ACCOUNT:
                 yield assignment, found
 
-    monkeypatch.setattr("obdi.statement_terms.assigned_sections", held)
+    monkeypatch.setattr("obdi.ingest.statement_terms.assigned_sections", held)
 
 
 @pytest.fixture

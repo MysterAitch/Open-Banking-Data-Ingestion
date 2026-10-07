@@ -44,9 +44,9 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from obdi.accounts import AccountRecord, AccountRef
-from obdi.ingest import pair_transfers_across_store
-from obdi.store import Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.pipeline import pair_transfers_across_store
+from obdi.ingest.store import Store
 from page_dom import INVISIBLE, Node
 from test_ledger import land, txn
 

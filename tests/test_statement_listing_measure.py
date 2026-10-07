@@ -50,12 +50,15 @@ import pytest
 from credit_union_documents import nine_accounts, pdf
 from obdi.account_names import AccountsShown
 from obdi.balance_anchors import record_stated_anchor
-from obdi.connections import ConnectionStore
 from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
-from obdi.family_anchors import Families
-from obdi.identity import artefact_digest, content_key
-from obdi.ingest import import_file, media_type_of, reconcile_batch
-from obdi.parsers.credit_union_pdf import section_key
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.family_anchors import Families
+from obdi.ingest.identity import artefact_digest, content_key
+from obdi.ingest.parsers.credit_union_pdf import section_key
+from obdi.ingest.pipeline import import_file, media_type_of, reconcile_batch
+from obdi.ingest.statement_terms import keep_statement_readings
+from obdi.ingest.store import Store
+from obdi.ingest.synthetic_pdf import build_pdf
 from obdi.statement_listing_measure import (
     DayReading,
     Held,
@@ -66,9 +69,6 @@ from obdi.statement_listing_measure import (
     statement_listing_report,
 )
 from obdi.statement_listing_page import statement_listing_html
-from obdi.statement_terms import keep_statement_readings
-from obdi.store import Store
-from obdi.synthetic_pdf import build_pdf
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from section_harness import config, environment, keep
 from statement_span_world import MONTHS, Spend, _ordinal, _pounds, feed, statement
@@ -945,9 +945,9 @@ class TestASectionOfAnAllAccountsStatement:
         assert sectioned["credit-union-personal-loan"].failing == []
 
     def test_Readings_WhenTheDocumentsOwnReadingIsAnotherStatements_IsNeverBorrowed(self):
-        from obdi.parsers.statement_reading import StatementReading
+        from obdi.ingest.parsers.statement_reading import StatementReading
+        from obdi.ingest.statement_terms import KeptPdf
         from obdi.statement_listing_measure import _Readings
-        from obdi.statement_terms import KeptPdf
 
         whole = StatementReading(
             statement_date=D(2026, 3, 1), closing_balance_minor=5, opening_balance_minor=5

@@ -19,8 +19,8 @@ import threading
 import httpx
 import pytest
 
-import obdi.statement_columns as statement_columns
-from obdi.connections import ConnectionStore
+import obdi.ingest.statement_columns as statement_columns
+from obdi.ingest.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from test_statement_shape import build_pdf
 

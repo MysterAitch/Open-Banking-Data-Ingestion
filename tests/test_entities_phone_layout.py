@@ -21,8 +21,8 @@ from pathlib import Path
 
 import pytest
 
-from obdi.connections import ConnectionStore
 from obdi.entities import Covered, EntitiesView, Entity, view_of
+from obdi.ingest.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 sync_api = pytest.importorskip("playwright.sync_api")

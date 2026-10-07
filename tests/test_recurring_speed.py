@@ -17,8 +17,8 @@ import pytest
 
 from large_store_corpus import LargeStore, cached_large_store
 from large_store_pages import serving
+from obdi.ingest.store import Store
 from obdi.recurring import find_recurring
-from obdi.store import Store
 
 #: Statements a GET of the page may issue: the transactions, the pairing table twice over (once
 #: for the confirmation set and once for the pairs), the declared accounts, and the connections'

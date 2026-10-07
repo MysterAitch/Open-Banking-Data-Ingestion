@@ -22,6 +22,7 @@ from obdi.agreement import (
     Standing,
 )
 from obdi.fetch_gaps import AccountOutlook, Basis, FetchGap, FetchReport, GapKind
+from obdi.ingest.rebuild_hold import RebuildHold
 from obdi.overview import (
     CURRENT,
     EMPTY,
@@ -33,7 +34,6 @@ from obdi.overview import (
     AttentionItem,
     Overview,
 )
-from obdi.rebuild_hold import RebuildHold
 from obdi.standing_data import AccountStanding
 from obdi.web_overview import overview_html
 from page_dom import Node, elements, inside, parse

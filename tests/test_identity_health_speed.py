@@ -28,10 +28,10 @@ from large_store_corpus import MAIN, LargeStore, cached_large_store
 from large_store_pages import copy_of, serving
 from obdi import statement_opening_measure
 from obdi.exact_rule_measure import exact_rule_report
-from obdi.family_anchors import families_of
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.store import Store
 from obdi.statement_listing_measure import statement_listing_report
 from obdi.statement_opening_measure import statement_opening_report
-from obdi.store import Store
 
 PAGE = "/identity-health"
 
@@ -133,7 +133,7 @@ class TestTheIdentityHealthPageOverTheLargeStore:
     ):
         from datetime import date
 
-        from obdi.ingest import reconcile_batch
+        from obdi.ingest.pipeline import reconcile_batch
         from test_ledger import txn
 
         held = copy_of(large, tmp_path / "copy")

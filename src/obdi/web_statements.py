@@ -20,11 +20,11 @@ from collections.abc import Callable, Mapping, Sequence
 from urllib.parse import quote
 
 from .account_names import AccountsShown
-from .bring_in_guess import guess_account
 from .core.namespaces import UNASSIGNED_ACCOUNT
 from .core.page_times import instant_of
 from .core.plural import plural
-from .statement_extraction import not_yet_extracted_words
+from .ingest.bring_in_guess import guess_account
+from .ingest.statement_extraction import not_yet_extracted_words
 from .web_marks import FETCH_NEXT_LINE
 
 _esc = html.escape

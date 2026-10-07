@@ -22,10 +22,10 @@ from datetime import date
 
 from .core.errors import DataError
 from .core.page_times import range_text, range_with_span
-from .parsers.base import ParseError
-from .parsers.pdf_statements import PdfStatementParser
-from .parsers.statement_reading import StatementReading
-from .parsers.uk_banks import detect
+from .ingest.parsers.base import ParseError
+from .ingest.parsers.pdf_statements import PdfStatementParser
+from .ingest.parsers.statement_reading import StatementReading
+from .ingest.parsers.uk_banks import detect
 from .statement_sections import masked, read_sections
 
 #: The title of the one finding for a document that is not divided into accounts.

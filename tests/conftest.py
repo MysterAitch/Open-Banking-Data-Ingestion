@@ -243,8 +243,8 @@ def land_transaction():
     from datetime import date as _date
 
     from obdi.core.models import SourceTier, Transaction, TransactionStatus
-    from obdi.identity import content_key as compute_content_key
-    from obdi.ingest import reconcile_batch
+    from obdi.ingest.identity import content_key as compute_content_key
+    from obdi.ingest.pipeline import reconcile_batch
 
     def land(
         store,
@@ -304,7 +304,7 @@ def serve_hub(tmp_path):
     import threading
     from http.server import HTTPServer
 
-    from obdi.connections import ConnectionStore
+    from obdi.ingest.connections import ConnectionStore
     from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
     servers: list[HTTPServer] = []
@@ -410,7 +410,7 @@ def _no_card_list_over_the_network(monkeypatch) -> None:
     request. A connection with no cards is the neutral answer; a test about
     cards replaces it. A call carrying its own `client` is a test of the real
     function against a fake transport, and passes straight through."""
-    from obdi.providers import truelayer
+    from obdi.ingest.providers import truelayer
 
     real = truelayer.fetch_cards
 
@@ -419,7 +419,7 @@ def _no_card_list_over_the_network(monkeypatch) -> None:
             return real(*args, **kwargs)
         return [], b'{"results": []}'
 
-    monkeypatch.setattr("obdi.pull.truelayer.fetch_cards", guarded)
+    monkeypatch.setattr("obdi.ingest.pull.truelayer.fetch_cards", guarded)
 
 
 @pytest.fixture(autouse=True)

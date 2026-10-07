@@ -27,7 +27,6 @@ from datetime import date
 
 import pytest
 
-from obdi.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
 from obdi.balance_anchors import (
     STATED,
     disregard_balance,
@@ -35,7 +34,8 @@ from obdi.balance_anchors import (
     record_stated_anchor,
     unitemised_for_store,
 )
-from obdi.store import Store
+from obdi.ingest.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
+from obdi.ingest.store import Store
 
 TODAY = date(2026, 4, 30)
 

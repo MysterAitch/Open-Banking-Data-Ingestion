@@ -28,17 +28,17 @@ from urllib.parse import urlparse
 from .account_names import AccountsShown
 from .alerts import consent_rung
 from .callback import render_page
-from .connections import ConnectionStore
 from .core.buildinfo import describe
 from .core.page_times import instant_of
+from .ingest.connections import ConnectionStore
 from .values_sitting import more_line_html
 from .web_connections import Hooks, connections_body
 from .web_marks import FETCH_NEXT_LINE
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
-    from .accounts import AccountRecord
     from .coverage import SourceCoverage
-    from .spaces import ArchiveNote
+    from .ingest.accounts import AccountRecord
+    from .ingest.spaces import ArchiveNote
     from .web import ExtendableAccount, WebConfig
 
 _esc = html.escape

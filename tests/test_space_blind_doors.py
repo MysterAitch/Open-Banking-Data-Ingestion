@@ -38,14 +38,14 @@ from typing import Any
 import pytest
 
 import obdi.cli as cli
-import obdi.ingest as ingest
-import obdi.pull as pull_module
+import obdi.ingest.pipeline as ingest
+import obdi.ingest.pull as pull_module
 import obdi.statement_sections as sections
 from obdi.core.models import Transaction
-from obdi.providers import truelayer
-from obdi.rebuild import rebuild_from_raw
+from obdi.ingest.providers import truelayer
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.store import Store
 from obdi.statement_sections import assign_section, check_assignment
-from obdi.store import Store
 from round_up_corpus import card_payment, land_feed, main_feed
 from section_harness import UNASSIGNED, config, environment, keep
 from test_assignment_doubt import SANTANDER_AS_WRITTEN
@@ -149,7 +149,7 @@ class TestReplayingOneArtefact:
 
 class TestTypingATransaction:
     def typed_over_a_leg(self, db: Path, *, given_map: bool) -> list[tuple[bool, list[str]]]:
-        from obdi.typed_transactions import record_typed_transaction
+        from obdi.ingest.typed_transactions import record_typed_transaction
 
         with Store(db) as store:
             land_evidence(store)

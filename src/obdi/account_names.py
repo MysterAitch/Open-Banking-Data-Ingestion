@@ -19,7 +19,7 @@ from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, replace
 
-from .accounts import AccountRecord
+from .ingest.accounts import AccountRecord
 
 
 def code_html(identifier: str) -> str:

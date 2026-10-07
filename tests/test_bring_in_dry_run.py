@@ -40,8 +40,8 @@ import pytest
 from coverage_page_world import repeated_lines
 from fetch_gaps_world import MONTHS, _declare, _pounds, feed, ordinal
 from obdi import values_sitting
-from obdi.store import Store
-from obdi.synthetic_pdf import build_pdf
+from obdi.ingest.store import Store
+from obdi.ingest.synthetic_pdf import build_pdf
 from page_dom import Node, elements, parse
 from served_store import environment_for, served_store
 

@@ -31,7 +31,7 @@ import pytest
 
 from fetch_gaps_world import Household, _declare, feed, santander_statements
 from obdi.fetch_gaps import add_months
-from obdi.store import Store
+from obdi.ingest.store import Store
 from page_dom import elements, parse
 from served_store import environment_for, served_store
 

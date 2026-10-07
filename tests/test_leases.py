@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from obdi.leases import STACK_UPDATE, acquire, active, held, lease, release
+from obdi.ingest.leases import STACK_UPDATE, acquire, active, held, lease, release
 
 
 class TestLeases:
@@ -73,7 +73,7 @@ class TestScheduledPullGate:
         import json as _json
         from datetime import datetime
 
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         db = tmp_path / "s.sqlite3"
         with Store(db) as store:
@@ -123,7 +123,7 @@ class TestScheduledPullGate:
 
     def test_FirstEverCycle_RunsNormally(self, tmp_path, monkeypatch):
         from obdi.cli import scheduled_pull_skip_reason
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
         db = tmp_path / "s.sqlite3"
@@ -142,7 +142,7 @@ class TestScheduledPullGate:
         from datetime import UTC, datetime
 
         from obdi.cli import scheduled_pull_skip_reason
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
         db = tmp_path / "s.sqlite3"
@@ -167,8 +167,8 @@ class TestScheduledPullGate:
         their collision aborted a live rebuild after the wipe. The pull
         loses nothing by waiting one interval."""
         from obdi.cli import scheduled_pull_skip_reason
-        from obdi.leases import acquire
-        from obdi.store import Store
+        from obdi.ingest.leases import acquire
+        from obdi.ingest.store import Store
 
         locks = tmp_path / "locks"
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
@@ -184,8 +184,8 @@ class TestScheduledPullGate:
 
     def test_MidCyclePull_HoldsTheRebuildBack(self, tmp_path, monkeypatch):
         from obdi.cli import start_background_rebuild
-        from obdi.leases import acquire
-        from obdi.store import Store
+        from obdi.ingest.leases import acquire
+        from obdi.ingest.store import Store
 
         locks = tmp_path / "locks"
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
@@ -201,8 +201,8 @@ class TestScheduledPullGate:
 
     def test_StackUpdateLease_HoldsTheCycleBack(self, tmp_path, monkeypatch):
         from obdi.cli import scheduled_pull_skip_reason
-        from obdi.leases import STACK_UPDATE, acquire
-        from obdi.store import Store
+        from obdi.ingest.leases import STACK_UPDATE, acquire
+        from obdi.ingest.store import Store
 
         locks = tmp_path / "locks"
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
@@ -223,8 +223,8 @@ class TestRebuildGuards:
     audit reads a half-populated store."""
 
     def _db_with_rebuild_running(self, tmp_path, monkeypatch):
-        from obdi.leases import acquire
-        from obdi.store import Store
+        from obdi.ingest.leases import acquire
+        from obdi.ingest.store import Store
 
         locks = tmp_path / "locks"
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
@@ -246,7 +246,7 @@ class TestRebuildGuards:
 
     def test_NoRebuild_NoNote(self, tmp_path, monkeypatch):
         from obdi.cli import rebuild_in_progress_note
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
         db = tmp_path / "s.sqlite3"
@@ -286,7 +286,7 @@ class TestAnEarlyScheduledPullWaitsForItsSlot:
         import json as _json
         from datetime import datetime
 
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(tmp_path / "locks"))
         monkeypatch.setenv("OBDI_PULL_INTERVAL_SECONDS", "21600")
@@ -339,8 +339,8 @@ class TestAnEarlyScheduledPullWaitsForItsSlot:
     def test_Waiting_HoldsNoLease_SoADeployIsNeverBlockedByIt(self, tmp_path, monkeypatch):
         from datetime import UTC, datetime, timedelta
 
-        from obdi import leases
         from obdi.cli import _await_scheduled_clearance
+        from obdi.ingest import leases
 
         db = self._db(tmp_path, monkeypatch, "2026-10-01T18:45:00+00:00")
         clock = _Clock(datetime(2026, 10, 1, 22, 45, 0, tzinfo=UTC))
@@ -391,8 +391,8 @@ class TestAnEarlyScheduledPullWaitsForItsSlot:
         a stack update holds its lease, the update finishes, the pull runs."""
         from datetime import UTC, datetime
 
-        from obdi import leases
         from obdi.cli import _await_scheduled_clearance
+        from obdi.ingest import leases
 
         db = self._db(tmp_path, monkeypatch, "2026-10-01T18:45:00+00:00")
         clock = _Clock(datetime(2026, 10, 2, 0, 8, 0, tzinfo=UTC))
@@ -435,8 +435,8 @@ class TestTransientBlocksAreWaitedOut:
         self, tmp_path, monkeypatch
     ):
         from obdi.cli import _await_scheduled_clearance
-        from obdi.leases import STACK_UPDATE, acquire, release
-        from obdi.store import Store
+        from obdi.ingest.leases import STACK_UPDATE, acquire, release
+        from obdi.ingest.store import Store
 
         locks = tmp_path / "locks"
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
@@ -462,8 +462,8 @@ class TestTransientBlocksAreWaitedOut:
         Giving up at once cost the cycle a whole interval, the same as a
         deploy did."""
         from obdi.cli import _await_scheduled_clearance
-        from obdi.leases import acquire, release
-        from obdi.store import Store
+        from obdi.ingest.leases import acquire, release
+        from obdi.ingest.store import Store
 
         locks = tmp_path / "locks"
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
@@ -486,8 +486,8 @@ class TestTransientBlocksAreWaitedOut:
         self, tmp_path, monkeypatch
     ):
         from obdi.cli import _await_scheduled_clearance
-        from obdi.leases import acquire
-        from obdi.store import Store
+        from obdi.ingest.leases import acquire
+        from obdi.ingest.store import Store
 
         locks = tmp_path / "locks"
         monkeypatch.setenv("OBDI_LOCKS_DIR", str(locks))
@@ -508,19 +508,19 @@ class TestTransientBlocksAreWaitedOut:
 
 class TestExclusiveAcquisition:
     def test_SecondActor_CannotTakeALiveLease(self, tmp_path):
-        from obdi import leases
+        from obdi.ingest import leases
 
         assert leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", 3600)
         assert not leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", 3600)
 
     def test_ExpiredLease_IsContestedAndRetaken(self, tmp_path):
-        from obdi import leases
+        from obdi.ingest import leases
 
         assert leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", -1)
         assert leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", 3600)
 
     def test_ReleasedLease_CanBeRetaken(self, tmp_path):
-        from obdi import leases
+        from obdi.ingest import leases
 
         assert leases.acquire_exclusive(tmp_path, "rebuild-derived", "web", 3600)
         leases.release(tmp_path, "rebuild-derived")
@@ -564,7 +564,7 @@ class TestStoreExitDiscipline:
     def test_ExceptionInsideStoreBlock_RollsBackUncommittedWork(self, tmp_path):
         import pytest
 
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         db = tmp_path / "s.sqlite3"
         with pytest.raises(RuntimeError, match="mid-block failure"), Store(db) as store:
@@ -581,7 +581,7 @@ class TestStoreExitDiscipline:
         assert rows[0] == 0
 
     def test_CleanExit_StillCommits(self, tmp_path):
-        from obdi.store import Store
+        from obdi.ingest.store import Store
 
         db = tmp_path / "s.sqlite3"
         with Store(db) as store:

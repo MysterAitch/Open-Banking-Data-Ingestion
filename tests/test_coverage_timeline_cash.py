@@ -17,13 +17,13 @@ import httpx
 import pytest
 
 from coverage_timeline_serve import served, timeline_of
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.core.models import SourceTier, Transaction
 from obdi.core.namespaces import CASH_LEG_SOURCE, UNITEMISED_SOURCE
-from obdi.identity import content_key
-from obdi.ingest import reconcile_batch
-from obdi.providers import starling
-from obdi.store import Store
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.identity import content_key
+from obdi.ingest.pipeline import reconcile_batch
+from obdi.ingest.providers import starling
+from obdi.ingest.store import Store
 from obdi.web_coverage_timeline import MADE_BY_OBDI_WORDS, month_cells
 
 TODAY = date(2026, 10, 5)

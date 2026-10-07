@@ -24,7 +24,6 @@ from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING
 
-from .accounts import AccountRef
 from .balance_anchors import (
     CURRENCY,
     FAMILY,
@@ -39,10 +38,11 @@ from .balance_anchors import (
 from .core.masking import Structural
 from .core.models import Transaction
 from .fault_structure import StructureReport, account_report, walk_report
+from .ingest.accounts import AccountRef
 
 if TYPE_CHECKING:
-    from .family_anchors import Families
-    from .store import Store
+    from .ingest.family_anchors import Families
+    from .ingest.store import Store
 
 WHOLE = "whole"
 OWN = "own"

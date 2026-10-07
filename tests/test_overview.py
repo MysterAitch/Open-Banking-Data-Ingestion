@@ -30,8 +30,9 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 
 import obdi.overview as overview_module
-from obdi.accounts import AccountRecord, AccountRef
 from obdi.alerts import Finding
+from obdi.ingest.accounts import AccountRecord, AccountRef
+from obdi.ingest.store import Store
 from obdi.overview import (
     ALERT_CONDITIONS,
     ARCHIVED,
@@ -52,7 +53,6 @@ from obdi.overview import (
     build_overview,
     freshness,
 )
-from obdi.store import Store
 from test_balance_reconciliation import _built
 from test_historical_spaces import store_with_a_deleted_space  # noqa: F401
 from test_ledger import build_household, land, txn
@@ -278,7 +278,7 @@ class TestTheOverviewsOwnChecks:
     ):
         """An id that was never listed beside the id holding its row is what a
         renumbered payment looks like, and must not shout as a lost one."""
-        from obdi.identity_health import IdentityHealth, ProviderIdTally
+        from obdi.ingest.identity_health import IdentityHealth, ProviderIdTally
         from obdi.overview import identity_items_from
 
         health = IdentityHealth(
@@ -368,7 +368,7 @@ class TestTheOverviewsOwnChecks:
     def test_RecoveredSpaces_WhenEveryOneIsDeclared_RaisesNothing(
         self, store_with_a_deleted_space
     ):
-        from obdi.spaces import account_for, recover
+        from obdi.ingest.spaces import account_for, recover
 
         with Store(store_with_a_deleted_space) as store:
             for space in recover(store):
