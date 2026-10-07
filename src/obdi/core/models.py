@@ -149,13 +149,23 @@ class RawArtefact:
     request_meta: str = ""
 
 
+#: Sources whose one stated date is the day the payment POSTED, not the day it was made. The
+#: aggregator's `timestamp` is documented as "the date the transaction was posted on the
+#: account" (`classification`), and on a real row was the day after the statement's transaction
+#: date; it states no separate transaction time. Both of a row's dates carry that one day.
+POSTING_DATE_ONLY_SOURCES = frozenset({"truelayer"})
+
+
 @dataclass(frozen=True)
 class Transaction:
     """A normalised money movement.
 
-    `booking_date` is when the bank posted it; `value_date` is when it counted.
-    They differ, and the difference is what shifts when a pending transaction
-    settles - which is why `value_date` alone feeds the content key.
+    `value_date` is the date the source gives for the transaction - when the owner acted or the
+    payment was made - and `booking_date` is when the bank posted, entered, or settled it,
+    where the source states both. Where it states only one date, both carry it (and
+    `states_transaction_date` says whether that one is a posting date). The difference is what
+    shifts when a pending transaction settles - which is why `value_date` alone feeds the
+    content key.
     """
 
     account_id: str
@@ -211,6 +221,17 @@ class Transaction:
     @property
     def is_credit(self) -> bool:
         return self.amount_minor > 0
+
+    @property
+    def states_transaction_date(self) -> bool:
+        """Whether `value_date` is the day the payment was made, as against the day it posted.
+
+        For the source whose only date is its posting date (`POSTING_DATE_ONLY_SOURCES`) it is
+        not, and `booking_date` equals it. For every other source `value_date` is the date the
+        source gives as the transaction's, and `booking_date` the day it was posted or settled
+        where the source states one (else the same day).
+        """
+        return self.source not in POSTING_DATE_ONLY_SOURCES
 
 
 @dataclass(frozen=True)

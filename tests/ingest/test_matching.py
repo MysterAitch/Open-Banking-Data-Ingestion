@@ -150,9 +150,16 @@ class TestSupersession:
         assert result.status is TransactionStatus.BOOKED
         assert result.value_date == date(2026, 3, 16)
 
-    def test_Transaction_WhenSuperseded_EarliestBookingDateRetained(self):
+    def test_Transaction_WhenPendingSettles_PostingDateIsTheSettledSightings(self):
+        # A pending sighting states no posting day (only when it was seen), so the day the bank
+        # took the payment is the settled sighting's. This pinned the earlier day until the
+        # rhythm detector began measuring pulled payments on the posting date.
         pending = txn(day=14, entity_id="ent-1", status=TransactionStatus.PENDING)
-        assert supersede(pending, txn(day=16)).booking_date == date(2026, 3, 14)
+        assert supersede(pending, txn(day=16)).booking_date == date(2026, 3, 16)
+
+    def test_Transaction_WhenTwoBookedSightingsState_EarliestPostingDateRetained(self):
+        first = txn(day=14, entity_id="ent-1", status=TransactionStatus.BOOKED)
+        assert supersede(first, txn(day=16)).booking_date == date(2026, 3, 14)
 
 
 class TestInternalTransfers:

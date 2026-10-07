@@ -409,7 +409,8 @@ class PdfStatementParser(StatementParser):
                 account_id=account_id,
                 amount_minor=row.amount_minor,
                 value_date=row.value_date,
-                booking_date=row.value_date,
+                # The day the bank entered it where the statement states one, else its one date.
+                booking_date=row.posted or row.value_date,
                 description=row.description,
                 source=self.source,
                 source_id=None,

@@ -339,6 +339,19 @@ def fetch_feed_between(
     return rows(payload, "feedItems"), body, asked
 
 
+def _settlement_day(item: JsonObject, transacted: date) -> date:
+    """The day the item states it settled, else the day it was made.
+
+    `value_date` carries `transactionTime` (when the owner acted) and `booking_date` the
+    `settlementTime` (when the bank took it), so a rhythm can be measured on whichever date its
+    kind needs (`analysis.recurring`). An item with no settlement time has only the one date.
+    """
+    stated = text(item, "settlementTime")
+    if not stated:
+        return transacted
+    return datetime.fromisoformat(stated.replace("Z", "+00:00")).date()
+
+
 def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:
     """Map one feed item, or None if it should not be stored.
 
@@ -387,6 +400,7 @@ def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:
     if not timestamp:
         raise StarlingError("feed item has no transaction time")
     when = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).date()
+    settled = _settlement_day(item, when)
 
     counterparty = text(item, "counterPartyName").strip()
     description = text(item, "reference").strip() or counterparty
@@ -396,7 +410,7 @@ def to_transaction(item: JsonObject, *, account_id: str) -> Transaction | None:
         amount_minor=minor_units,
         currency=currency,
         value_date=when,
-        booking_date=when,
+        booking_date=settled,
         description=description,
         counterparty=counterparty,
         status=status,
@@ -563,7 +577,7 @@ def _round_up_leg(item: JsonObject, *, account_id: str) -> Transaction | None:
         amount_minor=minor,
         currency="GBP",
         value_date=when,
-        booking_date=when,
+        booking_date=_settlement_day(item, when),
         description=ROUND_UP_DESCRIPTION,
         counterparty="",
         status=leg_status,

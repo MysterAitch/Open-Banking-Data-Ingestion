@@ -1747,9 +1747,16 @@ def supersede(previous: Transaction, observation: Transaction) -> Transaction:
     return replace(
         observation,
         entity_id=previous.entity_id,
-        # Retain the earliest booking date so "when did this first appear" is
-        # answerable after settlement moves the dates.
-        booking_date=min(previous.booking_date, observation.booking_date),
+        # `booking_date` is the day the bank posted it. A pending sighting states no posting day,
+        # only the day it was seen, so the settled sighting's replaces it; this had kept the
+        # earlier day, which put a Direct Debit's posting before its own settlement and hid the
+        # day it was taken from a rhythm measured on it. Between two sightings that both state
+        # a posting day the earlier is kept.
+        booking_date=(
+            observation.booking_date
+            if previous.status is TransactionStatus.PENDING
+            else min(previous.booking_date, observation.booking_date)
+        ),
         status=observation.status or previous.status,
         # Sticky. Confirming a transfer is expensive - it needs both sides
         # present in different accounts - and a later sighting arriving from a
