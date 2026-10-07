@@ -323,6 +323,11 @@ MORE_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "Recurring payments",
                 "What recurs in the transactions held: subscriptions, bills, transfers, income.",
             ),
+            (
+                "/entities",
+                "Entities",
+                "Gather the names a payee prints under into one, so what recurs is counted once.",
+            ),
             ("/coverage", "Coverage by source", "Which source holds which days, for each account."),
         ),
     ),

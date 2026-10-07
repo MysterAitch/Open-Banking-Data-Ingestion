@@ -64,6 +64,7 @@ from .coverage import report as coverage_report
 from .coverage_timeline import AccountTimeline
 from .declined_items import void_declined_items
 from .doctor import CheckResult, live_checks, report, run_checks, shape_problems
+from .entities import EntitiesView
 from .errors import DataError
 from .family_anchors import Families, families_of
 from .fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
@@ -3880,6 +3881,29 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         today = local_day(datetime.now(UTC))
         return RecurringFindings(find_recurring(transactions, pairs, today, closings), today)
 
+    def _shape_counts(store: Store) -> dict[str, int]:
+        from .entities import count_shapes
+        from .recurring import counts_as_occurrence
+
+        return count_shapes(
+            t.description for t in store.all_transactions() if counts_as_occurrence(t)
+        )
+
+    def entities_data() -> EntitiesView:
+        """Every payee name held across every account with its transactions, and the entities
+        made from them - one whole-table read of the transactions, whatever the store's size."""
+        from .entities import view_of
+
+        with Store(db_path) as store:
+            return view_of(_shape_counts(store), store.entities_with_shapes())
+
+    def entities_act(action: str, form: dict[str, list[str]]) -> str:
+        from .entity_actions import MERGE, apply_action
+
+        with Store(db_path) as store:
+            known = _shape_counts(store) if action == MERGE else {}
+            return apply_action(store, known, action, form)
+
     def preview_kept_statement(artefact_id: int, account_id: str) -> MatcherPreview | None:
         """How the matcher would resolve a kept statement's transactions against an account,
         counted with the dry run `check_assignment` uses and writing nothing.
@@ -4641,6 +4665,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
         ),
         recurring_data=recurring_data,
+        entities_data=entities_data,
+        entities_act=entities_act,
         attempts_index=attempts_index,
         extend_max=extend_max,
         account_shape=account_shape,

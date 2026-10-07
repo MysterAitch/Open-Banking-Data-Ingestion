@@ -72,6 +72,9 @@ class Proposal:
     rules: frozenset[str]
     #: Transactions across the shapes.
     transactions: int
+    #: The words every shape in the group begins with; empty where the group was joined through
+    #: words reordered, which share no opening.
+    opening: str = ""
 
 
 def _words(shape: str) -> frozenset[str]:
@@ -107,6 +110,28 @@ class Proposals:
 
     groups: tuple[Proposal, ...]
     too_broad: tuple[Proposal, ...]
+
+
+@dataclass(frozen=True)
+class EntitiesView:
+    """Everything the Entities page says: every shape with its transactions, the entities the
+    owner made, and what the rules propose from the shapes not yet under one."""
+
+    counts: Mapping[str, int]
+    entities: tuple[Entity, ...]
+    proposals: Proposals
+
+    def free_shapes(self) -> list[str]:
+        """The shapes under no entity, most-used first."""
+        held = {shape for entity in self.entities for shape in entity.shapes}
+        return sorted((s for s in self.counts if s not in held), key=lambda s: (-self.counts[s], s))
+
+
+def view_of(counts: Mapping[str, int], entities: Iterable[Entity]) -> EntitiesView:
+    """The page's view of the shapes held and the entities made from them."""
+    made = tuple(entities)
+    taken = {shape for entity in made for shape in entity.shapes}
+    return EntitiesView(counts, made, propose_groups(counts, taken=taken))
 
 
 def propose_groups(
@@ -163,6 +188,7 @@ def propose_groups(
                 shapes=ordered,
                 rules=rules,
                 transactions=sum(counts[s] for s in members),
+                opening=" ".join(shared),
             )
         )
     found.sort(key=lambda p: (-p.transactions, p.name, p.shapes))

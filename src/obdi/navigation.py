@@ -141,6 +141,10 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/reports": "more",
     "/review-flags": "more",
     "/recurring": "more",
+    "/entities": "more",
+    "/entities-merge": "more",
+    "/entities-split": "more",
+    "/entities-rename": "more",
     "/review-flags-two": "more",
     "/review-flags-one": "more",
     "/review-flags-undo": "more",
@@ -183,6 +187,7 @@ PAGE_NAMES: dict[str, PageName] = {
     # each other (`page_words`).
     "/agreements": PageName("Do my sources match?", "Cross-source agreement"),
     "/recurring": PageName("Recurring payments"),
+    "/entities": PageName("Entities"),
     "/identity-health": PageName("Is any payment counted twice?", "Identity health"),
     "/balance-reconciliation": PageName("Do the days add up?", "Balance reconciliation"),
     "/period-reconciliation": PageName("Do the statements add up?", "Statement periods"),

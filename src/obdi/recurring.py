@@ -547,7 +547,8 @@ def _split(
     return found
 
 
-def _counts(row: Transaction) -> bool:
+def counts_as_occurrence(row: Transaction) -> bool:
+    """Whether the row is an occurrence of anything: not history, and not yet pending."""
     return not row.status.is_history and row.status is not TransactionStatus.PENDING
 
 
@@ -565,7 +566,7 @@ def find_recurring(
     Pending and history rows (void, folded, reversed) are not occurrences: a pending row will be
     replaced by its settlement, and history is not money.
     """
-    rows = [row for row in transactions if _counts(row)]
+    rows = [row for row in transactions if counts_as_occurrence(row)]
     by_entity = {row.entity_id: row for row in rows}
     arriving: dict[str, Transaction] = {}
     for leaving_id, arriving_id in pairs:

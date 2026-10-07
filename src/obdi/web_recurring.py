@@ -199,16 +199,18 @@ def _list(rows: list[Series], names: AccountsShown, today: date, *, unmasked: bo
     return f'<ul class="recur-list">{items}</ul>'
 
 
-def _mode(*, unmasked: bool) -> str:
+def values_mode(route: str, *, unmasked: bool) -> str:
+    """The page's own "show values" press, or its "values are shown" notice, for the page at
+    `route`; the Entities page reads the same block."""
     if unmasked:
         return values_sitting.unless_sitting(
             '<p class="bad shown">'
             "VALUES ARE SHOWN on this page. It was produced by your request to show "
             "them, has no address of its own, and is not kept by the browser.</p>"
-            f'<p><a class="button secondary" href="{ROUTE}">Hide values</a></p>'
+            f'<p><a class="button secondary" href="{route}">Hide values</a></p>'
         )
     return (
-        f'<form method="post" action="{ROUTE}">'
+        f'<form method="post" action="{route}">'
         + submit_button("Show values", secondary=True)
         + "</form>"
         + values_sitting.show_everywhere_press()
@@ -253,7 +255,7 @@ def render_recurring(findings: RecurringFindings, names: AccountsShown, *, unmas
             )
         listing = "".join(sections)
     body = (
-        _mode(unmasked=unmasked)
+        values_mode(ROUTE, unmasked=unmasked)
         + lead
         + listing
         + '<p class="muted">Found from the transactions alone; nothing is declared or kept. '

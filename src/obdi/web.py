@@ -42,7 +42,7 @@ from secrets import token_urlsafe
 from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
-from . import values_sitting
+from . import entity_actions, values_sitting
 from .account_names import AccountShown, AccountsShown, accounts_shown, code_html
 from .accounts import AccountRecord, ArchiveOutcome
 from .actual_audit import (
@@ -69,6 +69,7 @@ from .connections import ConnectionStore, build_connection
 from .coverage import DoubtReport, SourceCoverage
 from .coverage_timeline import AccountTimeline
 from .doctor import shape_problems
+from .entities import EntitiesView
 from .errors import DataError
 from .fetch_gaps import FetchReport
 from .fetch_marks import MarkSet, MarkWorld
@@ -130,6 +131,7 @@ from .web_empty import (
     empty_result_row,
     plan_from_audit,
 )
+from .web_entities import EntitiesPages
 from .web_flags import FlagPages
 from .web_ledger import LedgerPages
 from .web_marker import marker_result_row
@@ -643,6 +645,12 @@ class WebConfig:
     #: What recurs in the transactions held (`recurring.find_recurring` over every account),
     #: judged against today: the Recurring page's one read.
     recurring_data: Callable[[], RecurringFindings] | None = None
+    #: Every counterparty name held with its transactions, and the entities made from them, with
+    #: what the rules propose from the names under none: the Entities page's one read.
+    entities_data: Callable[[], EntitiesView] | None = None
+    #: One press on the Entities page: (merge, split, or rename; the form it sent) to the
+    #: sentence that says what was done. A refusal is an `EntityRefused`.
+    entities_act: Callable[[str, dict[str, list[str]]], str] | None = None
     #: The fetch-attempt ledger: every ask made of a provider, refused or
     #: landed, plus per-account call counts over the last day. The probing
     #: workflow is press, read, decide - and deciding needs this without a
@@ -3618,6 +3626,7 @@ class ConnectionHandler(
     CoverageTimelinePages,
     PositionPages,
     RecurringPages,
+    EntitiesPages,
     DestinationPages,
     BringInPages,
     SetAsidePages,
@@ -3733,6 +3742,8 @@ class ConnectionHandler(
             self._flags_post()
         elif route == "/recurring":
             self._recurring_post()
+        elif route == "/entities":
+            self._entities_page(unmasked=True)
         else:
             return False
         return True
@@ -3890,6 +3901,9 @@ class ConnectionHandler(
             return
         if route == "/recurring":
             self._recurring_get()
+            return
+        if route == "/entities":
+            self._entities_get()
             return
         if route == "/date-lag":
             self._date_lag()
@@ -6392,6 +6406,18 @@ class ConnectionHandler(
             return
         if route == "/recurring":
             self._recurring_post()
+            return
+        if route == "/entities":
+            self._entities_show_post()
+            return
+        if route == "/entities-merge":
+            self._entities_press_post(entity_actions.MERGE)
+            return
+        if route == "/entities-split":
+            self._entities_press_post(entity_actions.SPLIT)
+            return
+        if route == "/entities-rename":
+            self._entities_press_post(entity_actions.RENAME)
             return
         if route == "/review-flags-two":
             self._flags_answer_post(self._read_form(), one=False)
