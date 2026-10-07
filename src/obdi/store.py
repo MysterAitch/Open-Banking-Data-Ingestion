@@ -2490,9 +2490,9 @@ class Store:
         if held is not None and str(held["account_ref"]) != account_ref:
             raise DataError(
                 f"this section is already assigned to {held['account_ref']}, and "
-                "its rows have been read into that account. A section cannot be "
-                "moved to another account once read in, because nothing takes "
-                "back the rows it contributed - nothing was changed."
+                "its rows have been read into that account. Assigning cannot take "
+                "those rows back; move the section instead (`move_statement_section`) "
+                "- nothing was changed."
             )
         self.connection.execute(
             "INSERT INTO statement_sections "
@@ -2502,6 +2502,58 @@ class Store:
             (digest, section_key, account_ref, label, _stamp_now()),
         )
         self.connection.commit()
+
+    def move_statement_section(
+        self, digest: str, section_key: str, new_account_ref: str
+    ) -> str | None:
+        """Re-file one assigned section under another account, carrying the rows it read in.
+
+        `assign_statement_section` refuses a second answer because nothing took back the rows the
+        first one contributed; this is the thing that does, the way `refile_artefact` does for a
+        whole statement: the rows derived from this document move with the declared assignment
+        (`_move_derived_rows`), in one transaction, so the assignment and the rows are never
+        under two accounts at once.
+
+        The rows are found by the document and the account they sit under, which is the whole of
+        what marks them as the section's. Where another section of the same document is assigned
+        to the same account their rows cannot be told apart, so the move is refused rather than
+        taking both.
+
+        Returns the account it was under, or None if the section was not assigned.
+        """
+        if not self.connection.in_transaction:
+            self.connection.execute("BEGIN IMMEDIATE")
+        held = self.connection.execute(
+            "SELECT account_ref FROM statement_sections WHERE digest = ? AND section_key = ?",
+            (digest, section_key),
+        ).fetchone()
+        if held is None:
+            self.connection.commit()
+            return None
+        old_ref = str(held["account_ref"])
+        if old_ref == new_account_ref:
+            self.connection.commit()
+            return old_ref
+        sharing = self.connection.execute(
+            "SELECT 1 FROM statement_sections "
+            "WHERE digest = ? AND account_ref = ? AND section_key != ?",
+            (digest, old_ref, section_key),
+        ).fetchone()
+        if sharing is not None:
+            self.connection.rollback()
+            raise DataError(
+                f"another account of this statement is assigned to {old_ref} too, and the rows "
+                "they read in cannot be told apart, so moving one would move both - nothing "
+                "was changed."
+            )
+        self._move_derived_rows(digest, old_ref, new_account_ref)
+        self.connection.execute(
+            "UPDATE statement_sections SET account_ref = ?, assigned_at = ? "
+            "WHERE digest = ? AND section_key = ?",
+            (new_account_ref, _stamp_now(), digest, section_key),
+        )
+        self.connection.commit()
+        return old_ref
 
     def statement_section_assignments(
         self, digest: str | None = None

@@ -128,6 +128,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/statements-assign": "bring-in",
     "/statement-dry-run": "bring-in",
     "/statement-section-assign": "bring-in",
+    "/statement-section-move": "bring-in",
     # More: everything else, in the plain groups its page lists them in. The accounts' own
     # housekeeping, the checks of the data's health, and the pages that exist to explain a fault
     # and the repairs.
