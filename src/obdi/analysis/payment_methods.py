@@ -27,6 +27,10 @@ class PaymentMethod:
     printed: tuple[str, ...]
     #: The (field, word) pairs a source states for it, as `stated_words` keeps them.
     coded: tuple[tuple[str, str], ...] = ()
+    #: The word of a printed phrase that is also a payee's own name ("google" in "google pay"):
+    #: the phrase is set aside before a name, but the word still tells payees apart, so it is not
+    #: one of `METHOD_WORDS`. Left in, three Google services stopped being offered as one payee.
+    brand: str = ""
 
 
 #: The first look at the Entities page over a real store found groups headed by direct debit,
@@ -60,6 +64,10 @@ METHODS: tuple[PaymentMethod, ...] = (
     PaymentMethod("balance-transfer", ("balance transfer", "balance transfers")),
     PaymentMethod("bank-transfer", ("bank transfer", "bank transfers")),
     PaymentMethod("card-provider", ("to pay cc",)),
+    # A wallet in front of a payee is how it was paid, not who: "google pay <retailer>" is that
+    # retailer. PayPal is deliberately not here - it is a counterparty of its own.
+    PaymentMethod("google-pay", ("google pay",), brand="google"),
+    PaymentMethod("apple-pay", ("apple pay",), brand="apple"),
 )
 
 
@@ -85,8 +93,11 @@ PRINTED_PHRASES: tuple[tuple[str, ...], ...] = tuple(
     )
 )
 
-#: The words that appear in any printed phrase: never a distinctive word of a payee's name.
-METHOD_WORDS: frozenset[str] = frozenset(word for phrase in PRINTED_PHRASES for word in phrase)
+#: The words that appear in any printed phrase: never a distinctive word of a payee's name,
+#: except a `PaymentMethod.brand`, which is one.
+METHOD_WORDS: frozenset[str] = frozenset(
+    word for phrase in PRINTED_PHRASES for word in phrase
+) - frozenset(method.brand for method in METHODS if method.brand)
 
 
 def strip_leading_methods(words: list[str]) -> list[str]:

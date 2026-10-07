@@ -8,6 +8,9 @@ Payment-method words (rule 1):
     words nowhere in the name.
   - A one-word retailer printed bare and after a method ("LIDL", "CONTACTLESS PAYMENT LIDL") is one
     group of two.
+  - A wallet ("GOOGLE PAY", "APPLE PAY") printed before a payee is a method like the rest; PayPal
+    is not one, and the wallet's brand word ("google") still tells payees apart, so three Google
+    services stay one group of three.
   - Nine different retailers printed after "FASTER PAYMENT" are nine unrelated names: nothing is
     offered and nothing is counted as too broad, because the method is not what they share.
   - A description that is only method words ("DIRECT DEBIT", "FASTER PAYMENT") keeps its words
@@ -68,6 +71,38 @@ class TestPaymentMethodWordsAreNotThePayee:
         (group,) = groups("FASTER PAYMENT TO PAY CC LIDL", "LIDL")
 
         assert group.name == "Lidl"
+
+    @pytest.mark.parametrize("wallet", ["GOOGLE PAY", "APPLE PAY", "CONTACTLESS PAYMENT"])
+    def test_Proposal_WhenAWalletPrecedesThePayee_JoinsThePayeesGroup(self, wallet):
+        (group,) = groups(f"{wallet} SAINSBURYS S MKTS", "SAINSBURYS S MKTS")
+
+        assert set(group.shapes) == {
+            f"{wallet.lower()} sainsburys s mkts",
+            "sainsburys s mkts",
+        }
+        assert wallet.split()[0].capitalize() not in group.name
+
+    def test_Proposal_WhenAWalletPrefixesAPossessiveSpelling_JoinsEitherSpelling(self):
+        (group,) = groups("GOOGLE PAY SAINSBURY'S MKTS", "SAINSBURYS S MKTS", "SAINSBURYS MKTS")
+
+        assert len(group.shapes) == 3
+
+    def test_Proposal_WhenOnlyAWalletIsPrinted_ProposesNothing(self):
+        assert groups("GOOGLE PAY", "APPLE PAY", "GOOGLE PAY 12") == []
+
+    def test_Proposal_WhenAWalletsBrandOpensSeveralOfItsOwnServices_StillOffersThemAsOnePayee(
+        self,
+    ):
+        (group,) = groups("GOOGLE STORAGE", "GOOGLE YOUTUBE", "GOOGLE CLOUD")
+
+        assert group.name == "Google"
+
+    def test_Proposal_WhenPayPalPrecedesPayees_PayPalIsStillTheirCounterparty(self):
+        # PayPal is a counterparty of its own and is not set aside like a wallet.
+        (group,) = groups("PAYPAL SPOTIFY", "PAYPAL NETFLIX", "PAYPAL STEAM")
+
+        assert group.name == "Paypal"
+        assert "paypal" not in payment_methods.METHOD_WORDS
 
     def test_Proposal_WhenNineRetailersFollowOneMethod_NothingIsOfferedOrCountedBroad(self):
         words = ["alpha", "bravo", "coral", "delta", "ember", "frost", "grove", "haven", "ivory"]
