@@ -634,6 +634,20 @@ obdi each day, and the projection to Actual moves to the end as an export. The s
 8. **R8 and R12** - exports to Actual, YNAB, or a file, kept cheap, built when wanted. **R11**
    the local model connector when the typing it saves is measured.
 
+**Never two-way sync.** The owner, 2026-10-07: "if I rename a payee in actual, that change
+needs to go back into OBDI otherwise it'll get wiped on the next rebuild/seed/sync - similarly
+assigning or creating or editing categories/targets/whatever" - and so "is it easier to just
+ask OBDI to add the features I want from the other software rather than doing hand changes in
+actual?" Yes, structurally: two editors of one fact need conflict resolution nobody can do
+but by hand; one-way projection is robust only if the facts are never edited at the far end,
+and that discipline failed because obdi offered no place for the hand work. So: facts are
+edited in obdi and only there, and obdi must make that one press from the row being looked at
+- a requirement on obdi, not on the owner; a tool he uses holds only what obdi does not model
+(envelope allocation), which never needs to come back; and where a fact is edited in the tool
+anyway, the push's existing audit lists the difference as a suggestion with its basis ("Actual
+says payee X is now Y") to adopt with one press or let the next push overwrite. Evidence with
+a basis, like a bank's category; never a merge.
+
 The slices below keep their original letters; their detail stands.
 
 **R1. Read the detector on the real store, then confirm series as commitments.**
