@@ -555,9 +555,22 @@ The line moves only on evidence, any one of these sustained for a couple of mont
 
 When one fires, what is built is the envelope view and a phone layout for it - one more page
 over data, verification, and projection that are already obdi's - and not a rewrite. Before
-one fires, building it is the expensive kind of nice-to-have. Until then "Actual is a
-disposable view" stands, and the projection (R8) is made complete enough that sign 1 is a
-measurement, not an impression: the projection reports what it could not carry.
+one fires, building it is the expensive kind of nice-to-have.
+
+**The signs had already fired when this was written.** The owner, the same day: "I currently
+don't use actual at all, because it is too noisy and requires so much hand work to categorise
+etc. ... The same is true for ynab - I have not used it in over a year/six months because the
+data in it is so stale ... This means OBDI is already quickly becoming the single pane of
+truth (albeit I don't currently use OBDI either - that's the gap/pain point I have at the
+moment where I do not use any tooling therefore don't yet have a clear idea of my financial
+position or budget etc.)". So the decision: **obdi is the tool.** Actual and YNAB become
+optional exports for a day they are wanted (a slice at the end of the roadmap, kept cheap),
+and the phase is reordered around one question - what makes the owner open obdi every day -
+which is a financial position he can trust and a month he can see. Envelopes are still held
+back: they are a method for deciding discretionary spend, and the pain described is upstream
+of that; if the month view does not answer "can I afford this?" well enough, that is their
+moment. "Actual is a disposable view" stands in a weaker form: nothing a person decides lives
+there, because nothing lives there at all until an export is asked for.
 
 ## 7. Pushing the boundaries
 
@@ -594,6 +607,34 @@ Each with what it would take and what would justify it.
 
 Slices sized as this week's: one build, one suite run, one release, each shippable alone with its
 measurement, smallest first. The first three in detail.
+
+**Re-cut on 2026-10-07 around daily use** (section 6a): the order is what makes the owner open
+obdi each day, and the projection to Actual moves to the end as an export. The sequence:
+
+1. **R1** - confirm what recurs, so the month's obligations are known (the detector found 77
+   series on the real store on 2026-10-07: 58 payments, 11 transfers, 8 incomes, 44 stopped,
+   4 changed; the page took 0.54 s; the owner's precision count is pending). With it, the
+   Recurring page leads with live series and folds those stopped over a year ago, and a
+   series must span at least four periods, not merely three occurrences.
+2. **R2** - the entity and the display name, because every page that follows names things.
+3. **Position, honestly** (new, before R3) - one page: what is held, what is owed, what is
+   committed before the next income, and what is free, per account and in total, each figure
+   with its basis beside it. The "available to spend" of a budgeting tool collapsed to one
+   number from facts obdi verifies. Measured against the owner's own reckoning for a month.
+4. **This month** (new) - the forward calendar as a page: each commitment due, paid or not yet,
+   the account it leaves and whether that account is funded for it before the next income,
+   receivables owed, goals' accruals. The budgeting core without envelopes - "can I afford
+   this?" answered from facts. The page the owner is expected to open first.
+5. **Goals** (new, R4's accrual engine made general): debts to clear, funds to build, savings,
+   with target types and progress; the stance default from them.
+6. **R3** flows and shares, then **R4** prepaid periods, **R5** the overview by provider and
+   product, **R9** the card's own commitments, **R10** windows that change.
+7. **R6** categories and rules and **R7** splits - discretionary spend last, because hand work
+   there is why the other tools were abandoned; gated on the owner asking for it.
+8. **R8 and R12** - exports to Actual, YNAB, or a file, kept cheap, built when wanted. **R11**
+   the local model connector when the typing it saves is measured.
+
+The slices below keep their original letters; their detail stands.
 
 **R1. Read the detector on the real store, then confirm series as commitments.**
 Read: the Recurring page on the real store (counts only): series by cadence and mark; whether
