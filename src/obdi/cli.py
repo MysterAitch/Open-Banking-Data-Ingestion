@@ -30,6 +30,7 @@ from .analysis.entities import (
     EntitiesView,
     EntityPage,
     Named,
+    NameOrigin,
     RuleTrial,
     learned_links,
     name_of,
@@ -3906,7 +3907,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             links, named = _name_rows([t for t in transactions if counts_as_occurrence(t)])
             held_names = {n: o.rows for n, o in name_origins(named).items()}
             gathered = {
-                shape: name for shape, (_id, name) in shape_entities(store, held_names).items()
+                key: name for key, (_id, name) in shape_entities(store, held_names).items()
             }
         closings: dict[str, list[tuple[date, int]]] = {}
         for closing in held:
@@ -3922,13 +3923,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         links = learned_links((t.description, t.counterparty) for t in rows)
         return links, [name_of(t.description, t.counterparty, links) for t in rows]
 
-    def _shape_counts(store: Store) -> dict[str, int]:
+    def _held_origins(store: Store) -> dict[str, NameOrigin]:
+        """How each name the store holds came to have it, with the source of a stated one."""
         from .analysis.recurring import counts_as_occurrence
 
-        _links, named = _name_rows(
-            [t for t in store.all_transactions() if counts_as_occurrence(t)]
-        )
-        return {n: o.rows for n, o in name_origins(named).items()}
+        rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+        _links, named = _name_rows(rows)
+        return name_origins(named, [t.source for t in rows])
+
+    def _shape_counts(store: Store) -> dict[str, int]:
+        return {n: o.rows for n, o in _held_origins(store).items()}
 
     def _covered(t: Transaction, item: Named, names: AccountsShown) -> Covered:
         from .read.ledger import row_anchor
@@ -3975,7 +3979,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 shown = listed.setdefault(shape, [])
                 if shape and len(shown) < COVERED_SHOWN:
                     shown.append(_covered(rows[i], named[i], names))
-            origins = name_origins(named)
+            origins = name_origins(named, [t.source for t in rows])
             counts = {n: o.rows for n, o in origins.items()}
             return view_of(
                 counts,
@@ -3989,11 +3993,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
-        from .analysis.entity_actions import MERGE, OWN, SPLIT, apply_action
+        from .analysis.entity_actions import CHILD, MERGE, OWN, SPLIT, apply_action
 
         with Store(db_path) as store:
-            known = _shape_counts(store) if action in (MERGE, OWN, SPLIT) else {}
-            return apply_action(store, known, action, form)
+            origins = _held_origins(store) if action in (MERGE, OWN, SPLIT, CHILD) else {}
+            known = {name: origin.rows for name, origin in origins.items()}
+            return apply_action(store, known, action, form, origins=origins)
 
     def entity_page(entity_id: int) -> EntityPage | None:
         """One entity with every name under it and the newest transactions of each: one
@@ -4004,7 +4009,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
             _links, named = _name_rows(rows)
-            origins = name_origins(named)
+            origins = name_origins(named, [t.source for t in rows])
             counts = {n: o.rows for n, o in origins.items()}
             entities = entities_of(store, counts)
             found = next((e for e in entities if e.id == entity_id), None)

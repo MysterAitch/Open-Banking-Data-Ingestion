@@ -17,10 +17,11 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date
 
+from ..ingest.entity_records import DESCRIPTION
 from ..ingest.store import Store
 from ..read.coverage_timeline import AGGREGATOR, EXPORT, FEED, kind_of_source
 from ..read.party_coverage import PartyStated, party_stated
-from .entities import DESCRIPTION, learned_links, name_of
+from .entities import learned_links, name_of
 
 #: The ways in that can carry a stated party where a statement reader states none.
 _CAN_STATE = frozenset({FEED, AGGREGATOR, EXPORT})

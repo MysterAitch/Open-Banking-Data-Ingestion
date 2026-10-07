@@ -13,12 +13,15 @@ from typing import TYPE_CHECKING
 from ..core.plural import plural
 from ..ingest.entity_records import OWNER_NAME, EntityRefused
 from .entities import (
+    NameOrigin,
     clean_rule,
     detach_shape,
     entities_of,
     exclude_shape,
+    holder_of,
+    identifier_for,
+    resolve_form_value,
     rule_phrase,
-    shape_entities,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -42,46 +45,68 @@ def _one(form: Mapping[str, Sequence[str]], field: str) -> str:
     return values[0].strip() if values else ""
 
 
+def _names_pressed(form: Mapping[str, Sequence[str]], known: Mapping[str, int]) -> list[str]:
+    """The names a press ticked, a reference to an account number turned back into the number
+    (`resolve_form_value`), and refused if the transactions no longer hold one."""
+    shapes = [
+        resolve_form_value(shape.strip(), known) for shape in form.get("shape", []) if shape.strip()
+    ]
+    _refuse_unknown(shapes, known)
+    return shapes
+
+
 def apply_action(
-    store: Store, known: Mapping[str, int], action: str, form: Mapping[str, Sequence[str]]
+    store: Store,
+    known: Mapping[str, int],
+    action: str,
+    form: Mapping[str, Sequence[str]],
+    origins: Mapping[str, NameOrigin] | None = None,
 ) -> str:
     """Do what a press asked and say what was done; `known` is every shape the store holds.
 
     A shape the transactions do not hold is refused: the form was made from a page that has since
     changed, or was not made from this page at all, and an entity over a name nothing prints would
     sit there for ever counting for nothing.
+
+    `origins` says how each name's rows came to have it. A merge attaches, for each ticked name,
+    the identifier its rows carry (`identifier_for`): the party's stated name where the name was
+    stated or linked to a party, the description-shape where it is the description alone. A name
+    with no origin given is attached as a description-shape, which is all that can be said of it.
     """
+    held_origins = origins or {}
     if action == MERGE:
-        shapes = [shape.strip() for shape in form.get("shape", []) if shape.strip()]
-        _refuse_unknown(shapes, known)
+        shapes = _names_pressed(form, known)
         rule = None
         if _one(form, "keep_rule"):
             rule = clean_rule(_one(form, "rule_kind"), _one(form, "rule_words"))
-        _entity, kept, made = store.gather_into(_one(form, "name"), shapes, rule=rule)
+        identifiers = [identifier_for(s, held_origins.get(s)) for s in shapes]
+        _entity, kept, made = store.gather_into(_one(form, "name"), identifiers, rule=rule)
         count = plural(len(set(shapes)), "name")
         said = f"Merged {count} into {kept}" if made else f"{count} added to {kept}"
         if rule is None:
             return f"{said}."
         return f"{said}; {rule_phrase(*rule)} will join it."
     if action == OWN:
-        shapes = [shape.strip() for shape in form.get("shape", []) if shape.strip()]
-        _refuse_unknown(shapes, known)
-        _entity, kept, made = store.gather_into_owner(shapes, _one(form, "name") or OWNER_NAME)
+        shapes = _names_pressed(form, known)
+        identifiers = [identifier_for(s, held_origins.get(s)) for s in shapes]
+        _entity, kept, made = store.gather_into_owner(identifiers, _one(form, "name") or OWNER_NAME)
         count = plural(len(set(shapes)), "name")
         if made:
             return f"Made {kept} for payments between your own accounts, holding {count}."
         return f"{count} added to {kept}."
     if action == SPLIT:
-        shape = _one(form, "shape")
-        held = shape_entities(store, known).get(shape)
+        shape = resolve_form_value(_one(form, "shape"), known)
+        kind = _one(form, "kind") or None
+        held = holder_of(store, shape, known)
         if held is None:
             raise EntityRefused("That name is not under an entity; the page may have changed.")
         by_hand = any(
-            entity.id == held[0] and shape in entity.shapes
+            entity.id == held[0]
+            and any(i.value == shape and kind in (None, i.kind) for i in entity.identifiers)
             for entity in store.entities_with_shapes()
         )
         if by_hand:
-            detach_shape(store, shape)
+            detach_shape(store, shape, kind=kind)
         else:
             exclude_shape(store, held[0], shape)
         if not any(entity.id == held[0] for entity in store.entities_with_shapes()):
@@ -102,7 +127,9 @@ def apply_action(
         if not entity.isdigit():
             raise EntityRefused("There is no such entity; it may have been removed.")
         parent = next((e.name for e in entities_of(store) if e.id == int(entity)), "")
-        store.make_child_entity(int(entity), _one(form, "shape"), _one(form, "name"))
+        store.make_child_entity(
+            int(entity), resolve_form_value(_one(form, "shape"), known), _one(form, "name")
+        )
         return f"Made {' '.join(_one(form, 'name').split())} its own entity under {parent}."
     if action == PARENT:
         entity = _one(form, "entity")

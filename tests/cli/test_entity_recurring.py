@@ -28,6 +28,7 @@ from obdi.analysis.entities import shape_of
 from obdi.analysis.recurring import find_recurring
 from obdi.cli import build_web_config
 from obdi.core.models import SourceTier, Transaction
+from obdi.ingest.entity_records import DESCRIPTION
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from page_dom import elements, parse
@@ -38,7 +39,15 @@ FIRST_PRINT = "FERNHOLLOW PLUS 1041"
 SECOND_PRINT = "FERNHOLLOW PLUS EU 2209"
 FIRST, SECOND = shape_of(FIRST_PRINT), shape_of(SECOND_PRINT)
 ENTITY = "Fernhollow Plus"
-BOTH = {FIRST: ENTITY, SECOND: ENTITY}
+
+
+def described(names: dict[str, str]) -> dict[tuple[str, str], str]:
+    """The detector's map of identifiers to entity names, for names these rows are called by their
+    description: it is keyed by kind and value (`shape_entities`), and these rows state no party."""
+    return {(DESCRIPTION, name): entity for name, entity in names.items()}
+
+
+BOTH = described({FIRST: ENTITY, SECOND: ENTITY})
 
 _counter = [0]
 
@@ -91,7 +100,9 @@ class TestARenamedSubscription:
         assert not series.stopped
 
     def test_Detector_WhenOneNameIsDetachedAgain_ReturnsTheTwoSeries(self):
-        found = find_recurring(renamed_subscription(), [], TODAY, entities={FIRST: ENTITY})
+        only_first = described({FIRST: ENTITY})
+
+        found = find_recurring(renamed_subscription(), [], TODAY, entities=only_first)
 
         assert sorted((s.shape, s.count) for s in found) == sorted([(ENTITY, 4), (SECOND, 5)])
 
@@ -106,8 +117,10 @@ class TestASubscriptionBilledUnderAlternatingNames:
         assert find_recurring(alternating_subscription(), [], TODAY) == []
 
     def test_Detector_WhenTheNamesAreGathered_FindsOneMonthlySeries(self):
-        names = dict.fromkeys(
-            (shape_of("ALTERNATE ONE 77"), shape_of("ALTERNATE TWO EU 88")), "Alternate"
+        names = described(
+            dict.fromkeys(
+                (shape_of("ALTERNATE ONE 77"), shape_of("ALTERNATE TWO EU 88")), "Alternate"
+            )
         )
 
         (series,) = find_recurring(alternating_subscription(), [], TODAY, entities=names)
@@ -142,7 +155,7 @@ class TestWhatAnEntityMustNotDo:
         assert find_recurring(twice, [], TODAY, entities=BOTH) == []
 
     def test_Detector_WhenAShapeIsNamedInDifferentCase_StillJoinsOneSeries(self):
-        names = {FIRST: "fernhollow plus", SECOND: "Fernhollow Plus"}
+        names = described({FIRST: "fernhollow plus", SECOND: "Fernhollow Plus"})
 
         (series,) = find_recurring(renamed_subscription(), [], TODAY, entities=names)
 

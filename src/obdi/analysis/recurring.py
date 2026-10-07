@@ -70,7 +70,7 @@ from statistics import median_low
 
 from ..core.models import Transaction, TransactionStatus
 from ..ingest.stated_words import words_in
-from .entities import Alias, learned_links, name_of
+from .entities import Alias, entity_of, learned_links, name_of
 from .payment_methods import METHODS
 
 #: Fewest occurrences that make a series. Two is a coincidence of a payee and a gap.
@@ -644,7 +644,7 @@ def find_recurring(
     pairs: Iterable[tuple[str, str]],
     today: date,
     closings: Closings | None = None,
-    entities: Mapping[str, str] | None = None,
+    entities: Mapping[tuple[str, str], str] | None = None,
     links: Mapping[str, Alias] | None = None,
 ) -> list[Series]:
     """Every series the transactions hold, by account and then by what they are called.
@@ -654,11 +654,12 @@ def find_recurring(
     not given), else its description's shape. A payee seen through a feed in some months and
     statements in others is therefore one series.
     `pairs` is the pairing pass's (leaving entity, arriving entity) for each proved transfer.
-    `entities` maps a payee name to the name of the entity the owner gathered it under: the
-    names of one entity are one payee here, so a subscription that changed the name it prints
-    under, or alternates between two, is one series, named by the entity (`Series.shape`). A
-    name under no entity is grouped as it is. Money in and money out stay apart, and a
-    transfer is found by its legs, never by a name.
+    `entities` maps an identifier (its kind and value, `entities.shape_entities`) to the name of
+    the entity the owner gathered it under; a row finds its entity by the identifier its name
+    and kind link through (`entities.entity_of`). The names of one entity are one payee here,
+    so a subscription that changed the name it prints under, or alternates between two, is one
+    series, named by the entity (`Series.shape`). A name under no entity is grouped as it is.
+    Money in and money out stay apart, and a transfer is found by its legs, never by a name.
     `closings` is each account's held statement closings, which explain a pulled series' missed
     slot where the card it pays owed nothing.
     Pending and history rows (void, folded, reversed) are not occurrences: a pending row will be
@@ -694,10 +695,12 @@ def find_recurring(
             shapes[between] = ""
             groups[between].append(_Leg(row, opposite.account_id))
             continue
-        shape = name_of(row.description, row.counterparty, links).name
+        named = name_of(row.description, row.counterparty, links)
+        shape = named.name
         if not shape:
             continue
-        gathered = (entities or {}).get(shape)
+        linked = entity_of(entities or {}, named.kind, shape)
+        gathered = None if linked is None else linked[1]
         if gathered is not None:
             payee = ("entity", gathered.casefold(), row.currency, direction)
             shapes[payee] = gathered

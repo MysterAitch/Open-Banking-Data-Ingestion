@@ -7,22 +7,29 @@ from raw); this module holds what is computed from the transactions alone.
 
 from __future__ import annotations
 
+import hashlib
 import heapq
 from collections import Counter
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from ..core.plural import plural
 from ..ingest.entity_records import (
+    ACCOUNT,
     BEGINS,
     CONTAINS,
+    DECLARED,
+    DESCRIPTION,
     OWNER_ROLE,
     RULE_KINDS,
+    SOURCE_ID,
+    STATED_NAME,
     Entity,
     EntityRefused,
     EntityRule,
+    Identifier,
 )
 from ..ingest.identity import NORMALISATION_STEPS, normalise_description
 from .entity_tokens import (
@@ -229,9 +236,8 @@ def shape_of(text: str) -> str:
 #: linked to a stronger one by rows seen by two sources (`learned_links`). RULE is an entity's
 #: rule matching a name, which acts on names and not on rows, so it is a kind of link and not a
 #: rung.
-ACCOUNT = "account"
-SOURCE_ID = "source id"
-STATED_NAME = "stated name"
+#: ACCOUNT, SOURCE_ID, STATED_NAME and DESCRIPTION are also the kinds of identifier an entity holds
+#: (`entity_records.IDENTIFIER_KINDS`, where they are defined once and imported here).
 ALIAS = "alias"
 #: A description-only row whose description, compared as names are compared (`entity_tokens`),
 #: equals one stated party's name compared the same way (`learned_links`). Weaker than ALIAS,
@@ -241,7 +247,6 @@ MATCHED_NAME = "matched name"
 #: exactly one stated party's name (`_truncation_parties` states the rule): a statement column
 #: that cuts a merchant at a fixed width. Weaker than MATCHED_NAME, which is exact.
 TRUNCATED_NAME = "truncated name"
-DESCRIPTION = "description"
 RULE = "rule"
 LADDER = (ACCOUNT, SOURCE_ID, STATED_NAME, ALIAS, MATCHED_NAME, TRUNCATED_NAME, DESCRIPTION)
 
@@ -259,6 +264,106 @@ KIND_SENTENCES: dict[str, str] = {
     DESCRIPTION: "description",
     RULE: "rule",
 }
+
+#: How a transaction is said to be linked to an entity, by the kind of identifier that linked it:
+#: the one table every page reads (NF-TRACE-01), so no page words a link itself.
+LINK_SENTENCES: dict[str, str] = {
+    ACCOUNT: "by the other party's account number",
+    SOURCE_ID: "by the source's own identifier for the other party",
+    STATED_NAME: "by the bank's name",
+    DESCRIPTION: "by the printed description",
+    RULE: "by rule",
+}
+
+#: What an entity page puts above the identifiers of each kind it holds, in the order they are
+#: listed (strongest first, then names a rule matches).
+IDENTIFIER_HEADINGS: dict[str, str] = {
+    ACCOUNT: "Account",
+    SOURCE_ID: "Known to a source as",
+    STATED_NAME: "Named by the bank as",
+    DESCRIPTION: "Printed as",
+    RULE: "Matched by a rule as",
+}
+
+#: The kind an attachment is read as when no identifier of the kind a row links through holds its
+#: name. Attachments made before kinds existed were all moved across as description-kind
+#: (`Store._migrate_entity_identifiers`), yet what they held was the name a row had when the owner
+#: pressed the button, which after stated names existed could be a stated party's. Without this
+#: fallback every such attachment would stop linking its rows on the day of the migration.
+LEGACY_KIND = DESCRIPTION
+
+
+def identifier_kind(kind: str) -> str:
+    """The kind of identifier a row named by `kind` (`LADDER`) links to an entity through: a row
+    named through a learned, matched, or truncated link links through the party it resolved to,
+    whose name is a stated name, so those three are `STATED_NAME`."""
+    return STATED_NAME if kind in (ALIAS, MATCHED_NAME, TRUNCATED_NAME) else kind
+
+
+def link_keys(kind: str, name: str) -> tuple[tuple[str, str], ...]:
+    """The identifiers (kind, value) that link a row of this name and `LADDER` kind to an
+    entity, strongest first: the row's own kind, then the legacy description kind
+    (`LEGACY_KIND`), then a rule matching the name (`RULE`)."""
+    own = identifier_kind(kind)
+    keys = [(own, name)]
+    if own != LEGACY_KIND:
+        keys.append((LEGACY_KIND, name))
+    keys.append((RULE, name))
+    return tuple(keys)
+
+
+_Held = TypeVar("_Held")
+
+
+def entity_of(
+    held: Mapping[tuple[str, str], _Held], kind: str, name: str
+) -> tuple[str, _Held] | None:
+    """The entity (or whatever `held` maps identifiers to) a row of this name and kind is linked
+    to, with the kind of identifier that linked it; None where no identifier it carries is held.
+    `held` is `shape_entities`."""
+    for key in link_keys(kind, name):
+        if key in held:
+            return key[0], held[key]
+    return None
+
+
+def name_shown(name: str, kind: str) -> str:
+    """A name as a page prints it: an account number only by its ending, whatever the page's
+    mode, since the digits of the other party's account are never the page's to print."""
+    if identifier_kind(kind) == ACCOUNT:
+        return f"ending {name[-ACCOUNT_ENDING:]}"
+    return name
+
+
+#: How many digits of an account number a page prints.
+ACCOUNT_ENDING = 4
+
+#: What a form carries in place of an account number, so the number is in no attribute of a page
+#: either: a press names it by a digest, and `resolve_form_value` finds the number again among the
+#: names the transactions hold.
+ACCOUNT_REFERENCE = "account-ref:"
+
+
+def form_value(name: str, kind: str) -> str:
+    """The value a form carries for a name: the name itself, except an account number, which is
+    carried as a reference to it (`ACCOUNT_REFERENCE`)."""
+    if identifier_kind(kind) != ACCOUNT:
+        return name
+    return ACCOUNT_REFERENCE + hashlib.sha256(name.encode()).hexdigest()[:16]
+
+
+def resolve_form_value(value: str, known: Iterable[str]) -> str:
+    """The name a form value stands for: itself, or for a reference to an account number
+    (`form_value`) the one name among `known` it was made from. Refused where none is, as a
+    name the transactions no longer hold is."""
+    if not value.startswith(ACCOUNT_REFERENCE):
+        return value
+    found = [name for name in known if form_value(name, ACCOUNT) == value]
+    if len(found) != 1:
+        raise EntityRefused(
+            "A name in that group is no longer in the transactions; reload the page and try again."
+        )
+    return found[0]
 
 
 def _set_aside_methods(text: str) -> str:
@@ -541,14 +646,28 @@ class NameOrigin:
     matched: int = 0
     #: Rows named by the description being a cut-off opening of this name (`TRUNCATED_NAME`).
     truncated: int = 0
+    #: Rows named by the other party's account number or a source's id for it, which a row
+    #: carries only once the derived rows have those columns.
+    account: int = 0
+    source_id: int = 0
+    #: The first source (alphabetically) that stated this name or the source's id, "" where none
+    #: did or the name is an account number, which is not per source.
+    source: str = ""
 
     @property
     def rows(self) -> int:
-        return self.stated + self.linked + self.described + self.matched + self.truncated
+        return (
+            self.stated + self.linked + self.described + self.matched + self.truncated
+            + self.account + self.source_id
+        )
 
     @property
     def kind(self) -> str:
         """The strongest kind any row of the name has (`LADDER`)."""
+        if self.account:
+            return ACCOUNT
+        if self.source_id:
+            return SOURCE_ID
         if self.stated:
             return STATED_NAME
         if self.linked:
@@ -558,15 +677,25 @@ class NameOrigin:
         return TRUNCATED_NAME if self.truncated else DESCRIPTION
 
 
-def name_origins(named: Iterable[Named]) -> dict[str, NameOrigin]:
-    """For each name, how its rows came to have it; rows with no name are not counted."""
+def name_origins(
+    named: Iterable[Named], sources: Iterable[str] | None = None
+) -> dict[str, NameOrigin]:
+    """For each name, how its rows came to have it; rows with no name are not counted.
+
+    `sources` is the source of each row, in the order of `named`, where the caller has them: the
+    source of a stated name or a source's id is kept for the identifier a merge attaches."""
     stated: Counter[str] = Counter()
     linked: Counter[str] = Counter()
     described: Counter[str] = Counter()
     matched: Counter[str] = Counter()
     truncated: Counter[str] = Counter()
+    accounts: Counter[str] = Counter()
+    source_ids: Counter[str] = Counter()
     supports: dict[str, dict[str, int]] = {}
-    for item in named:
+    first_source: dict[str, str] = {}
+    rows = list(named)
+    each = list(sources) if sources is not None else [""] * len(rows)
+    for item, source in zip(rows, each, strict=True):
         if not item.name:
             continue
         if item.kind == MATCHED_NAME:
@@ -578,8 +707,15 @@ def name_origins(named: Iterable[Named]) -> dict[str, NameOrigin]:
             supports.setdefault(item.name, {})[item.via] = item.support
         elif item.kind == DESCRIPTION:
             described[item.name] += 1
+        elif item.kind == ACCOUNT:
+            accounts[item.name] += 1
         else:
-            stated[item.name] += 1
+            if item.kind == SOURCE_ID:
+                source_ids[item.name] += 1
+            else:
+                stated[item.name] += 1
+            if source and (item.name not in first_source or source < first_source[item.name]):
+                first_source[item.name] = source
     return {
         name: NameOrigin(
             stated[name],
@@ -588,9 +724,54 @@ def name_origins(named: Iterable[Named]) -> dict[str, NameOrigin]:
             sum(supports.get(name, {}).values()),
             matched[name],
             truncated[name],
+            accounts[name],
+            source_ids[name],
+            first_source.get(name, ""),
         )
-        for name in {*stated, *linked, *described, *matched, *truncated}
+        for name in {
+            *stated, *linked, *described, *matched, *truncated, *accounts, *source_ids
+        }
     }
+
+
+def identifier_for(name: str, origin: NameOrigin | None) -> Identifier:
+    """The identifier a merge attaches for a ticked name: the strongest kind its rows carry,
+    never a string of unknown kind. A name stated, linked, or matched to a party is attached as
+    that party's stated name (with the source that stated it); a name made from a description
+    alone as a description-shape. A name the page holds no origin for is a description-shape,
+    which is all that can be said of it."""
+    if origin is None:
+        return Identifier(DESCRIPTION, name)
+    kind = identifier_kind(origin.kind)
+    source = origin.source if kind in (STATED_NAME, SOURCE_ID) else ""
+    return Identifier(kind, name, source, DECLARED, origin.rows)
+
+
+def carried_by(identifier: Identifier, origin: NameOrigin | None) -> bool:
+    """Whether some row now carries the identifier: a row of the name that the identifier's kind
+    links (`link_keys`). Without origins (a view made from counts alone) the name is all that can
+    be checked, and a name with rows is carried."""
+    if origin is None:
+        return True
+    return any(
+        key == (identifier.kind, identifier.value)
+        for kind in LADDER
+        if _origin_has(origin, kind)
+        for key in link_keys(kind, identifier.value)
+    )
+
+
+def _origin_has(origin: NameOrigin, kind: str) -> bool:
+    return bool(
+        {
+            ACCOUNT: origin.account,
+            SOURCE_ID: origin.source_id,
+            STATED_NAME: origin.stated,
+            ALIAS: origin.linked,
+            MATCHED_NAME: origin.matched,
+            DESCRIPTION: origin.described,
+        }[kind]
+    )
 
 
 def name_readings(
@@ -749,13 +930,31 @@ def entities_of(store: Store, known: Iterable[str] = ()) -> list[Entity]:
     return with_rules(made, rules, store.entity_exclusions(), names)
 
 
-def shape_entities(store: Store, known: Iterable[str] = ()) -> dict[str, tuple[int, str]]:
-    """Each name under an entity now (`entities_of`), to the id and name of its entity."""
-    return {
-        shape: (entity.id, entity.name)
-        for entity in entities_of(store, known)
-        for shape in entity.shapes
-    }
+def shape_entities(
+    store: Store, known: Iterable[str] = ()
+) -> dict[tuple[str, str], tuple[int, str]]:
+    """Each identifier under an entity now (`entities_of`), as (kind, value), to the id and name
+    of its entity; a name an entity holds only because a rule matches it is keyed (`RULE`, name).
+    A row finds its entity through `entity_of`, which tries the kinds it carries in order."""
+    held: dict[tuple[str, str], tuple[int, str]] = {}
+    for entity in entities_of(store, known):
+        for identifier in entity.identifiers:
+            held[(identifier.kind, identifier.value)] = (entity.id, entity.name)
+        for name in entity.by_rule:
+            held[(RULE, name)] = (entity.id, entity.name)
+    return held
+
+
+def holder_of(store: Store, shape: str, known: Iterable[str] = ()) -> tuple[int, str] | None:
+    """The id and name of the entity a name is under now, whatever the kind it is held as."""
+    return next(
+        (
+            (entity.id, entity.name)
+            for entity in entities_of(store, known)
+            if shape in entity.shapes
+        ),
+        None,
+    )
 
 
 def _rule_matches_for(store: Store, entity: int, shape: str) -> bool:
@@ -766,9 +965,12 @@ def _rule_matches_for(store: Store, entity: int, shape: str) -> bool:
     )
 
 
-def detach_shape(store: Store, shape: str, *, now: datetime | None = None) -> bool:
-    """Split `shape` apart from the entity it was attached to by hand, and commit; False where it
-    belonged to none (`Store.detach_shape` says what else is kept).
+def detach_shape(
+    store: Store, shape: str, *, now: datetime | None = None, kind: str | None = None
+) -> bool:
+    """Split the identifier whose value is `shape` (of the `kind` given, else the strongest held)
+    apart from the entity it was attached to by hand, and commit; False where it belonged to none
+    (`Store.detach_shape` says what else is kept).
 
     A name a rule of its entity also matches would be attached again by that rule on the next
     read, so the store is told to record the exclusion as well: whether a rule matches is the
@@ -777,7 +979,9 @@ def detach_shape(store: Store, shape: str, *, now: datetime | None = None) -> bo
     held = store.shape_entities().get(shape)
     if held is None:
         return False
-    return store.detach_shape(shape, exclude=_rule_matches_for(store, held[0], shape), now=now)
+    return store.detach_shape(
+        shape, exclude=_rule_matches_for(store, held[0], shape), now=now, kind=kind
+    )
 
 
 def exclude_shape(
@@ -1089,6 +1293,20 @@ class EntityPage:
         states its counterparty no longer has that shape as its name; such an attachment is
         listed, never dropped, so the owner sees what no longer attaches to anything."""
         return tuple(s for s in self.entity.shapes if s not in self.view.counts)
+
+    @property
+    def orphaned_identifiers(self) -> tuple[Identifier, ...]:
+        """The identifiers attached by hand that no transaction carries now, by kind: a stated
+        name whose rows are all described only is as orphaned as a name no row has, because the
+        row would link through its description and not through the party (`carried_by`). Where
+        the view holds no origins, the name alone is checked."""
+        origins = self.view.origins
+        return tuple(
+            identifier
+            for identifier in self.entity.identifiers
+            if identifier.value not in self.view.counts
+            or not carried_by(identifier, origins.get(identifier.value) if origins else None)
+        )
 
 
 def entity_page_of(

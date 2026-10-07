@@ -25,7 +25,13 @@ import pytest
 from obdi.analysis.entities import detach_shape, view_of
 from obdi.analysis.recurring import Series, find_recurring
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest.entity_records import OWNER_NAME, OWNER_ROLE, Entity, EntityRefused
+from obdi.ingest.entity_records import (
+    DESCRIPTION,
+    OWNER_NAME,
+    OWNER_ROLE,
+    Entity,
+    EntityRefused,
+)
 from obdi.ingest.store import Store
 
 NOW = datetime(2026, 10, 7, 9, 0, tzinfo=UTC)
@@ -134,7 +140,10 @@ class TestTheDetectorIsUnchangedByTheOwnerEntity:
 
     def test_Detector_WhenTheLegShapesAreUnderTheOwner_FindsTheSameSeries(self):
         rows, pairs = self.world()
-        owner = {"transfer to savings": OWNER_NAME, "from current": OWNER_NAME}
+        owner = {
+            (DESCRIPTION, "transfer to savings"): OWNER_NAME,
+            (DESCRIPTION, "from current"): OWNER_NAME,
+        }
 
         before = find_recurring(rows, pairs, TODAY)
         after = find_recurring(rows, pairs, TODAY, entities=owner)
@@ -148,7 +157,7 @@ class TestTheDetectorIsUnchangedByTheOwnerEntity:
             row(day, -2500, "TRANSFER TO SAVINGS", "current", f"loose{day}")
             for day in (4, 11, 18, 25)
         ]
-        owner = {"transfer to savings": OWNER_NAME}
+        owner = {(DESCRIPTION, "transfer to savings"): OWNER_NAME}
 
         before = find_recurring(rows, pairs, TODAY)
         after = find_recurring(rows, pairs, TODAY, entities=owner)

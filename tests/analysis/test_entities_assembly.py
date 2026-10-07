@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 import pytest
 
 from obdi.analysis.entities import (
+    RULE,
     clean_rule,
     detach_shape,
     entities_of,
@@ -19,7 +20,7 @@ from obdi.analysis.entities import (
     shape_entities,
     with_rules,
 )
-from obdi.ingest.entity_records import BEGINS, EntityRefused
+from obdi.ingest.entity_records import BEGINS, DESCRIPTION, EntityRefused
 from obdi.ingest.store import Store
 
 NOW = datetime(2026, 10, 7, 9, 0, tzinfo=UTC)
@@ -94,8 +95,8 @@ class TestEntitiesOfPutsTheStoresRowsTogether:
         entity = fernhollow(store)
 
         assert shape_entities(store, KNOWN) == {
-            HAND: (entity, "Fernhollow"),
-            VARIANT: (entity, "Fernhollow"),
+            (DESCRIPTION, HAND): (entity, "Fernhollow"),
+            (RULE, VARIANT): (entity, "Fernhollow"),
         }
         assert store.shape_entities() == {HAND: (entity, "Fernhollow")}
 
