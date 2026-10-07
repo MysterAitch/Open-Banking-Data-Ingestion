@@ -5788,6 +5788,11 @@ def main(argv: list[str] | None = None) -> int:
         "failed, 2 still running, 3 the store could not be opened - for a "
         "deploy to gate on",
     )
+    subcommands.add_parser(
+        "version",
+        help="the version and commit this build is, as the page footer says it - for a "
+        "deploy to read; a command is a contract, a module path is not",
+    )
 
     categorise_command = subcommands.add_parser(
         "categorise",
@@ -6244,6 +6249,15 @@ def main(argv: list[str] | None = None) -> int:
             print(RETRY_NOTE)
         if pressed.bound:
             print(WHAT_HAPPENS_NEXT)
+        return 0
+
+    if args.command == "version":
+        # The deploy's version gate asked a module by its path and broke when the package was
+        # split (0.4.365's converge stopped at the canary on `obdi.buildinfo`); a command on the
+        # command line is the surface that stays where it is.
+        from .core.buildinfo import describe as build_describe
+
+        print(build_describe())
         return 0
 
     if args.command == "rebuild-status":

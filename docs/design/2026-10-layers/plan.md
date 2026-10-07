@@ -12,6 +12,15 @@ importing the `Entity` record from `analysis.entities`); it is the twenty-first 
 directory rule as planned. What remains of the plan is the removal of the twenty-one, each in
 its own commit, starting with the settle-after-landing group under cure A.
 
+**What the move broke outside this repository (2026-10-07, 0.4.365's converge):** the deploy
+role in `homelab-ansible` asked the container `from obdi.buildinfo import describe` as its
+version gate, and stopped at the canary with `No module named 'obdi.buildinfo'`; production
+never moved. "Mentions of a moved module in configuration, left for a person" was in the
+residue above, and this repository was searched for them but the deploy repository was not.
+For any future rename: step 0 includes searching every repository that runs code inside the
+container (the deploy role, the stacks repository) for `obdi.<module>` mentions, and the
+durable contract is a command on obdi's own command line that the gate asks, not a module path.
+
 The owner's ask (2026-10-07): an architectural review that allows a good separation of data
 ingestion, reporting (the web pages), analysis (learning and local models), exports to Actual,
 and so on, so that a change touching one part runs only that part's test suites. `src/obdi` is a
