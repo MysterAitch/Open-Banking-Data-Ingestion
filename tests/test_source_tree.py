@@ -76,7 +76,7 @@ class TestTheRealApplicationIsWalkedWhole:
 
         assert len(tree) >= MINIMUM_MODULES
         assert "cli.py" in tree
-        assert "parsers/qif.py" in tree
+        assert any(path.endswith("parsers/qif.py") for path in tree), "a nested module is found"
 
     def test_ModuleText_ForAFileThatExistsOnce_IsItsText(self):
         assert "ConnectionHandler" in module_text("web.py")
