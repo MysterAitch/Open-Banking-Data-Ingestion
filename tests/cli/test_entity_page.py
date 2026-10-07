@@ -203,7 +203,10 @@ class TestShowingValues:
         lines = rule_lines(shown(base, entity))
 
         assert len(lines) == 1
-        assert lines[0].startswith("Begins with “sainsburys”")
+        assert lines[0].startswith(
+            "Matches any transaction whose description, reduced to a name as above, "
+            "begins with “sainsburys”"
+        )
         assert "matches 3 names" in lines[0]
         assert "Remove" in lines[0]
 
@@ -330,7 +333,10 @@ class TestKeepingARule:
         response = press(base, "/entity-rule", entity=entity, kind=BEGINS, words="Sainsburys")
 
         assert response.status_code == 200
-        assert "any name that begins with “sainsburys” will join Sainsburys" in outcome_of(
+        assert (
+            "any transaction whose description, reduced to a name as above, begins with "
+            "“sainsburys” will join Sainsburys"
+        ) in outcome_of(
             response.text
         )
         lines = name_lines(response.text)
@@ -507,7 +513,7 @@ class TestRenamingAndFolding:
         assert response.status_code == 200
         assert "Folded Sainsburys into Tesco" in outcome_of(response.text)
         page = shown(base, target)
-        assert any("Begins with" in line for line in rule_lines(page))
+        assert any("begins with" in line for line in rule_lines(page))
         assert httpx.get(f"{base}{address(entity)}", timeout=60).status_code == 404
 
 
@@ -569,4 +575,6 @@ class TestThePageAsItIsRead:
 
         base, _db, entity = ruled
 
-        assert repeated_lines(parse(shown(base, entity))) == {}
+        # A name's derivation is evidence inside its own closed fold and repeats its steps by
+        # design; every other sentence is still said once.
+        assert repeated_lines(parse(shown(base, entity)).without_class("ent-derive")) == {}

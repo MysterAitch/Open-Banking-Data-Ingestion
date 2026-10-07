@@ -22,6 +22,7 @@ from ..analysis.entities import (
     RuleLine,
     RuleTrial,
     clean_rule,
+    rule_parts,
     rule_phrase,
 )
 from ..core.logs import say
@@ -53,7 +54,6 @@ RENAME_ROUTE = "/entity-rename"
 SPLIT_ROUTE = "/entity-split"
 PARENT_ROUTE = "/entity-parent"
 
-_KIND_LABELS = {BEGINS: "Begins with", CONTAINS: "Contains the words"}
 _KIND_CHOICES = {BEGINS: "begins with", CONTAINS: "contains, in any order"}
 
 
@@ -117,8 +117,10 @@ def _names(page: EntityPage, *, unmasked: bool) -> str:
 
 def _rule_line(line: RuleLine, *, unmasked: bool) -> str:
     rule = line.rule
-    label = _KIND_LABELS.get(rule.kind, rule.kind)
+    before, after = rule_parts(rule.kind)
+    label = f"Matches {before}"
     words = f"“{_esc(rule.words)}”" if unmasked else _sealed(rule.words)
+    words += after
     matched = (
         f"matches {plural(line.matches, 'name')}" if line.matches else "matches nothing yet"
     )

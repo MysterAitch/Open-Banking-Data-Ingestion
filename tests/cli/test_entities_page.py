@@ -573,7 +573,13 @@ class TestWhatANameCoversBeforeMerging:
         }
         assert sorted(by_label) == ["1", "12"]
         london = by_label["12"]
-        rows = [li.text() for li in elements(london, "li") if "muted" not in li.classes]
+        rows = [
+            li.text()
+            for ol in elements(london, "ol")
+            if "ent-tx" in ol.classes
+            for li in elements(ol, "li")
+            if "muted" not in li.classes
+        ]
         assert len(rows) == 10
         assert rows[0].startswith("2026-09-12") and "-£10.12" in rows[0]
         assert "FERNHOLLOW GROCERS 1041 LONDON" in rows[0], "the description is as printed"
@@ -817,7 +823,9 @@ class TestThePageAsItIsRead:
 
         merge_group(served, shapes=(LONDON,), name="Fernhollow London")
 
-        assert repeated_lines(parse(shown(served))) == {}
+        # A name's derivation is evidence inside its own closed fold and repeats its steps by
+        # design; every other sentence is still said once.
+        assert repeated_lines(parse(shown(served)).without_class("ent-derive")) == {}
 
     def test_EntitiesPage_WhenRenderedFromAView_NamesEveryGroupTheViewOffers(self):
         counts = {f"zephyr {word} {n}": 1 for word in ("alpha", "beta") for n in ("one", "two")}

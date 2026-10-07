@@ -41,8 +41,15 @@ SCREENS = 3
 #: open (every one of the twelve names' folds listing its three transactions, which is all of the
 #: difference and an act the owner chooses); shown with a dry run answered 2,495. The closed
 #: allowance is inside three screens (2,532); the open one is about six screens.
-MEASURED_CLOSED = 2300
-MEASURED_OPEN = 5200
+#:
+#: RE-MEASURED with each rule read as what it does ("Matches any transaction whose description,
+#: reduced to a name as above, begins with ...", which wraps to several lines at this width) and
+#: each name's fold opening on its derivation: masked 974 closed and 1,342 open; shown 2,365
+#: closed (+121, the rule lines being the whole of it, since a closed fold adds nothing) and 7,604
+#: open (every one of twelve folds now also carries the printed text and its steps); shown with a
+#: dry run answered 2,641. Closed is still inside three screens.
+MEASURED_CLOSED = 2450
+MEASURED_OPEN = 7800
 
 _TOWNS = (
     "southampton", "scotland", "local edinburgh", "high street kensington", "ballymacarrett",

@@ -50,6 +50,10 @@ SCREENS_OPEN = 6
 #: and the cost of eight of them is all of the difference.
 #: The "New entity" form sits inside the fold of names under no entity, so closed is unchanged;
 #: opened it adds 174 px (shown 4,825 open), and the open allowance is 4,900.
+#: Re-measured with each name's derivation (the printed texts and the steps) inside its fold and
+#: the foot paragraph made the summary of the "how names are made" fold: masked 1,371 closed and
+#: 1,807 open; shown 2,467 closed and 4,806 open - no closed screen grew (it fell by 19 px; why
+#: was not investigated).
 MEASURED_CLOSED = 2500
 MEASURED_OPEN = 4900
 

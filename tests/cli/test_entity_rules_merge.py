@@ -119,7 +119,9 @@ class TestTheProposalFormOffersTheRule:
 
         (tick,) = [i for i in elements(form, "input") if i.attrs.get("name") == "keep_rule"]
         assert "checked" in tick.attrs
-        assert "and any name that begins with “fernhollow grocers”" in form.text()
+        assert "and any transaction whose description begins with “fernhollow grocers”" in (
+            form.text()
+        )
 
     def test_Merge_ForAGroupOfTheSameWordsInAnotherOrder_OffersATickedBoxNamingTheWords(
         self, world
@@ -130,7 +132,9 @@ class TestTheProposalFormOffersTheRule:
 
         (tick,) = [i for i in elements(form, "input") if i.attrs.get("name") == "keep_rule"]
         assert "checked" in tick.attrs
-        assert "and any name with the words “quillon hardware” in any order" in form.text()
+        assert (
+            "and any transaction whose description holds the words “quillon hardware” in any order"
+        ) in form.text()
 
     def test_Merge_ByHandOrFromACouldBelongToOffer_OffersNoRule(self, world):
         base, _db, _tmp = world
@@ -156,9 +160,10 @@ class TestPressingMerge:
 
         assert response.status_code == 200
         assert rules_of(db) == [(BEGINS, "fernhollow grocers")]
-        assert "any name that begins with “fernhollow grocers” will join it" in outcome_of(
-            response.text
-        )
+        assert (
+            "any transaction whose description, reduced to a name as above, begins with "
+            "“fernhollow grocers” will join it"
+        ) in outcome_of(response.text)
 
     def test_Merge_WithTheTickAsOffered_ForTheSameWordsGroup_KeepsAContainsRule(self, world):
         base, db, _tmp = world
@@ -252,11 +257,14 @@ class TestTomorrowsVariant:
 
         page = shown(base)
 
-        (line,) = [li for li in elements(parse(page), "li") if "inverness" in li.text()]
-        assert "by rule" in line.text()
-        entity_names = [
-            li.text() for li in elements(parse(page), "li") if "fernhollow grocers" in li.text()
+        names = [
+            li
+            for li in elements(parse(page), "li")
+            if li.parent is not None and "ent-names" in li.parent.classes
         ]
+        (line,) = [li for li in names if "inverness" in li.text()]
+        assert "by rule" in line.text()
+        entity_names = [li.text() for li in names if "fernhollow grocers" in li.text()]
         assert sum("by rule" in text for text in entity_names) == 1
 
 

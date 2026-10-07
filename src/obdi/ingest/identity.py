@@ -19,37 +19,67 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
+from collections.abc import Callable
 from datetime import date
 
-# Volatile fragments UK banks append to an otherwise stable narrative. Stripped
-# before hashing so that the same payment matches across sources and reissues.
-_VOLATILE_PATTERNS = [
-    re.compile(r"\bON \d{2}[/-]\d{2}[/-]\d{2,4}\b", re.I),  # "ON 14/03/2026"
-    re.compile(r"\b\d{2}[A-Z]{3}\d{2}\b", re.I),  # "14MAR26"
-    re.compile(r"\bCARD\s*\d{4}\b", re.I),  # card last-4
-    re.compile(r"\bX{2,}\d{4}\b", re.I),  # masked PAN tail
-    re.compile(r"\bREF[:\s]*[A-Z0-9]{6,}\b", re.I),  # terminal refs
-    re.compile(r"\bPENDING\b", re.I),
-    re.compile(r"\bAUTH(ORISATION)?\b", re.I),
-]
+# Volatile fragments UK banks append to an otherwise stable narrative, each with the name a page
+# gives its kind. Stripped before hashing so that the same payment matches across sources and
+# reissues.
+VOLATILE_FRAGMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bON \d{2}[/-]\d{2}[/-]\d{2,4}\b", re.I), "a printed date"),  # "ON 14/03/2026"
+    (re.compile(r"\b\d{2}[A-Z]{3}\d{2}\b", re.I), "a compact date"),  # "14MAR26"
+    (re.compile(r"\bCARD\s*\d{4}\b", re.I), "a card's last digits"),
+    (re.compile(r"\bX{2,}\d{4}\b", re.I), "a masked card tail"),
+    (re.compile(r"\bREF[:\s]*[A-Z0-9]{6,}\b", re.I), "a terminal reference"),
+    (re.compile(r"\bPENDING\b", re.I), "the word pending"),
+    (re.compile(r"\bAUTH(ORISATION)?\b", re.I), "the word authorisation"),
+)
 
 _NON_ALNUM = re.compile(r"[^a-z0-9 ]+")
 _WHITESPACE = re.compile(r"\s+")
 
 
-def normalise_description(raw: str) -> str:
-    """Reduce a bank narrative to its stable core.
+def _strip_accents(text: str) -> str:
+    text = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in text if not unicodedata.combining(c))
 
-    Casefolds, strips accents and punctuation, removes the volatile fragments
-    above, and collapses whitespace. Deliberately lossy: the raw text is always
-    retained in the raw layer, so nothing is destroyed by normalising hard here.
-    """
-    text = unicodedata.normalize("NFKD", raw)
-    text = "".join(c for c in text if not unicodedata.combining(c))
-    for pattern in _VOLATILE_PATTERNS:
+
+def _strip_volatile(text: str) -> str:
+    for pattern, _kind in VOLATILE_FRAGMENTS:
         text = pattern.sub(" ", text)
+    return text
+
+
+def _fold_and_space(text: str) -> str:
     text = _NON_ALNUM.sub(" ", text.casefold())
     return _WHITESPACE.sub(" ", text).strip()
+
+
+#: The steps `normalise_description` applies, in order, each with the sentence a page says it in.
+#: The function applies exactly these, so a page that lists them cannot list a step that is not
+#: taken or leave one out.
+NORMALISATION_STEPS: tuple[tuple[str, Callable[[str], str]], ...] = (
+    ("accents are removed", _strip_accents),
+    (
+        "known volatile fragments are removed ("
+        + ", ".join(kind for _pattern, kind in VOLATILE_FRAGMENTS)
+        + ")",
+        _strip_volatile,
+    ),
+    ("letters are lower-cased and punctuation becomes spaces", _fold_and_space),
+)
+
+
+def normalise_description(raw: str) -> str:
+    """Reduce a bank narrative to its stable core: `NORMALISATION_STEPS`, in order.
+
+    Deliberately lossy: the raw text is always retained in the raw layer, so nothing is
+    destroyed by normalising hard here.
+    """
+    text = raw
+    for _sentence, step in NORMALISATION_STEPS:
+        text = step(text)
+    return text
 
 
 def content_key(

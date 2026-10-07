@@ -25,12 +25,17 @@ from ..analysis.entities import (
     COVERED_SHOWN,
     OPENING_WORDS,
     SAME_WORDS,
+    SHAPE_STEPS,
     Covered,
+    Derivation,
     EntitiesView,
     Proposal,
     Suggestion,
+    derivation_of,
     rule_phrase,
 )
+from ..analysis.entity_tokens import COMPARISON_SENTENCE, DROPPED, IGNORED_TRAILING
+from ..analysis.payment_methods import METHODS
 from ..core.logs import say
 from ..core.masking import mask_text
 from ..core.money import format_amount
@@ -142,9 +147,37 @@ def _covered_row(covered: Covered) -> str:
     )
 
 
+def _steps_list(steps: Sequence[str]) -> str:
+    items = "".join(f"<li>{_esc(sentence)}</li>" for sentence in steps)
+    return f'<ol class="ent-steps">{items}</ol>'
+
+
+def derivation_html(derivation: Derivation) -> str:
+    """How a name was made, from the record alone: the field it was read from, each printed text
+    it came from beside the name it was reduced to, and the steps that changed any of them. The
+    source is read from the record, so a name made from another field is stated as such."""
+    lines = "".join(
+        f'<li><span class="txt">{_esc(text)}</span> → <span class="txt">{_esc(derivation.name)}'
+        "</span></li>"
+        for text in derivation.printed
+    )
+    more = f'<li class="muted">and {derivation.more:,} more</li>' if derivation.more else ""
+    steps = (
+        f'<p class="ent-why">Steps applied, in order:</p>{_steps_list(derivation.steps)}'
+        if derivation.steps
+        else '<p class="ent-why">Printed exactly as the name; no step changed it.</p>'
+    )
+    return (
+        '<div class="ent-derive">'
+        f'<p class="ent-why">From the {_esc(derivation.source)}:</p>'
+        f'<ul class="ent-printed">{lines}{more}</ul>{steps}</div>'
+    )
+
+
 def _count_or_rows(shape: str, view: EntitiesView) -> str:
-    """The number of transactions a name has; where the page holds them, that number opens the
-    newest of them (`COVERED_SHOWN`), so what a merge would capture can be seen before pressing."""
+    """The number of transactions a name has; where the page holds them, that number opens how the
+    name was made and the newest of them (`COVERED_SHOWN`), so what a merge would capture can be
+    seen before pressing."""
     total = view.counts.get(shape, 0)
     found = view.covers.get(shape, ())
     if not found:
@@ -153,7 +186,26 @@ def _count_or_rows(shape: str, view: EntitiesView) -> str:
     tail = f'<li class="muted">and {more:,} more</li>' if more > 0 else ""
     return (
         f'<details class="ent-rows"><summary class="ent-count">{total:,}</summary>'
+        f"{derivation_html(derivation_of(shape, found))}"
         f'<ol class="ent-tx">{"".join(_covered_row(c) for c in found)}{tail}</ol></details>'
+    )
+
+
+def names_method_html(lead: str = "How names are made and compared") -> str:
+    """The fold that says how a name is made from a printed description and how two are
+    compared, from the constants the code runs on: the steps, the payment-method phrases, and
+    the codes ignored at the end. Holds no value, so the masked page shows it too. `lead` is its
+    summary, which is the page's short account of what a name is, so the fold adds no line."""
+    methods = ", ".join(f"“{phrase}”" for m in METHODS for phrase in m.printed)
+    ignored = ", ".join(f"“{word}”" for word in sorted(IGNORED_TRAILING))
+    return (
+        f'<details class="ent-fold ent-method"><summary class="muted">{_esc(lead)}</summary>'
+        '<p class="ent-why">A name is made from the description a bank prints, by these steps '
+        f"in order:</p>{_steps_list([sentence for sentence, _step in SHAPE_STEPS])}"
+        f'<p class="ent-why">{_esc(COMPARISON_SENTENCE)}</p>'
+        f'<p class="ent-why">Payment methods set aside before a name: {_esc(methods)}.</p>'
+        f'<p class="ent-why">Codes ignored at the end of a name: {_esc(ignored)}. '
+        f"“{_esc(' '.join(sorted(DROPPED)))}” is ignored wherever it stands.</p></details>"
     )
 
 
@@ -236,7 +288,7 @@ def _keep_rule(group: Proposal) -> str:
         f'<input type="hidden" name="rule_kind" value="{_esc(kind)}">'
         f'<input type="hidden" name="rule_words" value="{_esc(words)}">'
         '<label class="tick"><input type="checkbox" name="keep_rule" value="1" checked>'
-        f'<span class="txt">and {_esc(rule_phrase(kind, words))}</span></label>'
+        f'<span class="txt">and {_esc(rule_phrase(kind, words, reduced=False))}</span></label>'
     )
 
 
@@ -453,10 +505,12 @@ def render_entities(
         + _groups(view, unmasked=unmasked)
         + _entities(view, unmasked=unmasked)
         + (_by_hand(view) if unmasked else "")
-        + '<p class="muted">A name is what a payee prints, with numbers and codes left out. '
-        "A group is offered where its names begin with the same two or more words, or are "
-        "the same words in another order. Gathering names changes how payments are counted "
-        "as recurring and nothing else.</p>"
+        + names_method_html(
+            "A name is what a payee prints, reduced as set out here. "
+            "A group is offered where its names begin with the same two or more words, or are "
+            "the same words in another order. Gathering names changes how payments are counted "
+            "as recurring and nothing else."
+        )
     )
     return render_page(page_name(ROUTE), body, body_class="ent-page")
 

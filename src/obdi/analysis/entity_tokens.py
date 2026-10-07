@@ -42,6 +42,18 @@ _PLURAL_FLOOR = 3
 MIN_DISTINCTIVE_LETTERS = 3
 
 
+#: How two names are compared, said once for the page that states it. The lists it refers to
+#: (`METHOD_WORDS`' phrases in `payment_methods.METHODS`, `IGNORED_TRAILING`) are shown from the
+#: constants beside it, never retyped.
+COMPARISON_SENTENCE = (
+    "Names are compared word by word. A payment method printed before the name and a country "
+    "or company code after it are set aside; a plural “s” on a word of "
+    f"{_PLURAL_FLOOR + 1} letters or more, an ampersand or “and”, and spaced initials (“b m”, "
+    "“bm”, “b&m”) make no difference. Initials match initials only, never a spelled-out name, "
+    f"and a word of fewer than {MIN_DISTINCTIVE_LETTERS} letters never tells two names apart."
+)
+
+
 @dataclass(frozen=True)
 class Token:
     """One word of a name: how it compares, and how it was printed."""

@@ -37,5 +37,9 @@ ENTITIES_STYLES = """
  .ent-rule-form label { display: flex; align-items: center; gap: var(--s2); }
  .ent-rule-form select, .ent-rule-form input { flex: 1 1 auto; min-width: 0; max-width: 100%; }
  .ent-rule-presses { display: flex; gap: var(--s2); }
+ .ent-steps { margin: var(--s1) 0 var(--s2); padding-left: var(--s4, 1.5rem); font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
+ .ent-derive { margin: var(--s1) 0 var(--s2); }
+ .ent-printed { list-style: none; margin: 0; padding: 0; }
+ .ent-printed li { display: block; padding: var(--s1) 0; overflow-wrap: anywhere; }
  .ent-rule { font: var(--text-sm)/130% var(--sans); color: var(--ink-2); white-space: nowrap; }
 """

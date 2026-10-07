@@ -11,6 +11,7 @@ import pytest
 
 from large_store_corpus import LargeStore, cached_large_store
 from large_store_pages import serving
+from page_dom import parse
 
 #: MEASURED 2026-10-07 on the large store (6,969 transactions, 79 payee names) on a machine busy
 #: with another build: 8 statements and 0.20 to 0.22 s for a warm GET. The statement bound allows
@@ -56,4 +57,7 @@ class TestEntitiesPageOverTheLargeStore:
         page = pages.get("/entities")
 
         assert "payee names across every account" in page.body
-        assert "faster payment" not in page.body.casefold()
+        # The fold that lists the payment methods set aside names them on every page, so it is
+        # cut out: what is checked is that no payee's name is.
+        outside = parse(page.body).without_class("ent-method").text().casefold()
+        assert "faster payment" not in outside

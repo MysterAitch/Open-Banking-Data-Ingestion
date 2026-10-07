@@ -30,6 +30,16 @@ class Node:
     def classes(self) -> set[str]:
         return set(self.attrs.get("class", "").split())
 
+    def without_class(self, name: str) -> Node:
+        """This tree with every element of the class cut out, for a check on what a page says
+        outside the parts that repeat by design (a name's derivation, in each name's fold)."""
+        self.children = [
+            child.without_class(name) if isinstance(child, Node) else child
+            for child in self.children
+            if not (isinstance(child, Node) and name in child.classes)
+        ]
+        return self
+
     def ancestors(self) -> Iterator[Node]:
         node = self.parent
         while node is not None:

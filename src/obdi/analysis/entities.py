@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import heapq
 from collections import Counter
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import TYPE_CHECKING
@@ -23,7 +23,7 @@ from ..ingest.entity_records import (
     EntityRefused,
     EntityRule,
 )
-from ..ingest.identity import normalise_description
+from ..ingest.identity import NORMALISATION_STEPS, normalise_description
 from .entity_tokens import (
     MIN_DISTINCTIVE_LETTERS,
     Token,
@@ -86,10 +86,12 @@ def _letters_before_digits(word: str) -> str:
     return word[:run] if run >= MIN_FUSED_LETTERS else ""
 
 
-def _shape(text: str) -> str:
-    words = [
-        w for w in map(_letters_before_digits, normalise_description(text).split()) if w
-    ]
+def _drop_digit_words(text: str) -> str:
+    return " ".join(w for w in map(_letters_before_digits, text.split()) if w)
+
+
+def _drop_printed_dates(text: str) -> str:
+    words = text.split()
     kept: list[str] = []
     index = 0
     while index < len(words):
@@ -105,12 +107,82 @@ def _shape(text: str) -> str:
     return " ".join(kept)
 
 
+#: The steps that make a shape from a printed description, in order, each with the sentence the
+#: Entities page says it in: `identity.NORMALISATION_STEPS`, then these two. `shape_of` applies
+#: exactly these, so the page's account of how a name is made cannot drift from the code.
+SHAPE_STEPS: tuple[tuple[str, Callable[[str], str]], ...] = (
+    *NORMALISATION_STEPS,
+    (
+        "words holding a digit are dropped, or cut back to their leading letters where those "
+        f"are at least {MIN_FUSED_LETTERS} letters",
+        _drop_digit_words,
+    ),
+    (
+        "a printed date such as “on 12 apr”, and a month or weekday left at the end, are dropped",
+        _drop_printed_dates,
+    ),
+)
+
+
+def _shape(text: str) -> str:
+    for _sentence, step in SHAPE_STEPS:
+        text = step(text)
+    return text
+
+
+#: Where a name comes from, as the noun the page puts after "the" ("from the description",
+#: "whose description"). A name's `Derivation` carries its own source, so a name made from
+#: another field says so without the page changing.
+DESCRIPTION_SOURCE = "description"
+
+
+@dataclass(frozen=True)
+class Derivation:
+    """How a name came to be: the field it was read from, the distinct texts printed there that
+    produced it, and the steps that changed any of them, in the order they are applied."""
+
+    source: str
+    #: Up to `DERIVATION_TEXTS_SHOWN` of the distinct printed texts, newest first.
+    printed: tuple[str, ...]
+    #: How many more distinct texts the page holds for the name than are shown.
+    more: int
+    #: The sentences of the steps that changed at least one printed text.
+    steps: tuple[str, ...]
+    name: str
+
+
+DERIVATION_TEXTS_SHOWN = 3
+
+
+def derivation_of(
+    shape: str, covered: Sequence[Covered], *, source: str = DESCRIPTION_SOURCE
+) -> Derivation:
+    """The derivation of a name from the transactions the page holds for it (`covered`)."""
+    distinct = list(dict.fromkeys(c.description for c in covered))
+    shown = distinct[:DERIVATION_TEXTS_SHOWN]
+    changed: set[int] = set()
+    for text in shown:
+        for index, (_sentence, step) in enumerate(SHAPE_STEPS):
+            after = step(text)
+            if after != text:
+                changed.add(index)
+            text = after
+    return Derivation(
+        source=source,
+        printed=tuple(shown),
+        more=len(distinct) - len(shown),
+        steps=tuple(sentence for i, (sentence, _step) in enumerate(SHAPE_STEPS) if i in changed),
+        name=shape,
+    )
+
+
 def shape_of(text: str) -> str:
     """The shape of a counterparty as printed: the normalised description without any word that
     holds a digit (bar the letters a name is fused to, `_letters_before_digits`), since a
     reference, a store number, a mandate, or a card tail is what changes between two sightings of
     one payee, and without the date a card payment prints ("on 12 apr").
-    Empty where nothing but codes is left.
+    Empty where nothing but codes is left. `SHAPE_STEPS` lists the steps in the order applied,
+    each with the sentence the page states it in.
 
     The one definition: the recurring detector and the Entities page both read it from here. It
     reads the DESCRIPTION alone, never the counterparty a source may state: a bank names a
@@ -171,12 +243,27 @@ def clean_rule(kind: str, words: str) -> tuple[str, str]:
     return kind, text
 
 
-def rule_phrase(kind: str, words: str) -> str:
+def rule_parts(
+    kind: str, *, source: str = DESCRIPTION_SOURCE, reduced: bool = True
+) -> tuple[str, str]:
+    """What a rule does, as the words before and after its own words: the field it reads
+    (`source`), that the field is reduced to a name first (`reduced`; left out where the line
+    is on a phone and the reduction is stated beside it), and how the name is compared."""
+    reads = f"any transaction whose {source}"
+    if reduced:
+        reads += ", reduced to a name as above,"
+    if kind == BEGINS:
+        return f"{reads} begins with", ""
+    return f"{reads} holds the words", " in any order"
+
+
+def rule_phrase(
+    kind: str, words: str, *, source: str = DESCRIPTION_SOURCE, reduced: bool = True
+) -> str:
     """What a rule matches, said as a noun phrase: the one place a rule is put into words, so the
     tick that offers it and the sentence that confirms it read alike."""
-    if kind == BEGINS:
-        return f"any name that begins with “{words}”"
-    return f"any name with the words “{words}” in any order"
+    before, after = rule_parts(kind, source=source, reduced=reduced)
+    return f"{before} “{words}”{after}"
 
 
 def _rule_norms(words: str) -> tuple[str, ...]:
