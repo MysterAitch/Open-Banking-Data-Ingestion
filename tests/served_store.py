@@ -44,7 +44,7 @@ def served_store(
 ) -> Iterator[str]:
     """Build a store with `build`, serve it, and yield the server's address."""
     from obdi.cli import build_web_config
-    from obdi.web import AuthorisationSession, ConnectionHandler
+    from obdi.pages.web import AuthorisationSession, ConnectionHandler
 
     environment = environment_for(root)
     saved = {name: os.environ.get(name) for name in _ENVIRONMENT}

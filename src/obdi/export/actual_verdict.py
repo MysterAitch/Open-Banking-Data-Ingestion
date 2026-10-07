@@ -37,7 +37,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 from ..core.plural import plural as counted
-from ..web_prune import align_plan, counts_from_audit
+from ..pages.web_prune import align_plan, counts_from_audit
 from .actual_audit import (
     accounts_of,
     count_of,

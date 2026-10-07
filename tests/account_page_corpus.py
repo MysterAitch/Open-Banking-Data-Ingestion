@@ -178,9 +178,9 @@ def served_corpus(root: Path) -> Iterator[str]:
     (2026-09-01 to 2026-09-30) are exactly its newest month of `NEWEST_MONTH_ROWS`, whenever
     the suite runs.
     """
-    from obdi import web_ledger
     from obdi.cli import build_web_config
-    from obdi.web import AuthorisationSession, ConnectionHandler
+    from obdi.pages import web_ledger
+    from obdi.pages.web import AuthorisationSession, ConnectionHandler
 
     class Fixed(datetime):
         @classmethod

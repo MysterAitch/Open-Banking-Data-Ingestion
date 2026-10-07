@@ -23,7 +23,7 @@ import pytest
 
 from large_store_corpus import LargeStore
 from obdi import cli
-from obdi.web import AuthorisationSession, ConnectionHandler
+from obdi.pages.web import AuthorisationSession, ConnectionHandler
 
 
 @dataclass(frozen=True)

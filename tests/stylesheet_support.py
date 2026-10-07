@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 
-from obdi.callback import render_page
+from obdi.pages.callback import render_page
 
 _TOKEN = re.compile(r"(--[a-z0-9-]+)\s*:\s*([^;]+);")
 _LIGHT_BLOCK = re.compile(r":root \{([^}]*)\}")

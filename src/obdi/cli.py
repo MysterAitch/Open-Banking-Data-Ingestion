@@ -87,6 +87,8 @@ from .ingest.space_binding import UNBOUND, SpacesPress, space_states
 from .ingest.spaces import ArchiveNote
 from .ingest.store import Store, StoreIsNewer, request_meta_and_provenance
 from .ingest.valuations import Asset, AssetKind, record_observation
+from .pages.web import ExtendableAccount, WebConfig
+from .pages.web import serve as serve_web
 from .read.account_about import facts_from_readings, read_about
 from .read.account_names import AccountsShown, accounts_shown
 from .read.alerts import Finding
@@ -134,8 +136,6 @@ from .verify.standing_data import (
 from .verify.statement_listing_measure import StatementListingReport
 from .verify.statement_opening_measure import StatementOpeningReport, statement_opening_report
 from .verify.statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
-from .web import ExtendableAccount, WebConfig
-from .web import serve as serve_web
 
 DEFAULT_DB = "./data/store.sqlite3"
 
@@ -3537,13 +3537,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def window_default() -> str:
-        from .ledger_scope import default_key
+        from .pages.ledger_scope import default_key
 
         with Store(db_path) as store:
             return default_key(store)
 
     def window_default_set(key: str) -> None:
-        from .ledger_scope import set_default_key
+        from .pages.ledger_scope import set_default_key
 
         with Store(db_path) as store:
             set_default_key(store, key)

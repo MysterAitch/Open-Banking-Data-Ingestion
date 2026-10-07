@@ -221,7 +221,7 @@ STATES: dict[str, dict[str, object]] = {
 
 def render_state(name: str) -> str:
     """The whole Actual page for one of the states, every press wired, at the story's end."""
-    from obdi.web_sections import render_actual
+    from obdi.pages.web_sections import render_actual
 
     state = STATES[name]
     results = state["results"]

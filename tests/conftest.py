@@ -305,7 +305,7 @@ def serve_hub(tmp_path):
     from http.server import HTTPServer
 
     from obdi.ingest.connections import ConnectionStore
-    from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
+    from obdi.pages.web import AuthorisationSession, ConnectionHandler, WebConfig
 
     servers: list[HTTPServer] = []
 

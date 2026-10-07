@@ -21,7 +21,7 @@ from obdi.core.models import RawArtefact
 from obdi.ingest.identity import artefact_digest
 from obdi.ingest.statement_extraction import keep_extraction
 from obdi.ingest.store import Store
-from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
+from obdi.pages.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 UNASSIGNED = "(unassigned)"
 

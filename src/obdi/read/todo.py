@@ -35,7 +35,7 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 from ..core.page_times import range_text
-from ..navigation import account_address
+from ..pages.navigation import account_address
 from ..verify.protection import tested_days_of
 from ..verify.standing_data import AccountStanding
 from .fetch_gaps import Basis, FetchGap, FetchReport, GapKind
