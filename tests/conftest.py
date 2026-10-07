@@ -60,7 +60,8 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "connections_page", "connections_position_scale", "coverage_page*",
             "coverage_timeline_collapsed*", "coverage_timeline_page",
             "coverage_timeline_phone_layout", "dangling_annotations_surface", "date_window*",
-            "deep_links", "destinations", "dev_harness", "every_page_is_reachable",
+            "deep_links", "destinations", "dev_harness", "entities_page",
+            "entities_phone_layout", "entities_speed", "every_page_is_reachable",
             "family_pages", "fetch_timeline*", "gaps_cost", "gaps_marks_page",
             "good_results_are_said_quietly", "handler_faults", "home_*",
             "identifiers_are_set_as_code", "import_masking", "instance_identity",
@@ -90,7 +91,13 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "transfer_pairs_payload", "transfer_skip_reasons",
         ),
     ),
-    ("analysis", ("recurring", "recurring_series", "recurring_speed")),
+    (
+        "analysis",
+        (
+            "recurring", "recurring_series", "recurring_speed", "entities_grouping",
+            "entity_recurring",
+        ),
+    ),
     (
         "verify",
         (
@@ -119,7 +126,8 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
             "consecutive_days_nothing_joined", "cross_source", "cross_source_reissue",
             "currency", "date_ambiguity", "declared_accounts", "declined_items", "defer",
             "deterministic_ids", "doctor", "doctor_rebuild_check", "duplication",
-            "empty_rebuild_alarm", "equal_payments_close_together", "exact_rule_*", "explain",
+            "empty_rebuild_alarm", "entity_store", "equal_payments_close_together",
+            "exact_rule_*", "explain",
             "export_declared", "export_raw", "export_rows_dated_after_the_feed",
             "export_verification", "feed_*", "fetch_now", "file_api_dedup", "fingerprint",
             "fixture_write_doors", "historical_spaces", "history_boundary_survival", "id_tier",
@@ -153,7 +161,7 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
 #: wording or layout is a feature test and stays out, or `guards` stops being a short list.
 GUARDS: frozenset[str] = frozenset(
     {
-        "get_routes_hold_no_stored_values", "navigation", "web_hardening",
+        "get_routes_hold_no_stored_values", "navigation", "web_hardening", "entities_speed",
         "page_wording_counts", "page_wording_emphasis", "page_wording_internals",
         "page_wording_plain", "page_wording_times", "page_wording_vocabulary",
         "report_page_wording", "measurement_wording", "ledger_speed", "recurring_speed",
