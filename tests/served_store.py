@@ -22,6 +22,9 @@ _ENVIRONMENT = (
     "OBDI_INSTANCE_LABEL",
     "OBDI_INSTANCE_ROLE",
 )
+#: Cleared before the web config is built, since `build_web_config` refuses one half of a
+#: provider's configuration without the other (see `served_store`).
+_PROVIDER_HALVES = ("TRUELAYER_CLIENT_ID", "TRUELAYER_CLIENT_SECRET_FILE")
 
 
 def environment_for(root: Path) -> dict[str, str]:
@@ -47,8 +50,14 @@ def served_store(
     from obdi.pages.web import AuthorisationSession, ConnectionHandler
 
     environment = environment_for(root)
-    saved = {name: os.environ.get(name) for name in _ENVIRONMENT}
+    saved = {name: os.environ.get(name) for name in (*_ENVIRONMENT, *_PROVIDER_HALVES)}
     os.environ.update(environment)
+    # A module that keeps one server runs this before the per-test clearing of the environment,
+    # so it sees whatever the previous module in the same worker left; half a provider
+    # configuration left behind makes the web config refuse to build. Measured once the package
+    # split reordered the modules across workers.
+    for name in _PROVIDER_HALVES:
+        os.environ.pop(name, None)
     (root / "accounts.json").write_text(
         json.dumps(
             {

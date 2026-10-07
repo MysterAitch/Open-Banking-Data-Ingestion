@@ -86,6 +86,12 @@ def served(tmp_path_factory):
     mp = pytest.MonkeyPatch()
     mp.setenv("OBDI_CONNECTION_STORE", str(root / "connections.json"))
     mp.delenv("OBDI_ACCOUNT_MAP", raising=False)
+    # A module-scoped fixture runs before the per-test clearing of the environment, so it sees
+    # whatever the previous module in the same worker left; half a provider configuration left
+    # behind makes the web config refuse to build. Measured once the package split reordered
+    # the modules across workers.
+    for variable in ("TRUELAYER_CLIENT_ID", "TRUELAYER_CLIENT_SECRET_FILE"):
+        mp.delenv(variable, raising=False)
     config = build_web_config(path)
     assert config is not None
     handler = type(
