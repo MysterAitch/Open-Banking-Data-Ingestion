@@ -42,6 +42,11 @@ dev = [
     # absent, so a plain `pip install .` never pulls it and the suite still runs
     # without it - only the probe's own self-check goes quiet, and it says so.
     "time-machine>=2.19",
+    # Runs the package split under docs/design/2026-10-layers/move.py. A lossless syntax
+    # tree, so the codemod rewrites import statements and module-path strings and nothing
+    # else, and a second run over its own result changes nothing. Used by that script only;
+    # never imported by the application or the suite.
+    "libcst>=1.8",
 ]
 
 [project.scripts]
