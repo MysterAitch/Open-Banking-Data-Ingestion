@@ -247,6 +247,7 @@ A split whose parts do not sum to the amount is refused where it is made.
 | 0.4.361 (counterparty-first shape; a fault) | 61 | 53 / 8 / 0 | 46 / 7 / 8 | 36 (17) | 4 | 872 / 98 / 263 / 1 of 10 |
 | 0.4.365 (shape from the description; account-first split; rules) | 63 | 54 / 8 / 1 | 51 / 7 / 5 | 31 (19) | 5 | 1,297 / 158 / 830 / 0 |
 | 0.4.366 (fused word keeps its letters IN THE KEY - a fault; one rule per proposal) | 70 | 61 / 8 / 1 | 58 / 7 / 5 | 36 (20) | 5 | 1,326 / 186 / 699 / 6 groups of 89 |
+| 0.4.367 (key reverted; common by position; function words) | 63 | 54 / 8 / 1 | 51 / 7 / 5 | 31 (19) | 5 | 1,297 / 185 / 776 / 2 groups of 20 |
 
 What the rows say: the four-slot rule removed sixteen fragments, thirteen of them stopped
 (0.4.357); keying the shape on a source-dependent field split one payee by source and cost the
