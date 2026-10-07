@@ -15,7 +15,7 @@ the first request.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
@@ -216,7 +216,8 @@ class TestEveryPageSaysWhetherValuesAreShown:
         text = parse(response.text)
         banner = [n for n in elements(text, "div") if "sitting" in n.classes]
         assert len(banner) == 1, path
-        assert re.search(r"\(until \d\d:\d\d UTC\)", banner[0].text()), path
+        assert re.search(r"\(until \d\d:\d\d\)", banner[0].text()), path
+        assert "UTC" not in banner[0].text(), path
         hide = [
             form
             for form in elements(banner[0], "form")
@@ -228,11 +229,21 @@ class TestEveryPageSaysWhetherValuesAreShown:
     def test_Banner_NamesTheEndOfTheSittingFromTheTimeTheCookieWasIssued(self, served):
         issued = datetime.now(UTC) - timedelta(hours=2, minutes=3)
         value = values_sitting.issue(issued)
-        expected = datetime.fromtimestamp(int(issued.timestamp()), UTC) + timedelta(hours=12)
+        ends = datetime.fromtimestamp(int(issued.timestamp()), UTC) + timedelta(hours=12)
+        # London is an hour ahead of UTC from 01:00 UTC on the last Sunday of March to 01:00 UTC
+        # on the last Sunday of October; written out here from that rule, not from the code.
+        year = ends.year
+        march = max(d for d in range(25, 32) if date(year, 3, d).weekday() == 6)
+        october = max(d for d in range(25, 32) if date(year, 10, d).weekday() == 6)
+        summer = datetime(year, 3, march, 1, tzinfo=UTC) <= ends < datetime(
+            year, 10, october, 1, tzinfo=UTC
+        )
+        expected = ends + timedelta(hours=1 if summer else 0)
 
         response = get(served, "/", {"Cookie": f"{values_sitting.COOKIE}={value}"})
 
-        assert f"(until {expected:%H:%M} UTC)" in response.text
+        assert f"(until {expected:%H:%M})" in response.text
+        assert "UTC)" not in response.text
 
     @pytest.mark.parametrize("path", ["/", LEDGER, "/more", "/position", "/agreements"])
     def test_Page_WhileValuesAreHidden_CarriesNoBanner(self, served, path):
@@ -422,6 +433,29 @@ class TestReturnAddressesInTheControls:
         assert "evil.example" not in "".join(
             node.attrs.get("value", "") for node in elements(parse(response.text), "input")
         )
+
+
+class TestTheBannersUntilTimeIsOnTheOwnersClock:
+    """KNOWN ANSWERS, worked by hand: a sitting that ends at 17:56 UTC ends at 18:56 in July and
+    at 17:56 in January, because London is an hour ahead of UTC only in summer."""
+
+    @pytest.mark.parametrize(
+        ("ends", "said"),
+        [
+            (datetime(2026, 7, 15, 17, 56, tzinfo=UTC), "(until 18:56)"),
+            (datetime(2026, 1, 15, 17, 56, tzinfo=UTC), "(until 17:56)"),
+        ],
+    )
+    def test_Banner_EitherSideOfAClockChange_SaysTheEndOnLondonsClock(self, ends, said):
+        token = values_sitting.sitting.set(ends)
+        try:
+            banner = values_sitting.banner_html()
+            line = values_sitting.more_line_html()
+        finally:
+            values_sitting.sitting.reset(token)
+
+        assert said in banner and "UTC" not in banner
+        assert said.removeprefix("(").removesuffix(")") in line and "UTC" not in line
 
 
 class TestTheCookieNeverOutlivesItsRules:

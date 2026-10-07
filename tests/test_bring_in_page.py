@@ -386,8 +386,19 @@ class TestEvidence:
             "halifax", "monzo",
         )
 
-        assert found.summary == "Every source looked at today at 07:55"
+        assert found.summary == "Every source looked at today at 08:55", "07:55 UTC is 08:55 BST"
         assert "consent lasts until 2099-06-15" in " ".join(found.lines)
+
+    def test_Line_WhenASourceAnsweredLateLastNightUtcButAfterMidnightInLondon_CountsAsToday(
+        self, tmp_path
+    ):
+        found = self.sources(
+            tmp_path,
+            {"halifax": "2026-10-04T23:30:00+00:00"},
+            "halifax",
+        )
+
+        assert found.summary == "Every source looked at today at 00:30"
 
     def test_Line_WhenASourceHasNotAnsweredToday_SaysHowManyHaveNot(self, tmp_path):
         found = self.sources(
@@ -414,8 +425,8 @@ class TestEvidence:
             tmp_path, {"starling-api": "2026-10-05T07:00:00+00:00"}, feed=True
         )
 
-        assert found.summary == "Every source looked at today at 07:00"
-        assert "The bank's own feed: last answered 2026-10-05 07:00." in found.lines
+        assert found.summary == "Every source looked at today at 08:00"
+        assert "The bank's own feed: last answered 2026-10-05 08:00." in found.lines
 
 
 FEED_ANSWER = "2026-10-04T15:57:12.345678+00:00"
@@ -466,12 +477,12 @@ class TestTheEvidenceLineOverHttp:
         said = flat(parse(page))
 
         assert (
-            "halifax, through the aggregator: last answered 2026-10-01 09:15; consent lasts "
+            "halifax, through the aggregator: last answered 2026-10-01 10:15; consent lasts "
             "until 2099-06-15."
         ) in said
         assert "monzo, through the aggregator: has never answered; consent lasts" in said
         assert "2 sources not looked at today" in said
-        assert page.count("Times are UTC.") == 1, "the zone is said once, never as a trailing Z"
+        assert "UTC" not in said, "a time on the owner's clock carries no zone beside it"
         assert "09:15Z" not in page
 
     def test_Page_WithTheBanksOwnFeed_NamesItsLastAnswerAndNeverAToken(self, serve_hub, tmp_path):
@@ -481,7 +492,7 @@ class TestTheEvidenceLineOverHttp:
             connection_last_answered=lambda: {"starling-api": FEED_ANSWER},
         )
 
-        assert "The bank's own feed: last answered 2026-10-04 15:57." in flat(parse(page))
+        assert "The bank's own feed: last answered 2026-10-04 16:57." in flat(parse(page))
         assert "OBDI_" not in page and "STARLING_PERSONAL" not in page
         assert not re.search(r"\d{2}:\d{2}Z|\d{2}:\d{2}:\d{2}", page.split("<body")[1])
 

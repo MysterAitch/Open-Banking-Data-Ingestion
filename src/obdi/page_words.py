@@ -50,6 +50,7 @@ REMOVE_TYPED_TRANSACTION = "Remove typed transaction"
 TYPED_TRANSACTION_REMOVED = "Typed transaction removed"
 MOVE_ARTEFACT = "Move to another account"
 ARTEFACT_MOVED = "Artefact moved to another account"
+SECTION_MOVED = "Account of a statement moved"
 REBUILD_ARTEFACT = "Rebuild this artefact's transactions"
 ARTEFACT_REBUILT = "Artefact's transactions rebuilt"
 

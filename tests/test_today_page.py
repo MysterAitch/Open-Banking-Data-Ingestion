@@ -501,7 +501,7 @@ class TestAClearDay:
     def test_Evidence_OnAClearDay_StillSaysTheChecksRan(self) -> None:
         summary = next(iter(elements(self.root(), "summary")))
 
-        assert summary.text() == "19 checks ran at 08:12"
+        assert summary.text() == "19 checks ran at 09:12", "08:12 UTC is 09:12 BST"
 
     def test_Rows_AccountsLockedIn_SayWhereAndNothingElse(self) -> None:
         said = texts(row(self.root(), "everyday"), "span", "a-trust")

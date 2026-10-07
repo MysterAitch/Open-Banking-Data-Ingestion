@@ -80,6 +80,7 @@ from .arrival_order import in_arrival_order
 from .matching import INTERNAL_TRANSFER_WINDOW_DAYS, SETTLEMENT_KEEPS_ID
 from .models import SourceTier, Transaction
 from .namespaces import CASH_LEG_SOURCE
+from .page_times import clock_text
 from .plural import plural as _plural
 from .store import FOLDED_SIGHTING_PREFIX, Store
 
@@ -371,7 +372,7 @@ class MovementCompleteness:
         lines.append(f"  {_plural(self.chain_days, 'account-pair day')} compared")
         lines += _named([f.says() for f in self.chain_faults], "both sides match every day")
         if self.check_seconds is not None and self.worked_out_at is not None:
-            moment = self.worked_out_at.astimezone(UTC).strftime("%H:%M UTC")
+            moment = clock_text(self.worked_out_at)
             lines += ["", f"Worked out in {sum(self.check_seconds):.1f} s at {moment}."]
         return "\n".join(lines)
 

@@ -66,7 +66,7 @@ from .fetch_reasons import gap_lines
 from .ingest import MatcherPreview
 from .namespaces import UNASSIGNED_ACCOUNT
 from .overview import AccountOverview, Overview
-from .page_times import UTC_NOTE, instant_of, span_phrase
+from .page_times import clock_text, instant_of, local_day, span_phrase
 from .plural import plural
 from .pull import STARLING_CONNECTION
 from .rebuild_hold import RebuildInProgress
@@ -307,7 +307,6 @@ def _evidence_html(evidence: Evidence, data: BringInData) -> str:
         '<a class="tap bi-door" href="/statement-shape">A statement, on its own</a>'
         '<a class="tap bi-door" href="/import">An export, on its own</a>'
     )
-    lines.append(_esc(UTC_NOTE))
     items ="".join(f"<li>{line}</li>" for line in lines)
     return (
         f'<details class="evidence"><summary>{_esc(evidence.summary)}</summary>'
@@ -896,18 +895,18 @@ def source_lines(
         )
     if not sources:
         return Evidence("No bank is connected", tuple(lines))
-    today = now.astimezone(UTC).date()
+    today = local_day(now)
     times = [moment for _, moment in sources]
-    if all(moment is not None and moment.astimezone(UTC).date() == today for moment in times):
+    if all(moment is not None and local_day(moment) == today for moment in times):
         stale = min(moment for moment in times if moment is not None)
         return Evidence(
-            f"Every source looked at today at {stale.astimezone(UTC).strftime('%H:%M')}",
+            f"Every source looked at today at {clock_text(stale)}",
             tuple(lines),
         )
     missing = [
         name
         for name, moment in sources
-        if moment is None or moment.astimezone(UTC).date() != today
+        if moment is None or local_day(moment) != today
     ]
     return Evidence(f"{plural(len(missing), 'source')} not looked at today", tuple(lines))
 

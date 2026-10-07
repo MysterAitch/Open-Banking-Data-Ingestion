@@ -15,7 +15,8 @@ route.
 NO FIGURES. This is served by GET, and no GET shows a monetary value. The account rows hold
 counts and dates, and `Overview` carries nothing else.
 
-EVERY TIME PRINTED IS UTC, and the evidence fold says so once (`TIMES_NOTE`), not on each time.
+EVERY TIME PRINTED IS ON THE PAGE'S CLOCK (`page_times.PAGE_ZONE`), which the page does not say:
+the owner reads it as his own.
 """
 
 from __future__ import annotations
@@ -47,7 +48,14 @@ from .overview import (
     AccountOverview,
     Overview,
 )
-from .page_times import date_with_age, range_text, span_phrase
+from .page_times import (
+    clock_text,
+    date_with_age,
+    instant_text,
+    local_day,
+    range_text,
+    span_phrase,
+)
 from .plural import plural
 from .rebuild_hold import RebuildInProgress
 from .standing_data import (
@@ -62,9 +70,6 @@ from .trust import Trust, trust_of, window_start
 from .trust_bar import axis_html, bar_html, ends_html, key_html, own_life
 
 _esc = html.escape
-
-#: Said once, in the evidence fold, so that no time on the page carries a bare "Z".
-TIMES_NOTE = "All times are UTC."
 
 #: How many things to do are open before the when-convenient ones fold behind a count. What
 #: needs the owner now or soon is never folded.
@@ -81,11 +86,10 @@ def serial(parts: Sequence[str]) -> str:
 
 
 def _clock(moment: datetime, now: datetime) -> str:
-    """A time of day, with the date where it is not today's. Always UTC; `TIMES_NOTE` says so."""
-    moment = moment.astimezone(UTC)
-    if moment.date() == now.astimezone(UTC).date():
-        return moment.strftime("%H:%M")
-    return moment.strftime("%Y-%m-%d %H:%M")
+    """A time of day on the page's clock, with the date where it is not today's there."""
+    if local_day(moment) == local_day(now):
+        return clock_text(moment)
+    return instant_text(moment)
 
 
 def _age(moment: datetime, now: datetime) -> str:
@@ -723,7 +727,7 @@ def _evidence_html(
     the machinery is doing. Its summary is never removable: it is what stops silence being
     mistaken for checks that did not run."""
     names = ", ".join((*ALERT_CONDITIONS, *OVERVIEW_CHECKS))
-    at = overview.generated_at.astimezone(UTC).strftime("%H:%M")
+    at = clock_text(overview.generated_at)
     if overview.checks_run == overview.checks_total:
         summary = f"{overview.checks_total} checks ran at {at}"
     else:
@@ -746,7 +750,6 @@ def _evidence_html(
         f"<li>Assembled {_age(overview.generated_at, now)} and reused for up to "
         f'{OVERVIEW_CACHE_SECONDS} seconds. <a class="tap" href="/?fresh=1">Check again</a></li>'
     )
-    items.append(f"<li>{TIMES_NOTE}</li>")
     return (
         f'<details class="evidence"><summary>{_esc(summary)}</summary>'
         f"<ul>{''.join(items)}</ul>{system_html}</details>"

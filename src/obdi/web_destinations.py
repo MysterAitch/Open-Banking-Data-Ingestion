@@ -16,7 +16,6 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Callable
-from datetime import UTC
 from functools import lru_cache
 from typing import TYPE_CHECKING
 from urllib.parse import quote
@@ -26,7 +25,7 @@ from .callback import render_page
 from .checks_index import CHECKS, CheckResult, result_of
 from .navigation import PAGE_NAMES, page_name
 from .overview import OVERVIEW_CACHE_SECONDS, Overview
-from .page_times import instant_of
+from .page_times import clock_text, instant_of
 from .web_sections import HookTimer
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -99,7 +98,7 @@ def _unread(what: str) -> str:
 
 
 def _stamp(moment: str) -> str:
-    """A recorded instant in the house form (`page_times`); the page says its zone once."""
+    """A recorded instant in the house form and zone (`page_times`)."""
     return _esc(instant_of(moment))
 
 
@@ -130,7 +129,7 @@ def render_checks(overview: Overview | None, *, review_flags_linked: bool = Fals
     if overview is None:
         read = "The checks on Today could not be read just now."
     else:
-        at = overview.generated_at.astimezone(UTC).strftime("%H:%M")
+        at = clock_text(overview.generated_at)
         read = (
             f"Read at {at} from the checks on Today, and reused for up to "
             f"{OVERVIEW_CACHE_SECONDS} seconds."

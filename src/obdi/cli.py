@@ -856,6 +856,15 @@ def _refile(db_path: Path, artefact_id: int, account: str) -> str | None:
         return store.refile_artefact(artefact_id, account)
 
 
+def _move_section(db_path: Path, artefact_id: int, section: str, account: str) -> str:
+    from .statement_sections import move_section
+
+    with Store(db_path) as store:
+        return move_section(
+            store, artefact_id=artefact_id, section_key=section, account=account
+        )
+
+
 def _scheduled_sources() -> set[str]:
     """Sources the scheduler actually pulls - the first-party token and the
     aggregator pipe. Files are never scheduled, so their lag is the normal
@@ -4607,6 +4616,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         kept_statement_ids=kept_statement_ids,
         artefact_detail=artefact_detail,
         refile_artefact=(lambda artefact_id, account: _refile(db_path, artefact_id, account)),
+        move_statement_section=(
+            lambda artefact_id, section, account: _move_section(
+                db_path, artefact_id, section, account
+            )
+        ),
         attempts_index=attempts_index,
         extend_max=extend_max,
         account_shape=account_shape,

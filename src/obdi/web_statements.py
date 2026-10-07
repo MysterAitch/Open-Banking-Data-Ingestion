@@ -22,6 +22,7 @@ from urllib.parse import quote
 from .account_names import AccountsShown
 from .bring_in_guess import guess_account
 from .namespaces import UNASSIGNED_ACCOUNT
+from .page_times import instant_of
 from .plural import plural
 from .statement_extraction import not_yet_extracted_words
 from .web_marks import FETCH_NEXT_LINE
@@ -42,7 +43,7 @@ def kept_count(entries: Sequence[object]) -> int:
 
 
 def _kept_at(item: dict[str, object]) -> str:
-    return str(item["fetched_at"])[:16].replace("T", " ")
+    return instant_of(item["fetched_at"])
 
 
 def _order(item: dict[str, object]) -> tuple[str, int]:
@@ -161,9 +162,15 @@ def _group(
 
 
 def _section_card(
-    item: dict[str, object], *, names: AccountsShown, options: dict[str, str], can_assign: bool
+    item: dict[str, object],
+    *,
+    names: AccountsShown,
+    options: dict[str, str],
+    can_assign: bool,
+    can_move: bool = False,
 ) -> str:
-    """A document of several accounts: one control for each account.
+    """A document of several accounts: one control for each account, and for an account already
+    given one, the control that moves it (`_MOVE_LEAD` says how, once, above the list).
 
     A label is shown with its digits masked and a section's refusal likewise; no row, figure, or
     payee appears.
@@ -187,6 +194,8 @@ def _section_card(
         form = ""
         if held:
             status = f'<span class="ok">assigned to {names.of(held).inline()}</span>'
+            if can_move:
+                form = _move_fold(ident, options, section=str(part["token"]))
         elif refusal:
             status = f'<span class="warn">refused: {_esc(refusal)}</span>'
         else:
@@ -288,18 +297,27 @@ def refile_form(
     confirm: str,
     button: str,
     placeholder: str,
+    section: str = "",
 ) -> str:
-    """The form that files a kept statement under another account (`/refile-artefact`).
+    """The form that files a kept statement under another account (`/refile-artefact`), or, given
+    a section's token, one account of an all-accounts statement (`/statement-section-move`).
 
-    The one drawing of it, for the artefact's own page and for the Statements page, so the two
-    cannot come to post different fields: the id, the chosen or typed account, and the tick
-    without which the handler refuses.
+    The one drawing of it, for the artefact's own page and for the Statements page, so they
+    cannot come to post different fields: what is moved, the chosen or typed account, and the
+    tick without which the handler refuses.
     """
     from .web import account_picker
 
-    return (
-        '<form method="post" action="/refile-artefact">'
+    which = (
+        f'<form method="post" action="/statement-section-move">'
+        f'<input type="hidden" name="artefact" value="{artefact_id}">'
+        f'<input type="hidden" name="section" value="{_esc(section)}">'
+        if section
+        else '<form method="post" action="/refile-artefact">'
         f'<input type="hidden" name="id" value="{artefact_id}">'
+    )
+    return (
+        which
         + account_picker(options, other_placeholder=placeholder)
         + '<label class="tick">'
         f'<input type="checkbox" name="confirm" value="yes" required> {confirm}</label>'
@@ -319,12 +337,19 @@ _MOVE_LEAD = (
 )
 
 
-def _move_fold(ident: int, options: dict[str, str]) -> str:
+#: What the move beside an account of an all-accounts document does, said once above them.
+_SECTION_MOVE_LEAD = (
+    " One given the wrong account is moved with the Move control beside it; its transactions "
+    "move with it."
+)
+
+
+def _move_fold(ident: int, options: dict[str, str], section: str = "") -> str:
     return (
         "<details><summary>Move it</summary>"
         + refile_form(
             ident, options, confirm="Confirm", button="Move it",
-            placeholder="or type an account name",
+            placeholder="or type an account name", section=section,
         )
         + "</details>"
     )
@@ -340,8 +365,8 @@ def _lines_for(
     it, and the sections of all-accounts documents assigned to it.
 
     With `move_options`, each whole statement carries the control that moves it to another
-    account. A section is not offered one: it is assigned once, as declared state, and nothing
-    re-assigns it.
+    account. A section is not offered one here: it is moved from the card of its document
+    (`_section_card`), where it is told apart from the document's other accounts.
     """
     found: list[tuple[str, str]] = []
     for item in entries:
@@ -442,6 +467,7 @@ def statements_body(
     can_assign: bool,
     can_section_assign: bool,
     can_move: bool = False,
+    can_move_section: bool = False,
     ref: str = "",
 ) -> str:
     """Everything between the heading and the foot of the kept statements page; with `ref`, the
@@ -528,9 +554,16 @@ def statements_body(
             '<details class="kept-group">'
             f"<summary>Covers several accounts ({len(sectioned)})</summary>"
             '<p class="muted">Each account in these documents is given its own account. The '
-            'document itself stays kept as it is.</p><ul class="diag-lines">'
+            f"document itself stays kept as it is.{_SECTION_MOVE_LEAD if can_move_section else ''}"
+            '</p><ul class="diag-lines">'
             + "".join(
-                _section_card(item, names=names, options=options, can_assign=can_section_assign)
+                _section_card(
+                    item,
+                    names=names,
+                    options=options,
+                    can_assign=can_section_assign,
+                    can_move=can_move_section,
+                )
                 for item in sorted(sectioned, key=_order)
             )
             + "</ul></details>"

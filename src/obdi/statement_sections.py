@@ -358,6 +358,48 @@ def assign_section(
     )
 
 
+def move_section(store: Store, *, artefact_id: int, section_key: str, account: str) -> str:
+    """Move one assigned section of a kept statement to another account, with its rows.
+
+    The section is named by its key or its token. Only a section somebody assigned is moved: one
+    still waiting is assigned (`assign_section`), which reads and checks it, and a move reads
+    nothing. Returns the account it was under; a refusal is a `DataError`. The rows follow in
+    the store's own tables at once, and the owner is told to rebuild from raw so every derived
+    view agrees (`Store.move_statement_section`).
+    """
+    destination = account.strip()
+    if not destination:
+        raise DataError("No account was named, so nothing was moved.")
+    try:
+        validate_canonical_name(destination)
+    except ValueError as exc:
+        raise DataError(f"Not moved: {exc}") from exc
+    row = store.connection.execute(
+        "SELECT digest FROM raw_artefacts WHERE rowid = ? AND source = 'statement'",
+        (artefact_id,),
+    ).fetchone()
+    if row is None:
+        raise DataError(f"No kept statement {artefact_id}.")
+    digest = str(row["digest"])
+    chosen = next(
+        (
+            item
+            for item in store.statement_section_assignments(digest)
+            if section_key in (item.section_key, section_token(item.section_key))
+        ),
+        None,
+    )
+    if chosen is None:
+        raise DataError(
+            "that account of the statement has not been given an account, so there is nothing "
+            "to move; give it one instead"
+        )
+    old = store.move_statement_section(digest, chosen.section_key, destination)
+    if old is None:
+        raise DataError("that account of the statement is no longer assigned")
+    return old
+
+
 @dataclass
 class SectionBatches:
     """What a rebuild reads back out of one multi-account statement."""

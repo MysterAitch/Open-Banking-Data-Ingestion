@@ -105,9 +105,9 @@ class TestNeedsAttention:
 
         assert verdict_of_page(page) == "Everything checked is in order."
         assert 'class="verdict ok' in page
-        assert "<summary>19 checks ran at 14:02</summary>" in page
-        assert re.search(r"\d\d:\d\dZ", page) is None, "the zone is said once, not on each time"
-        assert "All times are UTC." in page
+        assert "<summary>19 checks ran at 15:02</summary>" in page, "14:02 UTC is 15:02 BST"
+        assert re.search(r"\d\d:\d\dZ", page) is None, "a time carries no zone mark"
+        assert "UTC" not in page, "the owner reads the page's times as his own clock"
         assert '<ol class="attention">' not in page
         assert 'class="todos"' not in page, "a day with nothing to do says so in one line and stops"
 
@@ -159,7 +159,7 @@ class TestNeedsAttention:
         page = home(tmp_path, lambda fresh: assemble(household, findings=boom))
 
         assert "The alert check could not run (RuntimeError)" in page
-        assert "<summary>8 of 19 checks ran at 14:02; the rest could not run</summary>" in page
+        assert "<summary>8 of 19 checks ran at 15:02; the rest could not run</summary>" in page
         assert "Only 8 of 19 checks could run" in page
         assert "fault to look at now" in verdict_of_page(page)
         assert "Everything checked is in order" not in page

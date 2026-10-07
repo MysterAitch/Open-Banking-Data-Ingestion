@@ -284,7 +284,7 @@ class TestThePage:
     def test_ChecksPage_SaysWhenItWasRead_AndWhatItWasReadFrom(self, serve):
         page = httpx.get(f"{serve(overview=lambda fresh: overview())}/checks", timeout=20).text
 
-        assert "12:30" in page and "Check again" in page
+        assert "13:30" in page and "Check again" in page, "12:30 UTC is 13:30 BST"
 
     def test_Reports_StillAnswersWithTheChecksPage(self, serve):
         base = serve(overview=lambda fresh: overview())

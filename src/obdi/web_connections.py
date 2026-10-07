@@ -38,7 +38,7 @@ from .bank_balances import BANK_SOURCE
 from .connections import Connection, ConnectionStore
 from .navigation import account_address
 from .overview import NOW, SOON
-from .page_times import UTC_NOTE, date_with_age
+from .page_times import date_with_age
 from .plural import plural
 from .pull import STARLING_CONNECTION
 from .todo import Control, Todo
@@ -59,7 +59,9 @@ _NAMED_ACCOUNTS = 4
 #: A consent this near its end is a thing to do now and not soon: the last rung of the alert ladder.
 _URGENT_DAYS = 3
 
-_TIMES = f'<p class="muted">{UTC_NOTE}</p>'
+#: The scheduler's own record states its times in UTC, marked Z (`scheduler_status.when`), and is
+#: the one thing on this page that does; every other time is on the page clock (`page_times`).
+_TIMES = '<p class="muted">The scheduler\'s times are UTC, marked Z.</p>'
 
 
 @dataclass(frozen=True)

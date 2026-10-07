@@ -33,6 +33,7 @@ from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from .account_about import Window, windows_in_order
 from .account_names import AccountShown, AccountsShown, code_html
 from .accounts import (
     BALANCE_ONLY_KIND,
@@ -67,7 +68,7 @@ from .standing_data import (
     verification_of,
     verification_sentence,
 )
-from .web_account_about import windows_html
+from .web_account_about import window_line_html
 from .web_answers import UNREAD, AnswerPages, ledger_href, ledger_link
 from .web_destinations import accounts_links_html
 from .web_sections import back_link, referring_page
@@ -268,11 +269,52 @@ def _select_field(name: str, label: str, options: Iterable[tuple[str, str]]) -> 
     )
 
 
+def _window_edit_html(index: int, window: Window, today: date) -> str:
+    """One declared window as a line (its figure sealed) with its own fields beneath: the kind and
+    the two dates as they stand, a figure left blank to keep the one held, and a tick to remove.
+
+    The figure is never served into its field, because this page is served on a GET and a figure
+    is a value; a blank field means "as it is" (`windows_from_form`)."""
+    prefix = f"w{index}_"
+    return (
+        '<li class="window">'
+        + window_line_html(window, today, unmasked=False)
+        + _text_field(prefix + "kind", window.kind, "Kind")
+        + _text_field(
+            prefix + "figure",
+            "",
+            "New figure",
+            note="leave blank to keep it; a rate as a percentage, a limit in pounds and pence",
+        )
+        + _date_field(prefix + "from", window.window_from, "From")
+        + _date_field(prefix + "to", window.window_to, "To")
+        + f'<p><label><input type="checkbox" name="{prefix}remove" value="yes"> '
+        "Remove this window</label></p>"
+        "</li>"
+    )
+
+
 def _windows_section(record: AccountRecord | None, today: date) -> str:
     """The account's limit and rate windows as the account page lists them (figures sealed, since
-    this is a page served on a GET), and the one row that adds a window. A window is added here
-    and nowhere else; the figures of existing windows are not editable, only listed."""
-    listed = windows_html(record, today, unmasked=False) if record is not None else ""
+    this is a page served on a GET), each with fields to change or remove it, and the one row that
+    adds a window.
+
+    Windows are numbered in the order `windows_in_order` gives, and the number of them travels
+    with the form so a save made from a page served before the windows changed is refused."""
+    ordered = windows_in_order(record) if record is not None else []
+    listed = (
+        '<input type="hidden" name="window_count" value="' + str(len(ordered)) + '">'
+        '<ul class="windows">'
+        + "".join(_window_edit_html(i, w, today) for i, w in enumerate(ordered))
+        + "</ul>"
+        if record is not None and ordered
+        else ""
+    )
+    count = (
+        '<input type="hidden" name="window_count" value="0">'
+        if record is not None and not ordered
+        else ""
+    )
     add = (
         '<fieldset class="add-window"><legend>Add a window</legend>'
         '<p class="muted">A rate or a limit that held over some days: leave the row empty to add '
@@ -300,7 +342,7 @@ def _windows_section(record: AccountRecord | None, today: date) -> str:
     )
     return (
         '<h3>Rates and limits</h3>'
-        + (listed or '<p class="muted">None are declared.</p>')
+        + (listed or count + '<p class="muted">None are declared.</p>')
         + add
     )
 
@@ -313,8 +355,8 @@ def account_form(
 ) -> str:
     """The declare form and the edit form, which are one form.
 
-    The windows already declared are listed with their figures sealed, and a row adds one more
-    (`window_from_form`); changing or removing one is not offered here.
+    The windows already declared are listed with their figures sealed and fields to change or
+    remove each (`windows_from_form`), and a row adds one more (`window_from_form`).
 
     The stable id appears nowhere - not as a field, not as small print.
     Nobody types it and nothing displays it, so an edit identifies its
@@ -945,11 +987,69 @@ def window_from_form(fields: dict[str, str]) -> LimitWindow | RateWindow | None:
         raise ValueError("say whether the window to add is a rate or a limit")
     if not figure:
         raise ValueError("a window to add needs a figure")
+    return _window_of(term, kind, figure, first, last)
+
+
+def windows_from_form(
+    fields: dict[str, str], existing: AccountRecord
+) -> tuple[tuple[LimitWindow, ...], tuple[RateWindow, ...]]:
+    """The limits and rates the account holds once the form's edits to each declared window are
+    applied: a changed kind or date, a new figure where one was typed (a blank figure keeps the
+    one held, since the form never carries it), and a window dropped where its tick is set.
+
+    A form that carries no window count predates the fields and changes nothing. A count that is
+    not the number of windows held is refused: the numbers on the fields name windows by their
+    place in the order, and a different count means the place no longer names the window the
+    person was looking at. The order of each tuple is the order it was held in.
+    """
+    held = windows_in_order(existing)
+    if "window_count" not in fields:
+        return existing.limits, existing.rates
+    if fields["window_count"].strip() != str(len(held)):
+        raise StaleWindows(
+            "the account's windows have changed since this form was shown - open it again"
+        )
+    edited: dict[int, Window | None] = {}
+    for index, window in enumerate(held):
+        prefix = f"w{index}_"
+        if fields.get(prefix + "remove", "").strip():
+            edited[id(window)] = None
+            continue
+        kind = fields.get(prefix + "kind", window.kind).strip()
+        first = _form_date(fields.get(prefix + "from", ""), f"window {index + 1} from")
+        last = _form_date(fields.get(prefix + "to", ""), f"window {index + 1} to")
+        typed = fields.get(prefix + "figure", "").strip()
+        if typed:
+            term = "limit" if isinstance(window, LimitWindow) else "rate"
+            edited[id(window)] = _window_of(term, kind, typed, first, last)
+        else:
+            _check_span(first, last)
+            edited[id(window)] = replace(window, kind=kind, window_from=first, window_to=last)
+    limits = tuple(
+        w for old in existing.limits if isinstance(w := edited[id(old)], LimitWindow)
+    )
+    rates = tuple(w for old in existing.rates if isinstance(w := edited[id(old)], RateWindow))
+    return limits, rates
+
+
+class StaleWindows(ValueError):
+    """A form was shown before the account's windows changed."""
+
+
+def _check_span(first: date | None, last: date | None) -> None:
     if first and last and last < first:
         raise ValueError(
             f"the window ends ({last.isoformat()}) before it begins ({first.isoformat()}) - "
             "one of the two dates is wrong"
         )
+
+
+def _window_of(
+    term: str, kind: str, figure: str, first: date | None, last: date | None
+) -> LimitWindow | RateWindow:
+    """The window a term, kind, figure, and two dates describe, or a refusal saying which part
+    is wrong."""
+    _check_span(first, last)
     if term == "rate":
         try:
             percent = float(figure.removesuffix("%"))
@@ -1436,9 +1536,10 @@ class AccountPages(AnswerPages):
 
         Declaring is a CREATE act, so a reference already in the registry
         refuses rather than quietly editing: a silent edit would overwrite an
-        account the person never had on screen. The form carries no existing
-        window, only the one row that adds a window, so every window already
-        declared is carried across and the added one is appended to them.
+        account the person never had on screen. The form carries fields for each
+        window already declared and one row that adds a window: the declared
+        windows are edited as the form says (`windows_from_form`) and the added
+        one is appended to them.
         """
         hook = self.bound_config.declare_account
         if hook is None:
@@ -1480,18 +1581,26 @@ class AccountPages(AnswerPages):
             if str(record.ref) != original and str(record.ref) in declared:
                 self._respond(409, already_declared(str(record.ref)))
                 return
-            # The windows are not on the form, and declaring replaces them:
-            # carried across explicitly so editing a label cannot silently
-            # discard an account's limits and rates. So is the note on how the
-            # dates came to be known, while both dates are as they were: the
-            # form cannot say it, and "stated" written over an inference by an
-            # edit that touched neither date would be a false record.
+            # Declaring replaces the windows, so they are carried across as
+            # edited: editing a label cannot silently discard an account's
+            # limits and rates. So is the note on how the dates came to be
+            # known, while both dates are as they were: the form cannot say
+            # it, and "stated" written over an inference by an edit that
+            # touched neither date would be a false record.
+            try:
+                limits, rates = windows_from_form(fields, existing)
+            except StaleWindows as exc:
+                self._respond(409, refusal("Not saved", str(exc)))
+                return
+            except ValueError as exc:
+                self._respond(400, refusal("Not saved", str(exc)))
+                return
             same_dates = (record.opened, record.closed) == (existing.opened, existing.closed)
             record = replace(
                 record,
                 stable_id=existing.stable_id,
-                limits=existing.limits,
-                rates=existing.rates,
+                limits=limits,
+                rates=rates,
                 date_basis=existing.date_basis if same_dates else "",
             )
         elif str(record.ref) in declared:

@@ -404,7 +404,7 @@ class TestTheFirstScreenIsInOrder:
 
         summary = re.search(r'<details class="evidence"><summary>(.*?)</summary>', page)
         assert summary is not None
-        assert summary.group(1) == f"{troubled.checks_total} checks ran at 14:02"
+        assert summary.group(1) == f"{troubled.checks_total} checks ran at 15:02"
         assert "Last scheduled cycle" not in summary.group(1)
         assert "No scheduled cycle recorded." in page.split('class="evidence"')[1].split(
             "</details>"
@@ -565,7 +565,7 @@ class TestTheDataLine:
 
         assert (line.word, line.css) == ("current", "pill-ok")
         assert line.sentence == (
-            "Last scheduled cycle finished 13:50; no feed is stale or silent."
+            "Last scheduled cycle finished 14:50; no feed is stale or silent."
         )
 
     def test_Line_WhenFeedsAreStaleOrSilent_CountsThemFromTheChecksAlreadyRun(self, clear):

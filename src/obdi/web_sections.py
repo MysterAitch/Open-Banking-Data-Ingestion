@@ -30,6 +30,7 @@ from .alerts import consent_rung
 from .buildinfo import describe
 from .callback import render_page
 from .connections import ConnectionStore
+from .page_times import instant_of
 from .values_sitting import more_line_html
 from .web_connections import Hooks, connections_body
 from .web_marks import FETCH_NEXT_LINE
@@ -218,7 +219,7 @@ def _rebuild_fact(
             return '<p class="muted">no rebuild recorded</p>'
         newest = max(runs, key=lambda run: str(run.get("finished_at", "")))
         ok, finished = bool(newest.get("ok")), str(newest.get("finished_at", ""))
-    stamp = _esc(finished[:16].replace("T", " ")) + "Z" if finished else "at an unrecorded time"
+    stamp = _esc(instant_of(finished)) if finished else "at an unrecorded time"
     if ok:
         return f"<p>last rebuild ok, {stamp}</p>"
     return f'<p class="bad">last rebuild FAILED, {stamp}</p>'
