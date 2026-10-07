@@ -3884,13 +3884,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return RecurringFindings(found, today)
 
     def _shape_counts(store: Store) -> dict[str, int]:
-        from .entities import count_row_shapes
+        from .entities import count_shapes
         from .recurring import counts_as_occurrence
 
-        return count_row_shapes(
-            (t.description, t.counterparty)
-            for t in store.all_transactions()
-            if counts_as_occurrence(t)
+        return count_shapes(
+            t.description for t in store.all_transactions() if counts_as_occurrence(t)
         )
 
     def entities_data() -> EntitiesView:
@@ -3900,7 +3898,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             COVERED_SHOWN,
             Covered,
             count_row_legs,
-            count_row_shapes,
+            count_shapes,
+            shape_counterparties,
             shape_of,
             view_of,
         )
@@ -3913,7 +3912,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             names = account_names(store)
             listed: dict[str, list[Covered]] = {}
             for t in sorted(rows, key=lambda r: (r.value_date, r.entity_id), reverse=True):
-                shape = shape_of(t.description, t.counterparty)
+                shape = shape_of(t.description)
                 shown = listed.setdefault(shape, [])
                 if shape and len(shown) < COVERED_SHOWN:
                     shown.append(
@@ -3928,12 +3927,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                         )
                     )
             return view_of(
-                count_row_shapes((t.description, t.counterparty) for t in rows),
+                count_shapes(t.description for t in rows),
                 store.entities_with_shapes(),
-                count_row_legs(
-                    (t.description, t.counterparty, t.entity_id in leg_ids) for t in rows
-                ),
+                count_row_legs((t.description, t.entity_id in leg_ids) for t in rows),
                 {shape: tuple(found) for shape, found in listed.items() if shape},
+                shape_counterparties((t.description, t.counterparty) for t in rows),
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:

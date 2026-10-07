@@ -104,6 +104,9 @@ def _why(group: Proposal) -> str:
         parts.append("some begin with the same words")
     if SAME_WORDS in group.rules:
         parts.append("some are the same words in another order or without a code")
+    if group.bank_name:
+        both = "both" if len(group.shapes) == 2 else "all"
+        parts.append(f"the bank names {both} as “{group.bank_name}”")
     return "; ".join(parts)
 
 

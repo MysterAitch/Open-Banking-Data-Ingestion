@@ -610,7 +610,7 @@ def find_recurring(
             shapes[between] = ""
             groups[between].append(_Leg(row, opposite.account_id))
             continue
-        shape = shape_of(row.description, row.counterparty)
+        shape = shape_of(row.description)
         if not shape:
             continue
         gathered = (entities or {}).get(shape)

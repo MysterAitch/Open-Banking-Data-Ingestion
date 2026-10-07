@@ -29,11 +29,16 @@ Spellings of one name (rule 2):
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+from typing import ClassVar
+
 import pytest
 
 from obdi import entities, payment_methods
-from obdi.entities import count_row_shapes, count_shapes, propose_groups, shape_of
-from obdi.recurring import _TYPE_WORDS
+from obdi.entities import BANK_NAMES, count_shapes, propose_groups, shape_of, view_of
+from obdi.models import SourceTier, Transaction
+from obdi.recurring import _TYPE_WORDS, find_recurring
+from obdi.web_entities import render_entities
 
 
 def groups(*descriptions: str, taken: frozenset[str] = frozenset()):
@@ -281,56 +286,113 @@ class TestADateTheBankPrintsIsNotPartOfTheName:
         assert counted == {"bramblewick leeds": 2}
 
 
-class TestTheCounterpartyIsTheNameWhereASourceStatesOne:
-    def test_Shape_WhenACounterpartyIsStated_ComesFromItAndNotTheDescription(self):
-        shape = shape_of("CARD PAYMENT TO BRAMBLEWICK 8841 LEEDS GB", "Bramblewick")
+def row(day: date, minor: int, description: str, counterparty: str, n: int) -> Transaction:
+    return Transaction(
+        account_id="acct-a",
+        amount_minor=minor,
+        value_date=day,
+        booking_date=day,
+        description=description,
+        counterparty=counterparty,
+        source="synthetic",
+        tier=SourceTier.SYNTHETIC,
+        entity_id=f"e{n:05d}",
+    )
 
-        assert shape == "bramblewick"
 
-    def test_Shape_WhenNoCounterpartyIsStated_ComesFromTheDescription(self):
-        assert shape_of("BRAMBLEWICK 8841 LEEDS", "") == "bramblewick leeds"
-        assert shape_of("BRAMBLEWICK 8841 LEEDS", "   ") == "bramblewick leeds"
+class TestTheDetectorKeysOnePayeeTheSameWhateverTheSource:
+    """A bank states a merchant name only where it identified one, and a statement row states none,
+    so keying the detector on it split one payee's months into two shapes by source."""
 
-    def test_Shape_WhenTheCounterpartyIsOnlyCodes_FallsBackToTheDescription(self):
-        assert shape_of("BRAMBLEWICK LEEDS", "4471 9921") == "bramblewick leeds"
+    TODAY = date(2026, 10, 7)
 
-    def test_Count_WhenRowsStateACounterpart_TheShapesAreTheCounterpartiesAndTheDescriptionIsKept(
-        self,
-    ):
-        counted = count_row_shapes(
-            [
-                ("BRAMBLEWICK LEEDS 12", "Bramblewick"),
-                ("BRAMBLEWICK YORK 98", "Bramblewick"),
-                ("ARDEN FOODS 1", ""),
-            ]
+    def test_Detector_WhenHalfTheMonthsCameFromAStatementAndHalfFromAFeed_IsOneLiveSeries(self):
+        months = [(2025, 10), (2025, 11), (2025, 12), (2026, 1), (2026, 2), (2026, 3),
+                  (2026, 4), (2026, 5), (2026, 6), (2026, 7), (2026, 8), (2026, 9)]
+        rows = [
+            row(date(y, m, 15), -999, "BRAMBLEWICK LEEDS", "" if i < 6 else "Bramblewick", i)
+            for i, (y, m) in enumerate(months)
+        ]
+
+        (series,) = find_recurring(rows, [], self.TODAY)
+
+        assert (series.count, series.cadence, series.stopped) == (12, "monthly", False)
+        assert series.shape == "bramblewick leeds"
+
+    def test_Detector_WhenAWeeklyHabitStatesTheCounterpartyOnAlternateRows_IsStillOneHabit(self):
+        start = date(2026, 1, 5)
+        rows = [
+            row(
+                start + timedelta(weeks=i), -450 - (i % 3), "OAKMERE COFFEE",
+                "Oakmere" if i % 2 else "", i,
+            )
+            for i in range(20)
+        ]
+
+        (series,) = find_recurring(rows, [], self.TODAY)
+
+        assert (series.count, series.cadence) == (20, "weekly")
+
+    def test_Shape_IgnoresTheCounterpartyEntirely(self):
+        assert shape_of("CARD PAYMENT TO BRAMBLEWICK 8841 LEEDS GB") == (
+            "card payment to bramblewick leeds gb"
         )
 
-        assert counted == {"bramblewick": 2, "arden foods": 1}
 
-    def test_Detector_WhenARowStatesACounterparty_TheSeriesIsFoundUnderItAndNamedByItsEntity(self):
-        from datetime import date
+class TestTheBankNamingTwoShapesAsOneMerchant:
+    COUNTS: ClassVar[dict[str, int]] = {
+        "zqx holdings leeds": 5, "pay bwk north": 3, "arden foods": 2,
+    }
 
-        from obdi.models import SourceTier, Transaction
-        from obdi.recurring import find_recurring
+    def test_Proposal_WhenTheBankNamesTwoShapesAsOneMerchant_AreOneGroupNamedForIt(self):
+        said = {"zqx holdings leeds": {"Bramblewick": 5}, "pay bwk north": {"BRAMBLEWICK": 3}}
 
-        def row(month: int, description: str) -> Transaction:
-            return Transaction(
-                account_id="acct-a",
-                amount_minor=-999,
-                value_date=date(2026, month, 15),
-                booking_date=date(2026, month, 15),
-                description=description,
-                counterparty="Bramblewick",
-                source="synthetic",
-                tier=SourceTier.SYNTHETIC,
-                entity_id=f"e{month:03d}",
-            )
+        (group,) = propose_groups(self.COUNTS, counterparties=said).groups
 
-        rows = [row(m, f"CARD PAYMENT BRAMBLEWICK {m}41 TOWN{m}") for m in range(1, 7)]
-        today = date(2026, 10, 7)
+        assert set(group.shapes) == {"zqx holdings leeds", "pay bwk north"}
+        assert group.rules == frozenset({BANK_NAMES})
+        assert group.name == "Bramblewick"
+        assert group.bank_name == "Bramblewick"
 
-        by_shape = find_recurring(rows, [], today)
-        by_entity = find_recurring(rows, [], today, entities={"bramblewick": "Bramblewick Ltd"})
+    def test_Proposal_WhenTheBankNamesItSpeltWithAPluralOrCode_StillJoinsThem(self):
+        said = {"zqx holdings leeds": {"Bramblewicks Ltd": 5}, "pay bwk north": {"Bramblewick": 3}}
 
-        assert [(s.shape, s.count) for s in by_shape] == [("bramblewick", 6)]
-        assert [(s.shape, s.count) for s in by_entity] == [("Bramblewick Ltd", 6)]
+        (group,) = propose_groups(self.COUNTS, counterparties=said).groups
+
+        assert len(group.shapes) == 2
+
+    def test_Proposal_WhenOneShapesRowsCarryTwoCounterparties_ItJoinsNeitherByThisRule(self):
+        said = {
+            "zqx holdings leeds": {"Bramblewick": 3, "Other Merchant": 2},
+            "pay bwk north": {"Bramblewick": 3},
+            "arden foods": {"Other Merchant": 2},
+        }
+
+        assert propose_groups(self.COUNTS, counterparties=said).groups == ()
+
+    def test_Proposal_WhenTheMixedShapeSitsBesideTwoThatAgree_OnlyThoseTwoJoin(self):
+        counts = {**self.COUNTS, "pay bwk south": 1}
+        said = {
+            "zqx holdings leeds": {"Bramblewick": 3, "Other Merchant": 2},
+            "pay bwk north": {"Bramblewick": 3},
+            "pay bwk south": {"Bramblewick": 1},
+        }
+
+        (group,) = propose_groups(counts, counterparties=said).groups
+
+        assert set(group.shapes) == {"pay bwk north", "pay bwk south"}
+
+    def test_Proposal_WhenNoShapeStatesACounterparty_IsExactlyWhatItWas(self):
+        assert propose_groups(self.COUNTS, counterparties={}).groups == ()
+        assert propose_groups(self.COUNTS).groups == ()
+
+    def test_Proposal_WhenOnlyOneShapeIsNamed_NothingJoins(self):
+        assert propose_groups(self.COUNTS, counterparties={"arden foods": {"X": 2}}).groups == ()
+
+    def test_Page_WhenValuesAreShown_SaysWhyWithTheBanksName(self):
+        said = {"zqx holdings leeds": {"Bramblewick": 5}, "pay bwk north": {"Bramblewick": 3}}
+        view = view_of(self.COUNTS, [], counterparties=said)
+
+        page = render_entities(view, unmasked=True).decode("utf-8")
+
+        assert "the bank names both as “Bramblewick”" in page
