@@ -1,10 +1,10 @@
 """The one way a page writes a date, a month, a range, an instant, an age, and a percentage.
 
 A date is `2026-06-28`; a month `2026-06`; a range `2026-01-10 to 2026-06-28`; an instant
-`2026-10-04 15:24`, with the zone said once on the page (`UTC_NOTE`) and never a trailing "Z", an
-offset, seconds, or microseconds. A relative age is whole days in brackets after its date,
-`(98 days ago)`; where the age exists to flag a stale date, `date_with_age` writes it in coarser
-words. A percentage is `66.7%`. Diagnostic pages that quote a provider's own stamps as
+`2026-10-04 15:24` on the owner's clock (`PAGE_ZONE`), with no zone written beside it and never a
+trailing "Z", an offset, seconds, or microseconds. A relative age is whole days in brackets after
+its date, `(98 days ago)`; where the age exists to flag a stale date, `date_with_age` writes it in
+coarser words. A percentage is `66.7%`. Diagnostic pages that quote a provider's own stamps as
 evidence are the only exception, and say so by being the pages the wording tests exempt.
 """
 
@@ -12,8 +12,33 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-#: Said once on a page that shows instants, wherever the page converts to UTC.
-UTC_NOTE = "Times are UTC."
+from .london_clock import london
+
+#: The zone every clock time on a page is written in. The owner is in the UK and the host runs
+#: UTC, so a page that printed the host's clock read an hour out for half the year. The store's
+#: instants stay UTC; only rendering converts, here, and the zone is therefore never written
+#: beside a time. `london_clock.london` is the implementation of this zone's rule, because the
+#: standard library's zone database is absent on a Windows host and a page must not fall back to
+#: UTC without saying so.
+PAGE_ZONE = "Europe/London"
+
+
+def local_time(moment: datetime) -> datetime:
+    """The instant on the page's clock (`PAGE_ZONE`); a moment with no zone is taken as UTC."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return london(moment)
+
+
+def local_day(moment: datetime) -> date:
+    """The calendar day on the page's clock, which is the next day for a late summer evening in
+    UTC."""
+    return local_time(moment).date()
+
+
+def clock_text(moment: datetime) -> str:
+    """The time of day on the page's clock, to the minute: `15:24`."""
+    return local_time(moment).strftime("%H:%M")
 
 
 def date_text(day: date) -> str:
@@ -29,10 +54,9 @@ def range_text(first: date, last: date) -> str:
 
 
 def instant_text(moment: datetime) -> str:
-    """The instant on UTC's clock to the minute; a moment with no zone is taken as UTC."""
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=UTC)
-    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M")
+    """The instant on the page's clock (`PAGE_ZONE`) to the minute; a moment with no zone is taken
+    as UTC."""
+    return local_time(moment).strftime("%Y-%m-%d %H:%M")
 
 
 def instant_of(raw: object) -> str:

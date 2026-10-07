@@ -119,7 +119,10 @@ Seen on the real store the first time the rebuilt Today was read there (0.4.337,
 - The main account's page still reads every source report for the account on each load
   (v0.4.336 speed work: 193 to 81 queries warm; the next cost is that read).
 - "Artefact" as a page word is undecided; "rows" remains in some reports.
-- Today shows times in UTC.
+- (Done after 0.4.354.) Today shows times in London's clock, not UTC: every page time goes through
+  `page_times` (`PAGE_ZONE`), and the "All times are UTC" line is gone. The scheduler's own record,
+  the Actual results lists, the fetch attempts and timeline, and a bank's stated transaction times
+  still say UTC (marked Z or named) because they quote a source's own stamps as evidence.
 - Whether to state a balance for the cash account and the credit union loan is the owner's.
 - (Done after 0.4.352.) An archived account's own life begins at its stated opening day;
   before, a statement's printed period beginning earlier stretched the bar.

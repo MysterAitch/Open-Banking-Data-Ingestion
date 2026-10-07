@@ -26,6 +26,8 @@ from datetime import UTC, datetime, timedelta
 from http.cookies import CookieError, SimpleCookie
 from urllib.parse import urlparse
 
+from .page_times import clock_text
+
 COOKIE = "obdi-values"
 SITTING_HOURS = 12
 SHOW = "/values-shown"
@@ -186,7 +188,7 @@ def banner_html() -> str:
     return (
         '<div class="sitting" role="status">'
         "<span>Values are shown on every page for this sitting "
-        f"(until {until:%H:%M} UTC).</span>"
+        f"(until {clock_text(until)}).</span>"
         f'<form method="post" action="{HIDE}">{_return_field()}'
         '<button class="tap" type="submit">Hide values</button></form></div>'
     )
@@ -202,7 +204,7 @@ def more_line_html() -> str:
             '<button class="tap" type="submit">Show values on every page</button></form>'
         )
     return (
-        f"<h2>Values</h2><p>Values are shown this sitting, until {until:%H:%M} UTC.</p>"
+        f"<h2>Values</h2><p>Values are shown this sitting, until {clock_text(until)}.</p>"
         f'<form method="post" action="{HIDE}">{_return_field()}'
         '<button class="tap" type="submit">Hide values</button></form>'
     )

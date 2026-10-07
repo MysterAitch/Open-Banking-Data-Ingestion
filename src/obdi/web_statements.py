@@ -22,6 +22,7 @@ from urllib.parse import quote
 from .account_names import AccountsShown
 from .bring_in_guess import guess_account
 from .namespaces import UNASSIGNED_ACCOUNT
+from .page_times import instant_of
 from .plural import plural
 from .statement_extraction import not_yet_extracted_words
 from .web_marks import FETCH_NEXT_LINE
@@ -42,7 +43,7 @@ def kept_count(entries: Sequence[object]) -> int:
 
 
 def _kept_at(item: dict[str, object]) -> str:
-    return str(item["fetched_at"])[:16].replace("T", " ")
+    return instant_of(item["fetched_at"])
 
 
 def _order(item: dict[str, object]) -> tuple[str, int]:

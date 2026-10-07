@@ -77,6 +77,7 @@ from .join_basis import JoinCounts, SightingView, join_counts_of_bases, sighting
 from .masking import Structural, Total
 from .models import Transaction
 from .namespaces import CASH_LEG_SOURCE, MANUAL_SOURCE, UNITEMISED_SOURCE
+from .page_times import instant_of
 from .protection import Check, ProtectionView, check_span, protection_view
 from .replay import ReplayError, to_actual_transaction, withheld_reason
 from .round_up_accounts import RoundUpGaps
@@ -1047,7 +1048,7 @@ def _removed_balances(store: Store, ref: str, built: Ledger) -> tuple[RemovedBal
         RemovedBalance(
             day=removed.day.isoformat(),
             source=removed.source,
-            removed_at=removed.removed_at[:16].replace("T", " "),
+            removed_at=instant_of(removed.removed_at),
             balance_direction=direction_of(removed.balance_minor),
             balance=Money(removed.balance_minor, CURRENCY),
             restate_as=f"{'-' if removed.balance_minor < 0 else ''}"

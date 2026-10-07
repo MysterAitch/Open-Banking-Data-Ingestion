@@ -85,7 +85,7 @@ from .namespaces import (
 )
 from .navigation import answering, current_route, page_name
 from .overview import Overview
-from .page_times import UTC_NOTE, instant_of
+from .page_times import instant_of, instant_text
 from .page_words import (
     ARTEFACT_MOVED,
     ARTEFACT_REBUILT,
@@ -1756,7 +1756,7 @@ def _freshness_line(account: ExtendableAccount, fetch_these: str = "") -> str:
     if account.covered_to is None:
         return ""
     lag = (datetime.now(UTC).date() - account.covered_to).days
-    landed = account.last_landed[:16].replace("T", " ")
+    landed = instant_of(account.last_landed) if account.last_landed else ""
     stale = (
         f' <span class="pill pill-bad">stale: {lag} days behind</span>'
         if lag > 2
@@ -1777,7 +1777,7 @@ def _freshness_line(account: ExtendableAccount, fetch_these: str = "") -> str:
         coverage = f"covered to {account.covered_to.isoformat()}"
     return (
         f'<br><span class="muted">{coverage}'
-        + (f", last landed {landed} UTC" if landed else "")
+        + (f", last landed {landed}" if landed else "")
         + "</span>"
         + stale
     )
@@ -2226,7 +2226,7 @@ def _rebuild_status_line(
         return _rebuild_running_html(_read_progress(status, now or datetime.now(UTC)))
     if state == "done":
         badge = "ok" if status.get("ok") else "bad"
-        finished = html.escape(str(status.get("finished_at", "")))
+        finished = html.escape(instant_of(status.get("finished_at", "")))
         summary = html.escape(str(status.get("summary", ""))).replace(
             chr(10), "<br>"
         )
@@ -2317,7 +2317,7 @@ def _rebuild_history_html(
         rows.append(
             "<tr>"
             f'<td><span class="pill pill-{badge}">{"ok" if ok else "failed"}</span></td>'
-            f"<td>{html.escape(finished)}</td>"
+            f"<td>{html.escape(instant_of(finished))}</td>"
             f"<td>{duration}</td>"
             f"<td>{volume}</td>"
             f'<td class="muted">{slowest}</td>'
@@ -3163,8 +3163,8 @@ def _newest_of_kind(
 
 
 def _stamp_z(result: dict[str, object]) -> str:
-    """A result's finish time as the row lists write it: date, minute, and the zone mark."""
-    return html.escape(str(result.get("finished_at", ""))[:16].replace("T", " ")) + "Z"
+    """A result's finish time as the row lists write it: date and minute on the page's clock."""
+    return html.escape(instant_of(result.get("finished_at", "")))
 
 
 def _knowledge_rows(
@@ -3383,9 +3383,9 @@ def _press_sentence(result: Mapping[str, object]) -> str:
 
     Masked like the rest of the page: names, dates, counts and error codes only.
     """
-    stamp = html.escape(str(result.get("finished_at", ""))[:16].replace("T", " "))
+    stamp = html.escape(instant_of(result.get("finished_at", "")))
     parts = [
-        f"Last press finished {stamp} UTC: {result.get('asked', 0)} asked, "
+        f"Last press finished {stamp}: {result.get('asked', 0)} asked, "
         f"{result.get('landed', 0)} landed"
     ]
     refused_total = _as_int(result.get("refused_total"))
@@ -4266,7 +4266,7 @@ class ConnectionHandler(
             )
         body = (
             "<p>Every payload landed, newest first: the evidence everything else "
-            f"derives from. {UTC_NOTE}</p>"
+            "derives from.</p>"
             + ("".join(rows) or "<p>Nothing landed yet.</p>")
             + HOME_LINK
         )
@@ -4334,7 +4334,7 @@ class ConnectionHandler(
             moved
             + f'<p><strong>{html.escape(str(detail.get("source", "")))}</strong> - '
             f'{html.escape(str(detail.get("account_ref", "")))}<br>'
-            f'fetched {html.escape(instant_of(detail.get("fetched_at", "")))} UTC<br>'
+            f'fetched {html.escape(instant_of(detail.get("fetched_at", "")))}<br>'
             f'<span class="muted" style="word-break:break-all">'
             f'{html.escape(str(detail.get("origin", "")))}</span></p>'
             + (
@@ -6129,7 +6129,7 @@ class ConnectionHandler(
             "transaction. Consecutive balances must differ by exactly the "
             "amounts in between - a break means money moved that no held "
             "transaction explains. This is the store checked against the "
-            f"bank's own arithmetic. {UTC_NOTE}</p>"
+            "bank's own arithmetic.</p>"
             f'<pre class="scroll" style="white-space:pre-wrap">'
             f"{self._named(text)}</pre>" + HOME_LINK
         )
@@ -6914,7 +6914,7 @@ class ConnectionHandler(
                 self.answer_link(landed_account)
                 + f"<p><strong>{html.escape(filename)}</strong> was imported into "
                 f"<strong>{html.escape(self.answer_name(landed_account))}</strong> at "
-                f"{when.strftime('%Y-%m-%d %H:%M:%S')} UTC. This press did nothing more: "
+                f"{instant_text(when)}. This press did nothing more: "
                 "nothing was imported twice.</p>" + BACK_TO_IMPORT,
             )
         return render_page(
