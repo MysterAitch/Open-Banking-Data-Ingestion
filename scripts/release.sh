@@ -132,7 +132,16 @@ await_run() { # $1 = branch/ref name shown by gh
 # so a commit that fails them publishes nothing and this script says so.
 # What that costs is the version number: a tag on a failed build stays.
 git tag -a "$TAG" -m "release $TAG" "$SHA" 2>/dev/null || true
-git push origin "$TAG" 2>/dev/null || true
+# The push is checked, and retried once, because a transient refusal from the remote once went
+# into /dev/null here: the main build passed, the tag never left this machine, and the script
+# waited its whole limit on a tag build that could not exist. A tag already on the remote at
+# this commit pushes as "up to date", which is success; a tag there at ANOTHER commit is refused
+# by the remote, and that refusal must be seen, not swallowed.
+if ! git push origin "$TAG"; then
+  say "  pushing $TAG failed once; trying again in 10s"
+  sleep 10
+  git push origin "$TAG" || fail "could not push $TAG to origin"
+fi
 await_run "$TAG"
 
 # --- prove it at the registry ----------------------------------------------
