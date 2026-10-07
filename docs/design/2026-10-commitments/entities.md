@@ -103,6 +103,16 @@ row. The 0.4.361 "Payments between your own accounts" group, which attached the 
 an owner entity by name, was first-order and is withdrawn: nothing is proposed for a transfer
 leg, and its row says "to your <account>" with the owner behind it derived from the account.
 
+The owner, same day: "if the other account (or space) isn't in OBDI then that's a viable
+reason to have the other party be 'me'." It is, by the same route: the party is an account
+obdi does not hold, and what makes it "me" is a declaration that the account is the owner's.
+So where payments go to or come from an account identifier obdi has no account for, the page
+says "N payments to an account not held here (sort code ending …)" and offers "This account
+is mine" - declaring an EXTERNAL account of the owner's (no feed, no statements; an account
+record with an identifier and an owner), after which those rows are transfers "to your
+<name>". The same press serves a space or pot not fed, and a joint account declared later.
+What it must never do is decide from the owner's name being printed in a description.
+
 ## 4. What obdi can learn without being told
 
 A payment seen by two sources is ONE row in the derived layer carrying both sources' fields
