@@ -26,6 +26,45 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.372] - 2026-10-07
+
+### Added
+- **An account's bars say where the other party is stated, and Bring in
+  asks for the file that would state it.** The owner, 2026-10-07:
+  "Coverage notes (and the bars) can possibly indicate if structured
+  payment/payee data is available? ... any transactions with payee/merchant
+  data missing can flag up and highlight a CSV/JSON/manual/whatever detail
+  is required ... This doesn't mean we can't use the description however!
+  ... I knee jerk push back against deliberately and misleadingly misusing
+  and misrepresenting the description fields." A last row on the account's
+  strip, "Party stated", is solid where every transaction that day states
+  its party (by any kind above the bare description) and dashed where any
+  is named by the description only; the account's "What the bars show"
+  fold and the timeline page say "N transactions from A to B are named by
+  the description only - an export file for those months would state the
+  party", or "this source states no party" where the account has no feed,
+  aggregator, or export that could; Bring in lists the export as a want
+  beside the statements it asks for, with no set-aside; Today's quiet slot
+  carries the short form where nothing else fills it. The want is kept out
+  of the account's gaps on purpose: a file that states the party tests no
+  balance, so it is not a to-do, a dash on the trust bar, or a reason to
+  withhold the next expected statement. A row counts as described exactly
+  when its name's kind is the description, so the bar cannot disagree with
+  the Entities page's count. The sentence under the strip cost 137 px at
+  phone width and took the page's furniture over two screens, so it lives
+  in the closed fold. Not done: the row on the timeline's chart and on
+  Bring in's own strip; the cost of the whole-store read, memoised per
+  rebuild, is unmeasured.
+
+### Fixed
+- **A row that prints a party exactly as the feed states it is named by the
+  party.** The learned link refused a shape whose only counterparty was its
+  own name, so such rows were counted "from the description" on the
+  Entities page and dashed on the new bar, and Bring in would have asked
+  for an export that said nothing new. The name was the same string either
+  way; only the kind was wrong, and the kind is what the bar and the counts
+  read.
+
 ## [0.4.371] - 2026-10-07
 
 ### Changed
