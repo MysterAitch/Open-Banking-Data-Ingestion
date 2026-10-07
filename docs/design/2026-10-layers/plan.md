@@ -469,32 +469,56 @@ every package already moved depends only on packages already moved or on the roo
   ingest): it makes the direction true by making ingest half the application.
 - **A registry that verify fills at import** (cure D): fails silently when not imported.
 
-## Undecided, and not proven
+## Decided (2026-10-07)
 
-1. **The settle-after-landing cure (A or B).** Needs the owner, and a measure of every caller of
-   `pull`, `reconcile_batch`, and `rebuild_from_raw`, which this plan has not counted beyond
-   `rebuild_from_raw` (two callers, both in `cli.py`) and the 14 calls to `settle_review_flags`,
-   `recheck`, `replay_joins`, and `replay_batches` in `src` (counted by a text search).
-2. **A sixth or seventh package** for the read models (`read`), as discussed above.
-3. **Import sorting** after the rewrite: emit sorted statements from the tool, or one
-   `ruff check --select I --fix` run for these commits, given the rule against formatters.
-4. **The name `pipeline`** for the moved `ingest.py`.
-5. **`pages` above `export`**, and with it the amendment to "beside".
-6. **Whether `identifiers` and `proof_rail` are dead.** Nothing but their own tests imports them
+The owner deferred items 1 to 5 and answered the sixth himself; each is recorded with its reason
+so the next reader does not re-run the argument.
+
+1. **Cure A** for the settle-after-landing group: the caller passes the finisher as a required
+   parameter. The mid-pipeline section replay (U13) needs it anyway, and B leaves two ways to
+   land a row. It is a later release, after the move, since it changes what runs where; the
+   callers of `pull`, `reconcile_batch`, and `rebuild_from_raw` are counted then.
+2. **Seven packages, not six**: a `read` package between `verify` and `pages` for the 21 read
+   models, leaving `analysis` for the detector, categorisation, and the commitments phase. One
+   more directory now against a 660-file rename later. The direction becomes
+   `core <- ingest <- verify <- read <- analysis <- pages`, `export` beside `analysis` under
+   `pages`, so analysis may read the read models and the read models cannot read analysis; the
+   tables above still say `analysis` for both and are corrected when the mapping file is written.
+3. **Import sorting**: `ruff check --select I --fix` on the touched files, run as a step of the
+   move tool and judged afterwards by the AST comparison (check 2). The rule against running a
+   formatter over the tree stands; this is allowed because the comparison refuses any change
+   that is not a reordering of import nodes, so it cannot fail quietly.
+4. **`pipeline`** for the moved `ingest.py`.
+5. **`pages` above `export`**, amending "beside" as described in departure 2.
+6. **Scripted edits are allowed for the move** (the owner, 2026-10-07: the kind of change the
+   escape hatch is for), with one requirement he added: the rewrite must be deterministic and
+   reproducible, not string edits. So the tool is a LibCST codemod (lossless concrete syntax
+   tree; it understands `Import`, `ImportFrom`, relative depth, and string constants) driven by a
+   committed mapping file (`old module -> new module`, one table per step) beside this plan, the
+   tool committed with it. Each move commit must be regenerable: check out its parent, run the
+   tool for that step, and `git diff --exit-code` against the commit is empty. A second run on
+   the result changes nothing. The judge (check 2) uses the standard library's `ast`, so the
+   tool and its check do not share a parser. Rope's module-move was considered and set aside:
+   it works from its own project model and a mapping file cannot regenerate its output.
+
+## Not proven
+
+1. **Whether `identifiers` and `proof_rail` are dead.** Nothing but their own tests imports them
    in the repository outside `docs/`; whether a planned page wants them is not knowable here.
-7. **U14 to U16 and U1 were judged from import lines and call sites, not from reading the
+   Left in place; decided separately from the move.
+2. **U14 to U16 and U1 were judged from import lines and call sites, not from reading the
    bodies.** The split line in `period_reconciliation`, the dependencies of `same_money_outcome`
    and `same_movement_days`, and the other users of `ledger.running_balance` are the
    unmeasured parts of the 20 fixes.
-8. **The page proof's reach.** Every route over the invented stores is walked; pages that need
+3. **The page proof's reach.** Every route over the invented stores is walked; pages that need
    other states, and the live configuration, are not.
-9. **`store.py`** stays one module of 4,828 lines in ingest; the raw layer and derived tables are
+4. **`store.py`** stays one module of 4,828 lines in ingest; the raw layer and derived tables are
    not separated by this plan.
-10. **The marker work in flight** was not seen; the rule proposed for it is a plan for it, not a
+5. **The marker work in flight** was not seen; the rule proposed for it is a plan for it, not a
     reading of it.
-11. **The tool and the harnesses were not written to the repository or run end to end on a real
+6. **The tool and the harnesses were not written to the repository or run end to end on a real
     move.** The graph script was run on the 0.4.356 tree and its numbers are the ones above; the
     rewriter, the AST comparison, and the snapshot harness are specified, not yet exercised.
-12. **Counts are of module-pair edges and of import statements by the rule in
+7. **Counts are of module-pair edges and of import statements by the rule in
     `dependencies.md`;** `importlib` uses, and mentions of module names in prose, were not
     searched.
