@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from .entities import EntityRefused
+from .entities import OWNER_NAME, EntityRefused
 from .plural import plural
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -20,7 +20,8 @@ MERGE = "merge"
 SPLIT = "split"
 RENAME = "rename"
 FOLD = "fold"
-ACTIONS = (MERGE, SPLIT, RENAME, FOLD)
+OWN = "own"
+ACTIONS = (MERGE, SPLIT, RENAME, FOLD, OWN)
 
 
 def _one(form: Mapping[str, Sequence[str]], field: str) -> str:
@@ -43,6 +44,14 @@ def apply_action(
         _entity, kept, made = store.gather_into(_one(form, "name"), shapes)
         count = plural(len(set(shapes)), "name")
         return f"Merged {count} into {kept}." if made else f"{count} added to {kept}."
+    if action == OWN:
+        shapes = [shape.strip() for shape in form.get("shape", []) if shape.strip()]
+        _refuse_unknown(shapes, known)
+        _entity, kept, made = store.gather_into_owner(shapes, _one(form, "name") or OWNER_NAME)
+        count = plural(len(set(shapes)), "name")
+        if made:
+            return f"Made {kept} for payments between your own accounts, holding {count}."
+        return f"{count} added to {kept}."
     if action == SPLIT:
         shape = _one(form, "shape")
         held = store.shape_entities().get(shape)

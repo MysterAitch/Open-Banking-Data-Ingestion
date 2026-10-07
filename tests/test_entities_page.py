@@ -368,6 +368,118 @@ class TestRenaming:
         assert "no such entity" in refusal_of(response.text)
 
 
+@pytest.fixture
+def transfer_world(tmp_path, monkeypatch):
+    """Two accounts and two transfers between them (four legs, the shapes "transfer to savings"
+    and "from current"), beside one ordinary payee that is not a leg."""
+    from obdi.ingest import pair_transfers_across_store
+
+    current = tmp_path / "current.csv"
+    savings = tmp_path / "savings.csv"
+    _export(current, [
+        ("01/09/2026", "TRANSFER TO SAVINGS", "50.01"),
+        ("08/09/2026", "TRANSFER TO SAVINGS", "60.02"),
+        ("09/09/2026", "MARLOWE BAKERY 12", "4.44"),
+    ])
+    credits = ["Date,Counter Party,Reference,Type,Amount (GBP),Balance (GBP)"]
+    credits += [f"{day},FROM CURRENT,,FPI,{amount},0" for day, amount in
+                (("01/09/2026", "50.01"), ("08/09/2026", "60.02"))]
+    savings.write_text("\n".join(credits) + "\n", encoding="utf-8")
+    db = tmp_path / "store.sqlite3"
+    with Store(db) as store:
+        import_file(store, current, account_id="current-main")
+        import_file(store, savings, account_id="savings-pot")
+        assert pair_transfers_across_store(store) == 2
+    environment(monkeypatch, tmp_path)
+    config = build_web_config(db)
+    assert config is not None
+    base, stop = serve_config(config)
+    yield base, db
+    stop()
+
+
+class TestThePaymentsBetweenYourOwnAccounts:
+    def test_EntitiesPage_WhenFetched_CountsTheOwnersNamesAndNamesNobody(self, transfer_world):
+        base, _db = transfer_world
+
+        page = httpx.get(f"{base}/entities", timeout=60).text
+
+        assert "Payments between your own accounts" in page
+        assert "4 transactions across 2 names; 4 of them are the two sides" in page
+        assert "savings" not in page.casefold()
+
+    def test_EntitiesPage_WhenValuesAreShown_OffersTheOwnerGroupBeforeAnyPayeeGroup(
+        self, transfer_world
+    ):
+        base, _db = transfer_world
+
+        page = shown(base)
+
+        assert page.index("Payments between your own accounts") < page.index("Gather names")
+        (form,) = [
+            f for f in elements(parse(page), "form") if f.attrs.get("action") == "/entities-own"
+        ]
+        ticked = [i.attrs["value"] for i in elements(form, "input")
+                  if i.attrs.get("type") == "checkbox" and "checked" in i.attrs]
+        assert sorted(ticked) == ["from current", "transfer to savings"]
+        name = next(i for i in elements(form, "input") if i.attrs.get("name") == "name")
+        assert name.attrs["value"] == "Me"
+
+    def test_Own_WhenPressed_MakesTheOwnerEntityAndOffersNothingFurther(self, transfer_world):
+        base, db = transfer_world
+
+        response = press(
+            base, "/entities-own", name="Me", shape=["transfer to savings", "from current"]
+        )
+
+        assert outcome_of(response.text) == (
+            "Made Me for payments between your own accounts, holding 2 names."
+        )
+        assert "Payments between your own accounts" not in response.text
+        with Store(db) as store:
+            assert store.owner_entity() is not None
+            (entity,) = store.entities_with_shapes()
+        assert entity.role == "owner"
+
+    def test_Own_WhenAShapeIsLeftUnticked_TheOwnerKeepsOnlyTheOthersAndTheRestIsStillOffered(
+        self, transfer_world
+    ):
+        base, _db = transfer_world
+
+        response = press(base, "/entities-own", name="Me", shape=["from current"])
+
+        assert "Payments between your own accounts" in response.text
+        assert "Add to Me" in response.text
+
+    def test_Own_WhenAShapeIsNotInTheTransactions_IsRefusedAndNothingIsMade(self, transfer_world):
+        base, db = transfer_world
+
+        response = press(base, "/entities-own", name="Me", shape=["a name nobody prints"])
+
+        assert response.status_code == 400
+        with Store(db) as store:
+            assert store.owner_entity() is None
+
+    def test_Own_WhenNoShapeIsTicked_IsRefused(self, transfer_world):
+        base, _db = transfer_world
+
+        assert press(base, "/entities-own", name="Me").status_code == 400
+
+    def test_Own_WhenTheOwnerWasRenamed_AddsToItUnderItsNewName(self, transfer_world):
+        base, db = transfer_world
+        press(base, "/entities-own", name="Me", shape=["from current"])
+        with Store(db) as store:
+            (entity,) = store.entities_with_shapes()
+        press(base, "/entities-rename", entity=entity.id, name="Roger")
+
+        response = press(base, "/entities-own", shape=["transfer to savings"])
+
+        assert outcome_of(response.text) == "1 name added to Roger."
+
+    def test_EntitiesPage_WhenThereAreNoTransfers_OffersNoOwnerGroup(self, served):
+        assert "Payments between your own accounts" not in shown(served)
+
+
 class TestFoldingOneEntityIntoAnother:
     def two_merges(self, base: str) -> None:
         merge_group(base, shapes=(LONDON, READING), name="Fernhollow")

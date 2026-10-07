@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 from .callback import render_page
 from .entities import (
     OPENING_WORDS,
+    OWNER_NAME,
+    OWNER_ROLE,
     SAME_WORDS,
     EntitiesView,
     Entity,
@@ -44,6 +46,7 @@ MERGE_ROUTE = "/entities-merge"
 SPLIT_ROUTE = "/entities-split"
 RENAME_ROUTE = "/entities-rename"
 FOLD_ROUTE = "/entities-fold"
+OWN_ROUTE = "/entities-own"
 
 #: How many proposed groups lead the page; the rest are behind one fold, so thirty names stay
 #: within three phone screens (`test_entities_phone_layout`).
@@ -163,6 +166,36 @@ def _groups(view: EntitiesView, *, unmasked: bool) -> str:
     return "<h2>Could be one payee</h2>" + hint + lead
 
 
+def _owner(view: EntitiesView, *, unmasked: bool) -> str:
+    """The names that are legs of transfers between the owner's own accounts, offered first and
+    worded apart from the payees: they are not anyone else's."""
+    group = view.owner
+    if group is None:
+        return ""
+    across = _across(len(group.shapes), group.transactions)
+    heading = "<h2>Payments between your own accounts</h2>"
+    if not unmasked:
+        return (
+            f'{heading}<section class="ent-group"><p class="ent-why">{across}; '
+            f"{group.legs:,} of them are the two sides of a transfer between your accounts.</p>"
+            "</section>"
+        )
+    owner = next((e for e in view.entities if e.role == OWNER_ROLE), None)
+    if owner is None:
+        field = _name_field(OWNER_NAME, "Attach", label="Your entity")
+    else:
+        field = (
+            f'<div class="ent-name-field"><button class="tap" type="submit">'
+            f"Add to {_esc(owner.name)}</button></div>"
+        )
+    return (
+        f'{heading}<section class="ent-group"><form method="post" action="{OWN_ROUTE}">'
+        f"{field}{_ticks(group.shapes, view.counts, checked=True)}"
+        f'<p class="ent-why">{across}; {group.legs:,} of them are the two sides of a transfer '
+        "between your accounts, so the other side is you, not a payee.</p></form></section>"
+    )
+
+
 def _entity(entity: Entity, counts: Mapping[str, int], *, unmasked: bool) -> str:
     total = sum(counts.get(shape, 0) for shape in entity.shapes)
     across = _across(len(entity.shapes), total)
@@ -230,6 +263,7 @@ def render_entities(
         lead
         + values_mode(ROUTE, unmasked=unmasked)
         + f'<p class="ent-summary">{_esc(summary_line(view))}</p>'
+        + _owner(view, unmasked=unmasked)
         + _groups(view, unmasked=unmasked)
         + _entities(view, unmasked=unmasked)
         + (_by_hand(view) if unmasked else "")

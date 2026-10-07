@@ -39,7 +39,7 @@ from .accounts import (
     mint_account_id,
     read_registry_file,
 )
-from .entities import Entity, EntityRefused
+from .entities import OWNER_ROLE, Entity, EntityRefused
 from .errors import DataError
 from .models import (
     BASIS_FOLD,
@@ -124,7 +124,11 @@ from .stated_words import recorded_words
 #: 22 -> 23: the `entities` and `entity_shapes` tables, likewise: the owner's decisions about
 #: which counterparty shapes are one entity, kept across the rebuild from raw. A store stamped 22
 #: would never have grown them.
-SCHEMA_VERSION = 23
+#:
+#: 23 -> 24: the `entities.role` column: what an entity is to the household (so far, "owner"). A
+#: table that already exists is not altered by `CREATE TABLE IF NOT EXISTS`, so a store stamped 23
+#: would refuse the Entities page's first read of it.
+SCHEMA_VERSION = 24
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -702,7 +706,10 @@ CREATE TABLE IF NOT EXISTS entities (
     name       TEXT NOT NULL,
     parent_id  INTEGER,
     created_at TEXT NOT NULL,
-    removed_at TEXT
+    removed_at TEXT,
+    -- What the entity is to the household, or NULL: "owner" is the entity the owner's own
+    -- accounts' transfers are attached to. One entity kind, roles as a column (plan section 3).
+    role       TEXT
 );
 
 -- DECLARED: which counterparty shape (`recurring`'s payee shape) is under which entity. Detaching
@@ -881,7 +888,7 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'closed', 'date_basis', 'declared_at', 'kind', 'label', 'opened',
         'parent', 'ref', 'stable_id',
     ],
-    'entities': ['created_at', 'id', 'name', 'parent_id', 'removed_at'],
+    'entities': ['created_at', 'id', 'name', 'parent_id', 'removed_at', 'role'],
     'entity_shapes': ['attached_at', 'detached_at', 'id', 'of_entity', 'shape'],
     'events': ['created_at', 'entity_id', 'id', 'kind', 'payload', 'published_at'],
     'fetch_marks': [
@@ -1322,6 +1329,7 @@ class Store:
         self._migrate_starling_connection_id()
         self._migrate_artefact_connection_attribution()
         self._migrate_declared_accounts_from_file()
+        self._migrate_entity_role()
         self.connection.executescript(_epoch_triggers())
         self.connection.execute(
             "INSERT INTO obdi_meta (key, value) VALUES ('schema_version', ?) "
@@ -1377,6 +1385,12 @@ class Store:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (f"migration:{name}", _stamp_now()),
         )
+
+    def _migrate_entity_role(self) -> None:
+        """Add the entity role column to a store whose `entities` table was made without it."""
+        if "role" not in self._table_columns("entities"):
+            self.connection.execute("ALTER TABLE entities ADD COLUMN role TEXT")
+            self.connection.commit()
 
     def _migrate_transaction_tier_and_occurrence(self) -> None:
         """Add the identity-trust and repeat-within-batch columns.
@@ -4500,9 +4514,10 @@ class Store:
                 name=str(row["name"]),
                 parent_id=None if row["parent_id"] is None else int(row["parent_id"]),
                 shapes=tuple(shapes.get(int(row["id"]), ())),
+                role=None if row["role"] is None else str(row["role"]),
             )
             for row in self.connection.execute(
-                "SELECT id, name, parent_id FROM entities WHERE removed_at IS NULL "
+                "SELECT id, name, parent_id, role FROM entities WHERE removed_at IS NULL "
                 "ORDER BY name COLLATE NOCASE, id"
             )
         ]
@@ -4518,8 +4533,48 @@ class Store:
             )
         }
 
+    def gather_into_owner(
+        self, shapes: Iterable[str], name: str, *, now: datetime | None = None
+    ) -> tuple[int, str, bool]:
+        """Put `shapes` under the owner entity, making it on first use; returns its id, its name
+        as kept, and whether it was made.
+
+        The owner entity is the live one with the role "owner". Where none has it but an entity is
+        already called `name`, that entity is taken as the owner (the owner had made it by hand);
+        otherwise one is made called `name`. Refused whole for no shape or a shape another entity
+        holds, before anything is written.
+        """
+        chosen = _chosen_shapes(shapes)
+        self._refuse_shapes_held(chosen)
+        owner = self.owner_entity()
+        if owner is not None:
+            self.attach_shapes(owner[0], chosen, now=now)
+            return owner[0], owner[1], False
+        clean = _entity_name(name)
+        named = self._live_entity_named(clean)
+        if named is None:
+            return self.create_entity(clean, chosen, now=now, role=OWNER_ROLE), clean, True
+        self.connection.execute(
+            "UPDATE entities SET role = ? WHERE id = ?", (OWNER_ROLE, named[0])
+        )
+        self.attach_shapes(named[0], chosen, now=now)
+        return named[0], named[1], False
+
+    def owner_entity(self) -> tuple[int, str] | None:
+        """The id and name of the live entity with the role "owner", or None."""
+        row = self.connection.execute(
+            "SELECT id, name FROM entities WHERE role = ? AND removed_at IS NULL ORDER BY id",
+            (OWNER_ROLE,),
+        ).fetchone()
+        return None if row is None else (int(row["id"]), str(row["name"]))
+
     def create_entity(
-        self, name: str, shapes: Iterable[str], *, now: datetime | None = None
+        self,
+        name: str,
+        shapes: Iterable[str],
+        *,
+        now: datetime | None = None,
+        role: str | None = None,
     ) -> int:
         """Make an entity of `name` holding `shapes`, in one commit; returns its id.
 
@@ -4534,7 +4589,8 @@ class Store:
         stamp = (now or datetime.now(UTC)).isoformat()
         try:
             cursor = self.connection.execute(
-                "INSERT INTO entities (name, created_at) VALUES (?, ?)", (clean, stamp)
+                "INSERT INTO entities (name, created_at, role) VALUES (?, ?, ?)",
+                (clean, stamp, role),
             )
             entity = int(cursor.lastrowid or 0)
             self._insert_shapes(entity, chosen, stamp)
@@ -4625,6 +4681,12 @@ class Store:
             self.connection.execute(
                 "UPDATE entities SET parent_id = ? WHERE parent_id = ? AND removed_at IS NULL",
                 (target[0], entity),
+            )
+            # A role the folded entity held (the owner) is not lost to a target that has none.
+            self.connection.execute(
+                "UPDATE entities SET role = (SELECT role FROM entities WHERE id = ?) "
+                "WHERE id = ? AND role IS NULL",
+                (entity, target[0]),
             )
             self.connection.execute(
                 "UPDATE entities SET removed_at = ? WHERE id = ?", (stamp, entity)

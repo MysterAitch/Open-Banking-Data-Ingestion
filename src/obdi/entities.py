@@ -33,6 +33,13 @@ SAME_WORDS = "same words"
 MIN_OPENING_WORDS = 2
 
 
+#: The role of the entity that stands for the owner: the payee of every payment between his own
+#: accounts. No instance declares the owner's name anywhere, so the entity is made as `OWNER_NAME`
+#: unless the owner has typed another, and renamed like any entity.
+OWNER_ROLE = "owner"
+OWNER_NAME = "Me"
+
+
 class EntityRefused(DataError):
     """A change to the entities that was not made, said in the words the page shows."""
 
@@ -46,6 +53,8 @@ class Entity:
     #: The entity this one sits under, or None; kept, and read by nothing yet.
     parent_id: int | None
     shapes: tuple[str, ...]
+    #: What the entity is to the household (`OWNER_ROLE`), or None for a payee like any other.
+    role: str | None = None
 
 
 #: The words a bank prints for the date a card payment was made ("ON 12 APR"), which change with
@@ -103,6 +112,17 @@ def count_shapes(descriptions: Iterable[str]) -> dict[str, int]:
 def count_row_shapes(named: Iterable[tuple[str, str]]) -> dict[str, int]:
     """`count_shapes` over (description, counterparty) pairs, so a stated counterparty is read."""
     counted = Counter(shape_of(text, counterparty) for text, counterparty in named)
+    counted.pop("", None)
+    return dict(counted)
+
+
+def count_row_legs(named: Iterable[tuple[str, str, bool]]) -> dict[str, int]:
+    """For each shape, how many of the (description, counterparty, is a transfer leg) rows that
+    have it are legs; shapes with no leg are left out."""
+    counted: Counter[str] = Counter()
+    for text, counterparty, leg in named:
+        if leg:
+            counted[shape_of(text, counterparty)] += 1
     counted.pop("", None)
     return dict(counted)
 
@@ -199,6 +219,8 @@ class EntitiesView:
     counts: Mapping[str, int]
     entities: tuple[Entity, ...]
     proposals: Proposals
+    #: The shapes that are mostly the legs of the owner's own transfers, offered before any payee.
+    owner: OwnerGroup | None = None
 
     def free_shapes(self) -> list[str]:
         """The shapes under no entity, most-used first."""
@@ -206,11 +228,55 @@ class EntitiesView:
         return sorted((s for s in self.counts if s not in held), key=lambda s: (-self.counts[s], s))
 
 
-def view_of(counts: Mapping[str, int], entities: Iterable[Entity]) -> EntitiesView:
-    """The page's view of the shapes held and the entities made from them."""
+@dataclass(frozen=True)
+class OwnerGroup:
+    """Shapes whose transactions are mostly legs of confirmed transfers between the owner's
+    accounts, so the payee is the owner and not anyone else."""
+
+    #: Most-used first, then alphabetical.
+    shapes: tuple[str, ...]
+    transactions: int
+    #: How many of those transactions are transfer legs.
+    legs: int
+
+
+def owner_group(
+    counts: Mapping[str, int], legs: Mapping[str, int], taken: Collection[str]
+) -> OwnerGroup | None:
+    """The free shapes more than half of whose transactions are transfer legs, or None.
+
+    More than half and not at least half: a shape that is as often a payment to someone as a leg
+    of a transfer is not shown to be the owner's, and the owner is the one to say so.
+    """
+    mine = sorted(
+        (s for s, n in counts.items() if s not in taken and legs.get(s, 0) * 2 > n),
+        key=lambda s: (-counts[s], s),
+    )
+    if not mine:
+        return None
+    return OwnerGroup(
+        shapes=tuple(mine),
+        transactions=sum(counts[s] for s in mine),
+        legs=sum(legs[s] for s in mine),
+    )
+
+
+def view_of(
+    counts: Mapping[str, int],
+    entities: Iterable[Entity],
+    legs: Mapping[str, int] | None = None,
+) -> EntitiesView:
+    """The page's view of the shapes held and the entities made from them.
+
+    `legs` is, for each shape, how many of its transactions are legs of confirmed transfers
+    between the owner's own accounts; the shapes it makes the owner's are set apart before the
+    rules look for payees, so they are never offered as one.
+    """
     made = tuple(entities)
     taken = {shape for entity in made for shape in entity.shapes}
-    return EntitiesView(counts, made, propose_groups(counts, taken=taken))
+    owner = owner_group(counts, legs or {}, taken)
+    set_apart = taken | set(owner.shapes if owner else ())
+    return EntitiesView(counts, made, propose_groups(counts, taken=set_apart), owner)
 
 
 def propose_groups(

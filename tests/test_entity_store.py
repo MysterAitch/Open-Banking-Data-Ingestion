@@ -317,6 +317,29 @@ class TestFoldingOneEntityIntoAnother:
             store.fold_entity(second, "  ", now=NOW)
 
 
+class TestAStoreFromBeforeTheEntityRole:
+    def test_Store_StampedVersion23WithoutTheRoleColumn_GrowsItOnOpenAndTakesAnOwner(
+        self, tmp_path
+    ):
+        path = tmp_path / "old.sqlite3"
+        with Store(path) as old:
+            old.connection.executescript(
+                "DROP TABLE entity_shapes; DROP TABLE entities;"
+                "CREATE TABLE entities (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,"
+                " parent_id INTEGER, created_at TEXT NOT NULL, removed_at TEXT);"
+                "CREATE TABLE entity_shapes (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " of_entity INTEGER NOT NULL, shape TEXT NOT NULL, attached_at TEXT NOT NULL,"
+                " detached_at TEXT);"
+                "UPDATE obdi_meta SET value = '23' WHERE key = 'schema_version';"
+            )
+            old.connection.commit()
+
+        with Store(path) as opened:
+            opened.gather_into_owner(["a"], "Me", now=NOW)
+            assert opened.owner_entity() is not None
+            assert [e.role for e in opened.entities_with_shapes()] == ["owner"]
+
+
 class TestSurvivingTheRebuildFromRaw:
     def test_Entities_WhenTheStoreIsRebuiltFromRaw_AreStillThere(self, store):
         entity = store.create_entity("Fernhollow", GROCER, now=NOW)

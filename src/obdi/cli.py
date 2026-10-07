@@ -3896,16 +3896,25 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def entities_data() -> EntitiesView:
         """Every payee name held across every account with its transactions, and the entities
         made from them - one whole-table read of the transactions, whatever the store's size."""
-        from .entities import view_of
+        from .entities import count_row_legs, count_row_shapes, view_of
+        from .recurring import counts_as_occurrence
 
         with Store(db_path) as store:
-            return view_of(_shape_counts(store), store.entities_with_shapes())
+            rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+            leg_ids = store.confirmed_transfer_entities()
+            return view_of(
+                count_row_shapes((t.description, t.counterparty) for t in rows),
+                store.entities_with_shapes(),
+                count_row_legs(
+                    (t.description, t.counterparty, t.entity_id in leg_ids) for t in rows
+                ),
+            )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
-        from .entity_actions import MERGE, apply_action
+        from .entity_actions import MERGE, OWN, apply_action
 
         with Store(db_path) as store:
-            known = _shape_counts(store) if action == MERGE else {}
+            known = _shape_counts(store) if action in (MERGE, OWN) else {}
             return apply_action(store, known, action, form)
 
     def preview_kept_statement(artefact_id: int, account_id: str) -> MatcherPreview | None:
