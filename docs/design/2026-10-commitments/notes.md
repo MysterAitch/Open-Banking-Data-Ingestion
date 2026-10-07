@@ -248,6 +248,7 @@ A split whose parts do not sum to the amount is refused where it is made.
 | 0.4.365 (shape from the description; account-first split; rules) | 63 | 54 / 8 / 1 | 51 / 7 / 5 | 31 (19) | 5 | 1,297 / 158 / 830 / 0 |
 | 0.4.366 (fused word keeps its letters IN THE KEY - a fault; one rule per proposal) | 70 | 61 / 8 / 1 | 58 / 7 / 5 | 36 (20) | 5 | 1,326 / 186 / 699 / 6 groups of 89 |
 | 0.4.367 (key reverted; common by position; function words) | 63 | 54 / 8 / 1 | 51 / 7 / 5 | 31 (19) | 5 | 1,297 / 185 / 776 / 2 groups of 20 |
+| 0.4.369 (R2c: the stated party names a row; the learned link joins) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 867 (777 stated, 90 description, 34 rows linked) / 99 / 298 / 0 |
 
 What the rows say: the four-slot rule removed sixteen fragments, thirteen of them stopped
 (0.4.357); keying the shape on a source-dependent field split one payee by source and cost the
@@ -263,6 +264,14 @@ identity; the fused-letters rule moves to the comparison tokens. The six too-bro
 the one-rule groups meeting the "fifty commonest tokens" floor: on a real store the commonest
 tokens are the brands with the most variants, so a retailer's twenty towns were refused as
 too broad - a word is common by appearing after many different opening words, not by count.
+0.4.369's row answers the tiers question - 90% of the store's names come from a stated party -
+and shows the learned link too thin to do the join alone: 34 rows linked, because a link needs
+a description-only row whose shape exactly equals a both-fields row's shape, and a statement's
+narrative rarely reduces to a feed's description. A party's feed months and statement months
+stayed two names; the habit went to none and stopped rose by five (0.4.361's signature). The
+rung added in 0.4.370: a description-only row whose description, compared as names are
+compared, equals a stated party's name exactly is that party, said so; exact only, never a
+prefix, ambiguity links to neither.
 The Entities page serves in 0.9 s masked at this size (0.65 s before the drill-down folds).
 The owner's read of 0.4.367 (2026-10-07, with screenshots of a dozen groups, each with a true
 reason and its rule tick): "Seems to be substantially better. The remaining oddities/mismatches
