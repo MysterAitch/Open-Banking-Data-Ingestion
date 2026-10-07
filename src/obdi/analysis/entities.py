@@ -328,6 +328,40 @@ def name_of(
     return Named(shape, DESCRIPTION)
 
 
+def learned_links(rows: Iterable[tuple[str, str]]) -> dict[str, Alias]:
+    """For each description-shape, the one stronger identifier the rows that carry both say it
+    stands for, with how many rows say so; from (description, counterparty) rows.
+
+    A payment seen by a feed and a statement is ONE held row carrying the feed's counterparty
+    (`ingest.matching`), so each row with a stated counterparty AND a description is evidence
+    that the two identifiers are one party. It is derived from the rows, never declared, and
+    rebuilt wherever the rows are read. A shape whose rows state two different counterparties
+    is ambiguous and links to none (a rent reference paid to two housemates), and a shape whose
+    only counterparty is its own name has nothing to link. The links are for the rows that lack
+    the stronger identifier: `name_of` uses one only where the row states none itself.
+    """
+    seen: dict[str, Counter[str]] = {}
+    for description, counterparty in rows:
+        stated = counterparty_name(counterparty)
+        shape = _shape(description)
+        if stated and shape:
+            seen.setdefault(shape, Counter())[stated] += 1
+    return {
+        shape: Alias(name, counted[name], STATED_NAME)
+        for shape, counted in seen.items()
+        if len(counted) == 1
+        for name in counted
+        if name != shape
+    }
+
+
+def names_of(rows: Sequence[tuple[str, str]]) -> list[Named]:
+    """The name of each (description, counterparty) row, the links learned from all of them
+    (`learned_links`) used for the rows that state none."""
+    links = learned_links(rows)
+    return [name_of(description, counterparty, links) for description, counterparty in rows]
+
+
 def count_shapes(descriptions: Iterable[str]) -> dict[str, int]:
     """How many of the descriptions have each shape; descriptions with no shape are not counted."""
     counted = Counter(shape_of(text) for text in descriptions)
