@@ -236,6 +236,26 @@ Target / accrual (what a category must hold by when; what a prepaid period costs
   an entity (or, before one exists, a shape) to a category; a commitment implies a rule for
   its entity. A bank's own category is a suggestion with its basis. A rule applied is recorded on
   the row as derived state with its basis: "by rule R", "confirmed", "the bank says".
+- **Label.** A second axis, independent of the category tree. The owner, 2026-10-07: "tagging
+  of transactions and allowing multiple labels ... purchasing building/electrical things and
+  paying tradespeople etc. - these can be for a project (rewire, smart home build out,
+  fun/hobby, etc) and can fall under multiple of the above therefore don't fit neatly into the
+  traditional tree-shaped budget categories where a transaction (or part of a split
+  transaction) must only have one parent/one category. This limits/restricts the reporting and
+  analysis opportunities and is a pain point I feel with ynab." He offered "labels are
+  backwards facing metadata, while budget categories are future facing" as an off-the-cuff
+  suggestion and asked for scrutiny; it does not hold - a category also says what a transaction
+  was, and a label can face forward (a project's budget is a goal hung on a label). What holds
+  is CARDINALITY AND PURPOSE: a category is exactly one per transaction or split part and the
+  tree PARTITIONS money, so the budget sums, which is why it must have one parent and why it is
+  the wrong tool for a cross-cut; a label is zero or many per transaction or part and partitions
+  nothing - label totals overlap and never add up to anything, which is exactly what a project
+  needs. So: one category and any labels per transaction or split part; commitments may carry
+  labels; rules may apply labels as they apply categories (a tradesperson in a date range ->
+  "rewire"); a goal may attach to a label for a project's budget and progress; reporting asks
+  either axis or both. Labels are flat until a case nests. Stored as declared state keyed on
+  the transaction's identity (the store's `annotations` table already is), so they survive a
+  rebuild.
 - **Split.** Parts of one transaction, each with an amount, a category, and a note, summing to the
   row's amount. Declared on the transaction; the row is untouched.
 - **Target and accrual** (derived, forward-facing). From a commitment's current window: what its
@@ -655,8 +675,12 @@ obdi each day, and the projection to Actual moves to the end as an export. The s
    with target types and progress; the stance default from them.
 6. **R3** flows and shares, then **R4** prepaid periods, **R5** the overview by provider and
    product, **R9** the card's own commitments, **R10** windows that change.
-7. **R6** categories and rules and **R7** splits - discretionary spend last, because hand work
-   there is why the other tools were abandoned; gated on the owner asking for it.
+7. **R6** categories and rules, **R6a labels** (the second axis: any number per transaction or
+   part, on commitments too, applied by rules, a goal on a label for a project; the ledger's
+   fold shows them and a press from the row sets them), and **R7** splits - discretionary spend
+   last, because hand work there is why the other tools were abandoned; but labels for
+   projects are the owner's stated pain with the other tools, so R6a may run ahead of R6 if a
+   project is live.
 8. **R8 and R12** - exports to Actual, YNAB, or a file, kept cheap, built when wanted. **R11**
    the local model connector when the typing it saves is measured.
 
