@@ -84,23 +84,29 @@ def window_figure_html(window: Window, *, unmasked: bool) -> str:
     return figure_html(percent_words(window.annual_percent), unmasked=unmasked)
 
 
+def window_line_html(window: Window, today: date, *, unmasked: bool) -> str:
+    """One window said in a line: what it is, its figure, the days it holds, and whether it is
+    current or ending. The edit page sets its fields under the same line."""
+    said = [span_words(window)]
+    marks = _marks(window, today)
+    if marks:
+        said.append(marks)
+    return (
+        f"{_esc(_what(window))} "
+        f"{window_figure_html(window, unmasked=unmasked)} - {' - '.join(_esc(s) for s in said)}"
+    )
+
+
 def windows_html(record: AccountRecord, today: date, *, unmasked: bool) -> str:
     """The account's limit and rate windows in date order, one line each, or nothing where it
     declares none."""
     ordered = windows_in_order(record)
     if not ordered:
         return ""
-    items = []
-    for window in ordered:
-        said = [span_words(window)]
-        marks = _marks(window, today)
-        if marks:
-            said.append(marks)
-        items.append(
-            f'<li class="window">{_esc(_what(window))} '
-            f"{window_figure_html(window, unmasked=unmasked)} - {' - '.join(_esc(s) for s in said)}"
-            "</li>"
-        )
+    items = [
+        f'<li class="window">{window_line_html(window, today, unmasked=unmasked)}</li>'
+        for window in ordered
+    ]
     return f'<ul class="windows">{"".join(items)}</ul>'
 
 
