@@ -26,6 +26,34 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.358] - 2026-10-07
+
+### Changed
+- **A change runs its own layer's tests plus the guards, not the whole
+  suite.** The suite passed ten thousand tests this week and a quarter of an
+  hour a run, and every merge ran it once locally and once more at the CI
+  gate; the local run caught almost nothing the gate would not have, and the
+  owner would not accept an hour's cycle for small increments. Every test
+  file now carries one layer marker (`ingest`, `verify`, `analysis`, `pages`,
+  `export`), placed by one table at the top of `tests/conftest.py`, and the
+  cross-cutting house-rule tests carry `guards` as well; `slow` marks those
+  that build the large stores. Collection refuses a file the table does not
+  place, and a misspelt marker is an error, so the table cannot rot quietly.
+  Measured once at six workers on a shared machine: the whole suite 756 s;
+  `guards` 75 s; `pages or guards` 204 s; `ingest or guards` 286 s. The CI
+  gate still runs everything, so nothing deploys on a layer run alone.
+  `docs/BUILDING.md` ("Which tests to run") states the routine. Two things
+  the markers do not do: a change reaching another layer's tests is not
+  caught by its own layer's run, so those files are run by name; and
+  `ingest` holds over 40% of the suite, which the planned package split
+  (`docs/design/2026-10-layers/`) is the answer to, not a finer marker.
+- **The layers plan is recorded and decided.** A measured dependency map of
+  the 208 modules and the eight-commit move that follows from it are in
+  `docs/design/2026-10-layers/`, with the owner's decisions written down:
+  the split runs as a reproducible codemod from a committed mapping file,
+  with a seventh package for the read models, each move commit regenerable
+  from its parent.
+
 ## [0.4.357] - 2026-10-07
 
 ### Changed
