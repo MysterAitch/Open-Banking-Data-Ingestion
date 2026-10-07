@@ -24,10 +24,10 @@ from obdi.ingest.entity_records import OWNER_ROLE, Entity
 
 @pytest.fixture(autouse=True)
 def no_common_words(monkeypatch):
-    """In a store of a dozen names every repeated word is among the fifty commonest, so the
+    """In a store of a dozen names a word that follows three different openings is common, so the
     scenarios below, which are about what a shared word means, set that rule aside; the tests of
     the rule itself set their own figure."""
-    monkeypatch.setattr(entities, "COMMON_TOKENS", 0)
+    monkeypatch.setattr(entities, "COMMON_AFTER_OPENINGS", 1000)
 
 
 def held(name: str, *shapes: str, role: str | None = None, ident: int = 7) -> Entity:
@@ -76,8 +76,9 @@ class TestWhenTheSharedWordSaysNothingAboutWho:
         fillers = {f"filler{n} store": 2 for n in range(5)}
         return {**fillers, "fernhollow store": 1, "zephyr store": 1, "fernhollow online": 1}
 
-    def test_Suggestion_WhenTheSharedWordIsAmongTheCommonest_IsNotOffered(self, monkeypatch):
-        monkeypatch.setattr(entities, "COMMON_TOKENS", 1)
+    def test_Suggestion_WhenTheSharedWordFollowsManyBrands_IsNotOffered(self, monkeypatch):
+        # "store" follows the five fillers, "fernhollow", and "zephyr": seven different openings.
+        monkeypatch.setattr(entities, "COMMON_AFTER_OPENINGS", 3)
         entity = held("Fernhollow Store", "fernhollow store")
 
         view = view_of(self.corpus(), [entity])
@@ -86,8 +87,8 @@ class TestWhenTheSharedWordSaysNothingAboutWho:
         assert "zephyr store" not in offered
         assert "fernhollow online" in offered
 
-    def test_Suggestion_WhenTheSameWordIsNotAmongTheCommonest_IsOffered(self, monkeypatch):
-        monkeypatch.setattr(entities, "COMMON_TOKENS", 0)
+    def test_Suggestion_WhenTheSameWordFollowsFewerBrandsThanTheFloor_IsOffered(self, monkeypatch):
+        monkeypatch.setattr(entities, "COMMON_AFTER_OPENINGS", 8)
         entity = held("Fernhollow Store", "fernhollow store")
 
         view = view_of(self.corpus(), [entity])

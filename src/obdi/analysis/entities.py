@@ -525,11 +525,18 @@ def _common_opening(members: Collection[Sequence[Token]]) -> int:
     return len(run or [])
 
 
-#: How many of the commonest words across all shapes are too ordinary to say who a payee is. A
-#: word printed in only one shape is never counted common, however few words the store holds:
-#: with nothing repeated there is no ordinary word, and a tie among singletons would be settled by
-#: the alphabet.
-COMMON_TOKENS = 50
+#: Fewest different opening words a word must follow, in the names it is not the opening word of,
+#: to be too ordinary to say who a payee is ("payment", a town, a branch word). Measured on the
+#: invented large store: a town follows 3 or 4 different brands ("london" 3, "reading" 4), while
+#: every planted retailer follows none - they open names and are not found after anything - so 3
+#: is the largest floor under which the towns are common there, and it is the count at which a
+#: coincidence stops explaining a shared word (`MIN_ONE_WORD_VARIANTS`). "payment" and "gbr"
+#: follow no brand in the invented stores, so the floor is not measured against them; they are
+#: kept out of the distinctive words independently (`distinctive_words`). Replaces the fifty most
+#: frequent words, which on a real store were the brands with the most variants: a retailer's
+#: twenty towns were "too broad" (6 groups of 89 names) because the retailer was among the
+#: commonest words. A brand opens many names however frequent it is and so stays distinctive.
+COMMON_AFTER_OPENINGS = 3
 
 #: Fewest shapes that must open with one distinctive word for it alone to join them. Two shapes
 #: that share a single word are far more often two payees than one; three is the first count a
@@ -538,17 +545,26 @@ MIN_ONE_WORD_VARIANTS = 3
 
 
 def common_tokens(named: Mapping[str, Sequence[Token]]) -> frozenset[str]:
-    """The `COMMON_TOKENS` words found in the most shapes, among those found in at least two."""
-    found: Counter[str] = Counter()
+    """The words too ordinary to say who a payee is: those that follow at least
+    `COMMON_AFTER_OPENINGS` different opening words, in the names they do not open. A word is
+    common by where it appears and not by how often: a brand that opens a great many names is
+    distinctive however many there are."""
+    following: dict[str, set[str]] = {}
     for shape_tokens in named.values():
-        found.update({token.norm for token in shape_tokens})
-    ranked = sorted((n for n in found if found[n] >= 2), key=lambda n: (-found[n], n))
-    return frozenset(ranked[:COMMON_TOKENS])
+        if len(shape_tokens) < 2:
+            continue
+        opening = shape_tokens[0].norm
+        for token in shape_tokens[1:]:
+            if token.norm != opening:
+                following.setdefault(token.norm, set()).add(opening)
+    return frozenset(
+        n for n, openings in following.items() if len(openings) >= COMMON_AFTER_OPENINGS
+    )
 
 
 def is_distinctive(norm: str, common: Collection[str]) -> bool:
     """Whether a compared word can say who a payee is: not one letter, not a payment method, not
-    a country or company code, and not one of the commonest words."""
+    a country or company code, and not a word that follows many brands (`common_tokens`)."""
     return norm not in common and norm in distinctive_words((Token(norm, norm),))
 
 
@@ -769,9 +785,10 @@ def suggest_for_entities(
     words with (the first by name where two share as many); names the owner has already placed,
     the owner's own, and names in a proposed group (`set_apart`) are not offered.
 
-    A word is distinctive as `is_distinctive` says, so the commonest words of the store
-    (`COMMON_TOKENS`) never join a name to an entity. The owner entity is never a target: its
-    shapes are transfers, and a name that shares a word with one is not shown to be the owner's.
+    A word is distinctive as `is_distinctive` says, so a word that follows many different
+    brands (`common_tokens`) never joins a name to an entity. The owner entity is never a
+    target: its shapes are transfers, and a name that shares a word with one is not shown to
+    be the owner's.
     """
     targets = [e for e in entities if e.role != OWNER_ROLE and e.shapes]
     if not targets:

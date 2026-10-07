@@ -18,12 +18,29 @@ from __future__ import annotations
 import pytest
 
 from obdi.analysis.entities import (
+    COMMON_AFTER_OPENINGS,
+    MAX_SHAPES_PROPOSED,
     OPENING_WORDS,
     SAME_WORDS,
+    common_tokens,
     count_shapes,
+    is_distinctive,
     propose_groups,
     shape_of,
 )
+from obdi.analysis.entity_tokens import tokens_of
+
+#: Twenty invented places, none of them a word any brand below is made of.
+TWENTY_TOWNS = [
+    "ashford", "bexley", "carlow", "dunmore", "elgin", "forres", "girvan", "halton", "ilkley",
+    "jarrow", "kendal", "louth", "malton", "neston", "oakham", "penryn", "quorn", "rhyl",
+    "selby", "thirsk",
+]
+SIX_BRANDS = ["alder", "birch", "cedar", "hazel", "linden", "rowan"]
+
+
+def named_shapes(*descriptions: str):
+    return {shape: tokens_of(shape) for shape in count_shapes(descriptions)}
 
 
 def proposals(*descriptions: str, taken: frozenset[str] = frozenset()):
@@ -37,9 +54,13 @@ class TestAnOpeningThatNamesHowAndNotWho:
     shapes sharing an opening are still offered, since one retailer prints a town per branch; nine
     are counted and never offered, unless the opening is a distinctive word (a brand)."""
 
+    #: Names that make "store" follow three different brands, as an ordinary word follows many.
+    STORE_FOLLOWS_BRANDS = ("ALDER STORE", "BIRCH STORE", "CEDAR STORE")
+
     def test_Proposal_WhenOrdinaryWordsOpenNineShapes_NothingIsOfferedAndItIsCounted(self):
         words = ["alpha", "bravo", "coral", "delta", "ember", "frost", "grove", "haven", "ivory"]
-        descriptions = [f"THE STORE {w.upper()} 12" for w in words]
+        descriptions = [f"STORE FRONT {w.upper()} 12" for w in words]
+        descriptions += self.STORE_FOLLOWS_BRANDS
 
         found = propose_groups(count_shapes(descriptions))
 
@@ -58,7 +79,8 @@ class TestAnOpeningThatNamesHowAndNotWho:
 
     def test_Proposal_WhenABroadGroupSitsBesideASmallOne_OnlyTheSmallOneIsOffered(self):
         words = ["alpha", "bravo", "coral", "delta", "ember", "frost", "grove", "haven", "ivory"]
-        descriptions = [f"THE STORE {w.upper()}" for w in words]
+        descriptions = [f"STORE FRONT {w.upper()}" for w in words]
+        descriptions += self.STORE_FOLLOWS_BRANDS
         descriptions += ["FERNHOLLOW GROCERS LONDON", "FERNHOLLOW GROCERS READING"]
 
         found = propose_groups(count_shapes(descriptions))
@@ -113,8 +135,17 @@ class TestAGroupOfOneRetailersVariants:
 
 
 class TestTwoFirmsThatOnlyShareAWord:
-    def test_Proposal_WhenOnlyTheFirstWordIsShared_NothingIsProposed(self):
-        assert proposals("MARLOWE BAKERY 12", "MARLOWE INSURANCE 99", "MARLOWE ROOFING 3") == []
+    def test_Proposal_WhenOnlyTheFirstWordIsSharedByTwoNames_NothingIsProposed(self):
+        assert proposals("MARLOWE BAKERY 12", "MARLOWE INSURANCE 99") == []
+
+    def test_Proposal_WhenOnlyTheFirstWordIsSharedByThreeNames_TheyAreOneGroup(self):
+        # Three is the count at which a shared first word stops being a coincidence
+        # (`MIN_ONE_WORD_VARIANTS`); a store of a handful of names used to hide this, since every
+        # repeated word there was among the fifty commonest.
+        (group,) = proposals("MARLOWE BAKERY 12", "MARLOWE INSURANCE 99", "MARLOWE ROOFING 3")
+
+        assert group.name == "Marlowe"
+        assert len(group.shapes) == 3
 
     def test_Proposal_WhenOneWordShapesAreShared_NothingIsProposed(self):
         assert proposals("NETFLIX 123", "NETFLIX PREMIUM 456") == []
@@ -209,3 +240,71 @@ class TestTheOrderTheyArriveIn:
     @pytest.mark.parametrize("count", [0, 1])
     def test_Proposal_WithNoShapesOrOne_ProposesNothing(self, count):
         assert proposals(*["LIDL GB 1"] * count) == []
+
+
+class TestAWordIsCommonByWhereItAppearsNotHowOften:
+    """KNOWN ANSWERS, decided before the first run.
+
+    A real store's fifty most frequent words were the brands with the most variants, so a
+    retailer's twenty towns were "too broad". A word is common when it follows at least
+    `COMMON_AFTER_OPENINGS` different opening words in the names it does not open.
+
+      - A brand opening twenty names (one town each) is distinctive, and its twenty names are
+        proposed whole: it follows no other word, and no town follows more than two brands.
+      - "payment" after fifteen different brands is common.
+      - A town after five different brands is common and opens no group of its own; after one
+        brand fewer than the floor it is not common and three names it opens are one group.
+    """
+
+    def test_Proposal_WhenABrandOpensTwentyNamesWithATownEach_TheyAreOneGroupProposedWhole(self):
+        chain = [f"BRAMBLEWICK {town.upper()}" for town in TWENTY_TOWNS]
+        # Each town is also printed after one other brand, so a town is seen more than once.
+        others = [
+            f"{SIX_BRANDS[i % 6].upper()} {town.upper()}" for i, town in enumerate(TWENTY_TOWNS)
+        ]
+        descriptions = [*chain, *others]
+
+        found = propose_groups(count_shapes(descriptions))
+        common = common_tokens(named_shapes(*descriptions))
+
+        assert "bramblewick" not in common
+        assert is_distinctive("bramblewick", common)
+        (group,) = [g for g in found.groups if g.name == "Bramblewick"]
+        assert len(group.shapes) == 20 > MAX_SHAPES_PROPOSED
+        assert found.too_broad == ()
+
+    def test_Common_WhenPaymentFollowsFifteenDifferentBrands_ItIsCommon(self):
+        brands = [f"{a}{b}" for a in "abc" for b in ("ford", "ham", "ley", "ton", "wick")]
+        assert len(brands) == 15
+        descriptions = [f"{brand.upper()} PAYMENT" for brand in brands]
+
+        common = common_tokens(named_shapes(*descriptions))
+
+        assert "payment" in common
+        assert not is_distinctive("payment", common)
+
+    def test_Proposal_WhenATownFollowsFiveBrands_ItIsCommonAndOpensNoGroup(self):
+        assert COMMON_AFTER_OPENINGS <= 5
+        after = [f"{brand.upper()} WEXFORD" for brand in SIX_BRANDS[:5]]
+        opened = ["WEXFORD MARKET", "WEXFORD QUAY", "WEXFORD DEPOT"]
+
+        common = common_tokens(named_shapes(*after, *opened))
+        found = propose_groups(count_shapes([*after, *opened]))
+
+        assert "wexford" in common
+        assert not any(s.startswith("wexford") for g in found.groups for s in g.shapes)
+
+    def test_Proposal_WhenATownFollowsOneBrandFewerThanTheFloor_ThreeNamesItOpensAreAGroup(self):
+        after = [f"{brand.upper()} WEXFORD" for brand in SIX_BRANDS[: COMMON_AFTER_OPENINGS - 1]]
+        opened = ["WEXFORD MARKET", "WEXFORD QUAY", "WEXFORD DEPOT"]
+
+        common = common_tokens(named_shapes(*after, *opened))
+        found = propose_groups(count_shapes([*after, *opened]))
+
+        assert "wexford" not in common
+        assert [g.name for g in found.groups] == ["Wexford"]
+
+    def test_Common_WhenOneWordIsOnlyEverTheOpening_NothingIsCommonHoweverFrequent(self):
+        descriptions = [f"BRAMBLEWICK {town.upper()}" for town in TWENTY_TOWNS]
+
+        assert common_tokens(named_shapes(*descriptions)) == frozenset()

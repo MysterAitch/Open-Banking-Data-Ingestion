@@ -96,15 +96,18 @@ class TestTheOwnersMixedProposal:
             ["m b online", "m b online direct"],
             ["m s", "m s bank leeds", "m s bank york"],
             ["marks and spencer", "marks spencer london"],
+            ["mcdonalds birmingham gbr", "mcdonalds hull", "mcdonalds leeds", "mcdonalds york"],
+            ["microsoft", "microsoft store", "microsoft xbox"],
         ]
 
-    def test_Proposals_WhenAWordIsAmongTheCommonestInTheStore_ItAloneJoinsNothing(self):
-        # Microsoft and McDonald's each print under their own word, but with so few distinct
-        # words in the store "microsoft" and "mcdonalds" are among the commonest, and one common
-        # word never makes a group (measured: neither was proposed).
-        shapes = {s for g in proposals(*self.DESCRIPTIONS) for s in g.shapes}
+    def test_Proposals_WhenABrandOpensSeveralNames_ItAloneJoinsThem(self):
+        # Microsoft opens three names and McDonald's four, and neither follows any other brand,
+        # so each is distinctive however few words the store holds. Before words were common by
+        # where they appear, both were "among the commonest" of a tiny store and joined nothing.
+        groups = {frozenset(g.shapes) for g in proposals(*self.DESCRIPTIONS)}
 
-        assert not any(s.startswith(("microsoft", "mcdonalds")) for s in shapes)
+        assert frozenset({"microsoft", "microsoft store", "microsoft xbox"}) in groups
+        assert any(len(g) == 4 and all(s.startswith("mcdonalds") for s in g) for g in groups)
 
     def test_Page_WhenValuesAreShown_EachReasonNamesTheWordsOfItsOneRule(self):
         page = render_entities(

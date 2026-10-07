@@ -491,7 +491,7 @@ class TestWhatAFirstMergeTeaches:
     def taught(self, world, monkeypatch):
         from obdi.analysis import entities
 
-        monkeypatch.setattr(entities, "COMMON_TOKENS", 0)
+        monkeypatch.setattr(entities, "COMMON_AFTER_OPENINGS", 1000)
         base, db = world
         merge_group(base, shapes=(LONDON, READING), name="Fernhollow")
         return base, db
@@ -530,11 +530,19 @@ class TestWhatAFirstMergeTeaches:
             (entity,) = store.entities_with_shapes()
         assert set(entity.shapes) == {LONDON, READING, EXPRESS}
 
-    def test_EntitiesPage_WhenTheSharedWordIsAmongTheCommonest_OffersNothing(self, world):
+    def test_EntitiesPage_WhenTheSharedWordIsABrandOpeningManyNames_StillOffersTheName(
+        self, world
+    ):
+        # "fernhollow" opens three names and follows no other word, so it is not common however
+        # often it is printed; a word is common by where it appears (`common_tokens`), and
+        # `test_entities_teaching` holds the case of one that follows many brands.
         base, _db = world
         merge_group(base, shapes=(LONDON, READING), name="Fernhollow")
 
-        assert self.could_forms(shown(base)) == []
+        (form,) = self.could_forms(shown(base))
+        offered = [i.attrs["value"] for i in elements(form, "input")
+                   if i.attrs.get("type") == "checkbox"]
+        assert EXPRESS in offered
 
 
 @pytest.fixture

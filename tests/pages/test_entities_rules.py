@@ -198,19 +198,18 @@ TOWNS = [
 ]
 
 
-def heavy_words(monkeypatch, count: int = 3) -> list[str]:
-    """Descriptions that make `count` invented words the commonest in the store, and the setting
-    that `count` words are the commonest, so a word of ordinary frequency is not among them."""
-    monkeypatch.setattr(entities, "COMMON_TOKENS", count)
+def common_words(count: int = 3) -> list[str]:
+    """Descriptions that make `count` invented words common: each follows four different brands,
+    one more than `entities.COMMON_AFTER_OPENINGS`, as an ordinary word follows many."""
+    assert entities.COMMON_AFTER_OPENINGS < 4
     heavy = ["hearth", "island", "jasper", "kettle", "lantern"][:count]
-    # Words only: a word holding a digit would be dropped from the shape.
-    tags = [f"zz{a}{b}" for a in "abcd" for b in "abcde"]
-    return [f"{word} {tag}" for word in heavy for tag in tags]
+    brands = ["alder", "birch", "cedar", "hazel"]
+    return [f"{brand} {word}" for word in heavy for brand in brands]
 
 
 class TestOneDistinctiveOpeningWordIsEnoughForThreeVariants:
-    def test_Proposal_WhenThirteenTownsShareOnlyTheBrand_AreOneGroupNamedForIt(self, monkeypatch):
-        filler = heavy_words(monkeypatch)
+    def test_Proposal_WhenThirteenTownsShareOnlyTheBrand_AreOneGroupNamedForIt(self):
+        filler = common_words()
         chain = [f"BRAMBLEWICK {town.upper()} GBR" for town in TOWNS]
 
         found = groups(*filler, *chain)
@@ -219,23 +218,23 @@ class TestOneDistinctiveOpeningWordIsEnoughForThreeVariants:
         assert len(group.shapes) == 13
         assert propose_groups(count_shapes([*filler, *chain])).too_broad == ()
 
-    def test_Proposal_WhenThreeShapesShareACommonFirstWord_TheyAreNotJoined(self, monkeypatch):
-        filler = heavy_words(monkeypatch)
+    def test_Proposal_WhenThreeShapesShareACommonFirstWord_TheyAreNotJoined(self):
+        filler = common_words()
         chain = [f"HEARTH {town.upper()}" for town in TOWNS[:3]]
 
         found = groups(*filler, *chain)
 
         assert all(not {f"hearth {t}" for t in TOWNS[:3]} & set(g.shapes) for g in found)
 
-    def test_Proposal_WhenOnlyTwoVariantsShareADistinctiveWord_TheyAreNotJoined(self, monkeypatch):
-        filler = heavy_words(monkeypatch)
+    def test_Proposal_WhenOnlyTwoVariantsShareADistinctiveWord_TheyAreNotJoined(self):
+        filler = common_words()
 
         found = groups(*filler, "BRAMBLEWICK LEEDS", "BRAMBLEWICK YORK")
 
         assert [g for g in found if "bramblewick" in g.name.casefold()] == []
 
-    def test_Proposal_WhenTheSharedFirstWordIsAMethodWord_TheyAreNotJoined(self, monkeypatch):
-        filler = heavy_words(monkeypatch)
+    def test_Proposal_WhenTheSharedFirstWordIsAMethodWord_TheyAreNotJoined(self):
+        filler = common_words()
         # "online" is not a method phrase alone, but the whole phrase is: three payees printed
         # after it are three payees.
         found = groups(*filler, "ONLINE PAYMENT ARDEN", "ONLINE PAYMENT BRAMLEY",
@@ -243,15 +242,15 @@ class TestOneDistinctiveOpeningWordIsEnoughForThreeVariants:
 
         assert [g for g in found if "arden" in " ".join(g.shapes)] == []
 
-    def test_Proposal_WhenTheSharedFirstWordIsACountryCode_TheyAreNotJoined(self, monkeypatch):
-        filler = heavy_words(monkeypatch)
+    def test_Proposal_WhenTheSharedFirstWordIsACountryCode_TheyAreNotJoined(self):
+        filler = common_words()
 
         found = groups(*filler, "UK ARDEN", "UK BRAMLEY", "UK CORMORANT")
 
         assert [g for g in found if "uk arden" in g.shapes] == []
 
-    def test_Proposal_WhenAGroupHeldByABrandIsLarge_IsNotCountedTooBroad(self, monkeypatch):
-        filler = heavy_words(monkeypatch)
+    def test_Proposal_WhenAGroupHeldByABrandIsLarge_IsNotCountedTooBroad(self):
+        filler = common_words()
         chain = [f"BRAMBLEWICK {town.upper()}" for town in TOWNS]
 
         found = propose_groups(count_shapes([*filler, *chain]))
