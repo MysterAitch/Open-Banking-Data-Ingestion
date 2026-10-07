@@ -26,6 +26,63 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.361] - 2026-10-07
+
+### Changed
+- **The Entities page compares names, not printings.** The owner's first
+  reading on the real store (1,335 names, 181 proposals, 6 groups of 80
+  names too broad) found the proposals "reasonable so far" but "many need
+  refining and many are more narrow than they could/should be", and what he
+  showed was four missing rules, not a limit of rules. The words a bank
+  prints before a payee (direct debit, faster payment, card subscription,
+  contactless, and the like) are stripped before grouping, from the one
+  list the detector already uses to decide pulled from scheduled, so those
+  six "too broad" groups become their real payees' variants; tokens are
+  compared modulo a plural s, joined or spaced initials, an ampersand
+  against "and", and trailing country, region, and company codes, so one
+  retailer printed three ways is one group; a printed date with its digits
+  dropped ("on apr") no longer splits a name; a single opening word joins a
+  group when it is distinctive and three or more variants share it, which
+  is how a fast-food chain's thirteen towns become one; and where a source
+  states a counterparty (the bank's own cleaned merchant name) that is the
+  shape's first source, the description the fallback. On the large invented
+  store: 79 names to 68 shapes, 4 proposals covering 12 to 27 covering 57,
+  nothing too broad.
+- **The owner is recognised.** Names that are mostly the legs of transfers
+  between his own accounts lead the page as "payments between your own
+  accounts", and one press attaches them to an owner entity (named "Me"
+  until renamed; schema 24 adds the entity's role), instead of proposing
+  him as a payee.
+- **Two merges can be combined.** Merging or gathering under a name already
+  in use adds the names to that entity (the refusal is gone, the outcome
+  says "N names added to X"), and each entity has a "Fold into" press that
+  moves its names under another; split-apart per name remains the undo.
+- **The first merges teach the page.** A free name sharing a distinctive
+  word with an entity the owner made is offered under it as "could belong
+  to", with one press. Reached nothing on the invented stores, which hold
+  no brand variety; the real store is the measurement.
+- **A name that is a different thing becomes a child entity.** The owner's
+  case: twenty variants of a retailer are purchases and the twenty-first is
+  its subscription service. "Make its own entity" under a parent lists the
+  child under it, and the Recurring page names the child's series by the
+  child. The parent column is read for the first time.
+- **Each name opens to the transactions it covers** - day, account, amount,
+  and the description as printed, linked to the ledger row - so what a
+  merge would capture is visible before the press; the owner: "the count is
+  useful but it's not enough". Masked, the fold holds days and counts only.
+  The page issues 21 statements (bound 23), up from 8: one for the transfer
+  pairs, the rest the one place account labels are decided.
+- **A payee that does not fit one rhythm across accounts is divided by
+  account before amount.** Found by the counterparty shape: an employer
+  paying three accounts became one group, and the amount-first split
+  fragmented the varying monthly pay into pieces the four-slot rule then
+  dropped. Splitting by account first finds it; a group that fits across
+  accounts is still never split, so a payment moved to another account is
+  marked, not counted as missed plus new. The large invented store goes from
+  12 series to 18, checked against what it plants: a monthly pay, a monthly
+  savings transfer, and a monthly card payment in each of its three worlds,
+  plus the main account's salary - the old 12 was the wrong answer.
+
 ## [0.4.360] - 2026-10-07
 
 ### Changed
