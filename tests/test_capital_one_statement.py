@@ -24,6 +24,7 @@ reader existed: previous 1,000.00 owed, paid in 250.00 and 15.00, paid out
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 import pytest
@@ -57,6 +58,7 @@ def _cover(label: str, figure: str) -> str:
 
 
 HEADING = " Your transaction details".ljust(88) + "Paid in" + " " * 11 + "Paid out"
+_DATED_ROW = re.compile(r"^\s*\d{1,2}\s+[A-Za-z]{3,4}\s")
 
 
 def _totals(day: str, paid_in: str, paid_out: str) -> str:
@@ -118,6 +120,121 @@ def pages_of(statement_date: str = "2 July 26", closing: str = "£806.25") -> li
         "highest-rate balance first.",
     ]
     return [first, second]
+
+
+def _two_pages(
+    first_rows: list[str],
+    second_rows: list[str],
+    *,
+    previous: str,
+    new: str,
+    paid_in: str,
+    paid_out: str,
+    closing: str,
+    table_previous: str,
+    statement_date: str = "2 July 26",
+) -> list[list[str]]:
+    """A statement of two pages: the cover and the first rows, then the rest and the totals."""
+    return [
+        [
+            *_furniture(1, 2, statement_date),
+            f"{'':<127}Your account summary",
+            _cover("Credit limit", "£5,000.00"),
+            _cover("Previous balance", previous),
+            _cover("Your new balance", new),
+            "Minimum Payments",
+            HEADING,
+            *first_rows,
+            f"{'':<87}continued on next page...",
+        ],
+        [
+            *_furniture(2, 2, statement_date),
+            f"{'':<1}continued from previous page...",
+            HEADING,
+            *second_rows,
+            _totals("2 Jul", paid_in, paid_out),
+            *_closing(closing, previous=table_previous),
+            "If we do not receive the minimum payment we will apply your payment to the",
+        ],
+    ]
+
+
+#: A card in credit. KNOWN ANSWER, decided before the reader was changed: 120.00 owed to begin
+#: with, payments of 250.00 and 45.50, and 24.75 of interest, so 120.00 - 295.50 + 24.75 leaves
+#: the card 150.75 IN CREDIT. In the house's balance convention (an amount owed, negated) the
+#: opening is -12,000 and the closing is +15,075, and the rows are +25,000, +4,550 and -2,475.
+IN_CREDIT_ROWS = [25000, 4550, -2475]
+
+
+def pages_in_credit(new: str = "-£150.75") -> list[list[str]]:
+    return _two_pages(
+        [
+            _figure_row("20 Jun", "Direct Debit Payment - Thank You", "250.00", "in"),
+            _figure_row("25 Jun", "Direct Debit Payment - Thank You", "45.50", "in"),
+        ],
+        [_figure_row("2 Jul", "Standard Purchase Interest   on 2 Jul", "24.75", "out")],
+        previous="£120.00",
+        new=new,
+        paid_in="295.50",
+        paid_out="24.75",
+        closing=new,
+        table_previous="120.00",
+    )
+
+
+#: The month after. KNOWN ANSWER: the card began 150.75 in credit (the table prints it as
+#: "-150.75"), 300.00 and 25.00 were spent and 20.00 refunded, so -150.75 - 20.00 + 325.00
+#: leaves 154.25 OWED. The opening is +15,075, the closing is -15,425, and the rows are
+#: -30,000, +2,000, and -2,500.
+MONTH_AFTER_ROWS = [-30000, 2000, -2500]
+
+
+def pages_month_after(
+    previous: str = "-£150.75", table_previous: str = "-150.75"
+) -> list[list[str]]:
+    return _two_pages(
+        [
+            _figure_row("21 Jun", "EXAMPLE SHOP LTD   LONDON   GBR   on 20 Jun", "300.00", "out"),
+            _figure_row("25 Jun", "REFUND EXAMPLE SHOP LTD   LONDON   on 24 Jun", "20.00", "in"),
+        ],
+        [_figure_row("28 Jun", "EXAMPLE CAFE   LEEDS   GBR   on 27 Jun", "25.00", "out")],
+        previous=previous,
+        new="£154.25",
+        paid_in="20.00",
+        paid_out="325.00",
+        closing="£154.25",
+        table_previous=table_previous,
+    )
+
+
+#: Where a side panel's text starts on the cover page, beyond the Paid out column's edge.
+PANEL_AT = OUT_END + 14
+PANEL_FUSED_AT = OUT_END + 1
+
+
+def with_side_panel(
+    pages: list[list[str]], *, heading_gap: int = 14, panel_at: int = PANEL_AT
+) -> list[list[str]]:
+    """The first page with the cover's right-hand panel printed beside its table.
+
+    The heading row carries a figure to the right of "Paid out", the first two rows carry panel
+    text in their tails (one ending in a bare figure), and two lines above the heading carry the
+    panel's own estimate. Page two is untouched: the panel is on the cover only.
+    """
+    first = list(pages[0])
+    at = first.index(HEADING)
+    first[at] = HEADING + " " * heading_gap + "£12.34."
+    first.insert(at, f"{'':<{panel_at}}This month's estimated interest will be")
+    first.insert(at + 1, f"{'':<{panel_at}}£12.34.")
+    at = first.index(HEADING + " " * heading_gap + "£12.34.")
+    tails = ("Any questions?", "Our fee is   2.99")
+    seen = 0
+    for index in range(at + 1, len(first)):
+        if _DATED_ROW.match(first[index]) and seen < len(tails):
+            first[index] = first[index].ljust(panel_at) + tails[seen]
+            seen += 1
+    assert seen == len(tails), "the panel's tails were not placed"
+    return [first, *pages[1:]]
 
 
 def flat(pages: list[list[str]]) -> list[str]:
@@ -518,6 +635,304 @@ class TestAmbiguityIsRefusedNotGuessed:
         message = refused(without(pages_of(), "Your transaction details"))
 
         assert "heading" in message.casefold() or "transaction details" in message.casefold()
+
+
+class TestACardInCredit:
+    """A negative balance owed is money the card owes its owner, and is read as such.
+
+    The balances keep the house's convention - an amount owed, negated - so a card in credit
+    is a POSITIVE balance and the gate's arithmetic is unchanged: opening plus the rows is
+    closing, signs included.
+    """
+
+    @pytest.mark.parametrize("new", ["-£150.75", "-Â£150.75", "£-150.75", "-150.75"])
+    def test_CapitalOneStatement_WhenTheCardEndsInCredit_ReadsAPositiveClosingBalanceThatReconciles(
+        self, new
+    ):
+        reading = read(pages_in_credit(new))
+
+        assert not reading.notes
+        assert reading.opening_balance_minor == -12000
+        assert reading.closing_balance_minor == 15075
+        assert [row.amount_minor for row in reading.transactions] == IN_CREDIT_ROWS
+        assert reading.reconciles, reading.discrepancy_minor
+
+    def test_CapitalOneStatement_WhenTheCardEndsInCredit_YieldsItsRowsThroughTheImportDoor(self):
+        rows = list(
+            CapitalOneCreditCardPdfParser().parse(pdf(pages_in_credit()), account_id="an-account")
+        )
+
+        assert [row.amount_minor for row in rows] == IN_CREDIT_ROWS
+
+    @pytest.mark.parametrize(
+        ("previous", "table_previous"),
+        [
+            ("-£150.75", "-150.75"),
+            ("-£150.75", "-£150.75"),
+            ("-Â£150.75", "-150.75"),
+            ("£-150.75", "£-150.75"),
+        ],
+    )
+    def test_CapitalOneStatement_WhenTheMonthAfterBeginsInCredit_ReadsAPositiveOpeningBalance(
+        self, previous, table_previous
+    ):
+        reading = read(pages_month_after(previous, table_previous))
+
+        assert not reading.notes
+        assert reading.opening_balance_minor == 15075
+        assert reading.closing_balance_minor == -15425
+        assert [row.amount_minor for row in reading.transactions] == MONTH_AFTER_ROWS
+        assert reading.reconciles, reading.discrepancy_minor
+
+    def test_CapitalOneStatement_WhenTheMonthAfterBeginsInCredit_YieldsItsRowsThroughTheImportDoor(
+        self,
+    ):
+        rows = list(
+            CapitalOneCreditCardPdfParser().parse(
+                pdf(pages_month_after()), account_id="an-account"
+            )
+        )
+
+        assert [row.amount_minor for row in rows] == MONTH_AFTER_ROWS
+
+    def test_CapitalOneStatement_WhenTheTablesPreviousBalanceDisagreesInSign_IsRefused(self):
+        # 150.75 owed and 150.75 in credit are different facts; agreeing on the digits
+        # alone is not agreeing.
+        message = refused(pages_month_after("-£150.75", "150.75"))
+
+        assert "previous balance" in message.casefold()
+
+    def test_CapitalOneStatement_WhenTheCoverSaysCreditAndTheClosingLineSaysOwed_IsRefused(self):
+        pages = pages_in_credit()
+        pages[1] = [line.replace("-£150.75", "£150.75") for line in pages[1]]
+
+        message = refused(pages)
+
+        assert "new balance" in message.casefold()
+
+    def test_CapitalOneStatement_WhenACreditStatementsPaymentIsFiledUnderPaidOut_IsRefused(self):
+        wrong = [
+            [
+                _figure_row("20 Jun", "Direct Debit Payment - Thank You", "250.00", "out")
+                if "250.00" in line
+                else line
+                for line in page
+            ]
+            for page in pages_in_credit()
+        ]
+
+        reading = read(wrong)
+
+        assert reading.notes or not reading.reconciles
+
+    def test_CapitalOneStatement_WhenACreditFigureCarriesTwoMinusSigns_IsRefusedNotMisread(self):
+        reading = read(pages_in_credit("-£-150.75"))
+
+        assert reading.notes
+
+    def test_CapitalOneStatement_WhenACreditFigureAlsoCarriesCR_IsRefusedNotMisread(self):
+        reading = read(pages_in_credit("-£150.75 CR"))
+
+        assert reading.notes
+
+    def test_CapitalOneStatement_WhenTheCoverStatesTwoDifferentCreditFigures_IsRefused(self):
+        pages = pages_in_credit()
+        pages[0].insert(7, _cover("Your new balance", "-£150.76"))
+
+        message = refused(pages)
+
+        assert "new balance" in message.casefold()
+
+    def test_CapitalOneStatement_WhenTheStatementIsAnOrdinaryOneOwed_StaysAnOrdinaryOne(self):
+        # The control: the sign handling changes nothing for a balance owed.
+        reading = read(pages_of())
+
+        assert reading.opening_balance_minor == -100000
+        assert reading.closing_balance_minor == -80625
+        assert reading.reconciles
+
+
+class TestAJanuaryStatementWithNothingOnItsSecondPageButTheTotals:
+    """The accepted layout of January: two rows on page one, the totals alone on page two.
+
+    KNOWN ANSWER: 10.00 owed, a payment of 3.50 in and a purchase of 2.25 out, so 8.75 owed;
+    rows +350 and -225 dated December, opening -1,000 and closing -875.
+    """
+
+    @staticmethod
+    def _january() -> list[list[str]]:
+        return _two_pages(
+            [
+                _figure_row("30 Dec", "EXAMPLE SHOP LTD   LONDON   GBR   on 29 Dec", "2.25", "out"),
+                _figure_row("31 Dec", "Direct Payment", "3.50", "in"),
+            ],
+            [],
+            previous="£10.00",
+            new="£8.75",
+            paid_in="3.50",
+            paid_out="2.25",
+            closing="£8.75",
+            table_previous="10.00",
+            statement_date="9 January 26",
+        )
+
+    def test_CapitalOneStatement_WhenRowsAreOnlyOnTheFirstPage_ReadsExactlyAsBefore(self):
+        reading = read(self._january())
+
+        assert not reading.notes
+        assert [row.amount_minor for row in reading.transactions] == [-225, 350]
+        assert [row.value_date for row in reading.transactions] == [
+            date(2025, 12, 30),
+            date(2025, 12, 31),
+        ]
+        assert reading.opening_balance_minor == -1000
+        assert reading.closing_balance_minor == -875
+        assert reading.reconciles
+
+
+@pytest.mark.parametrize(
+    ("heading_gap", "panel_at"),
+    [(14, PANEL_AT), (0, PANEL_FUSED_AT)],
+    ids=["panel-apart", "panel-fused-to-the-table"],
+)
+class TestACoverPageWithASidePanelBesideTheTable:
+    """The cover's right-hand panel ("Your interest rates") prints beside the table, so a
+    figure lands on the heading row and text lands in some rows' tails.
+
+    KNOWN ANSWER: the same statement as `pages_of` - five rows, 1,000.00 owed to begin with and
+    806.25 at the close - because nothing in the panel is the table's.
+    """
+
+    def test_CapitalOneStatement_WhenThePanelSharesTheHeadingRow_ReadsEveryRowOnBothPages(
+        self, heading_gap, panel_at
+    ):
+        reading = read(with_side_panel(pages_of(), heading_gap=heading_gap, panel_at=panel_at))
+
+        assert not reading.notes
+        assert [row.amount_minor for row in reading.transactions] == [
+            25000,
+            -4000,
+            1500,
+            -1250,
+            -1875,
+        ]
+        assert reading.opening_balance_minor == -100000
+        assert reading.closing_balance_minor == -80625
+        assert reading.reconciles, reading.discrepancy_minor
+
+    def test_CapitalOneStatement_WhenThePanelSharesTheHeadingRow_YieldsItsRowsThroughTheImportDoor(
+        self, heading_gap, panel_at
+    ):
+        panelled = with_side_panel(pages_of(), heading_gap=heading_gap, panel_at=panel_at)
+
+        rows = list(CapitalOneCreditCardPdfParser().parse(pdf(panelled), account_id="an-account"))
+
+        assert len(rows) == 5
+
+    def test_CapitalOneStatement_WhenThePanelSitsBesideACardInCredit_ReadsTheCreditToo(
+        self, heading_gap, panel_at
+    ):
+        reading = read(
+            with_side_panel(pages_in_credit(), heading_gap=heading_gap, panel_at=panel_at)
+        )
+
+        assert not reading.notes
+        assert reading.closing_balance_minor == 15075
+        assert reading.reconciles
+
+    def test_CapitalOneStatement_WhenAFigureStandsInAPanelTailOfARowWithNoFigureOfItsOwn_IsRefused(
+        self, heading_gap, panel_at
+    ):
+        pages = with_side_panel(pages_of(), heading_gap=heading_gap, panel_at=panel_at)
+        pages[0] = [
+            " 22 Jun    NO FIGURE OF ITS OWN".ljust(panel_at) + "Our fee is   2.99"
+            if "Direct Debit Payment" in line
+            else line
+            for line in pages[0]
+        ]
+
+        reading = read(pages)
+
+        assert any("NO FIGURE OF ITS OWN" in note for note in reading.notes)
+
+    def test_CapitalOneStatement_WhenARowIsMisfiledBesideThePanel_IsStillRefused(
+        self, heading_gap, panel_at
+    ):
+        # Stripping the panel must not stop the columns being checked: a payment moved to Paid
+        # out is the one fault a plausible page cannot show.
+        pages = with_side_panel(pages_of(), heading_gap=heading_gap, panel_at=panel_at)
+        pages[0] = [
+            _figure_row("21 Jun", "EXAMPLE SHOP LTD   LONDON   GBR   on 20 Jun", "40.00", "in")
+            if "EXAMPLE SHOP" in line
+            else line
+            for line in pages[0]
+        ]
+
+        reading = read(pages)
+
+        assert reading.notes or not reading.reconciles
+
+
+class TestEachPageIsAttributedByItsOwnHeading:
+    @staticmethod
+    def _drifted_second_page() -> list[list[str]]:
+        """Page two printed seven characters further right, heading and figures alike."""
+        pages = pages_of()
+        pages[1] = [
+            (" " * 7 + line) if (line.rstrip()[-1:].isdigit() or line == HEADING) else line
+            for line in pages[1]
+        ]
+        return pages
+
+    def test_CapitalOneStatement_WhenASecondPageIsPrintedFurtherRight_ItsFiguresFollowItsOwnHeading(
+        self,
+    ):
+        reading = read(self._drifted_second_page())
+
+        assert not reading.notes
+        assert reading.reconciles
+
+    def test_CapitalOneStatement_WhenASecondPageReprintsNoHeading_ItsRowsAreRefused(self):
+        pages = pages_of()
+        pages[1] = [line for line in pages[1] if line != HEADING]
+
+        reading = read(pages)
+
+        assert any("EXAMPLE CAFE" in note for note in reading.notes)
+
+
+class TestTheReaderReportSaysACardIsInCredit:
+    """The shape page's "What the reader found" says the sign was understood, so the owner can
+    tell a card read as in credit from one whose minus was dropped."""
+
+    @staticmethod
+    def _closing_line(pages: list[list[str]]) -> str:
+        from obdi.reader_findings import findings_html, findings_of
+
+        findings = findings_of(pdf(pages))
+        assert findings.found, findings.said
+        text = findings_html(findings, lambda token: token)
+        return next(
+            part.split("</li>")[0]
+            for part in text.split("<li>")
+            if part.startswith("Closing balance")
+        )
+
+    def test_ShapePage_WhenTheCardEndsInCredit_SaysTheClosingBalanceIsInCredit(self):
+        assert "in credit" in self._closing_line(pages_in_credit())
+
+    def test_ShapePage_WhenTheCardEndsOwing_DoesNotSayInCredit(self):
+        assert "in credit" not in self._closing_line(pages_of())
+
+    def test_ShapePage_WhenTheMonthBeganInCreditButEndsOwing_DoesNotSayInCredit(self):
+        assert "in credit" not in self._closing_line(pages_month_after())
+
+    def test_ShapePage_WhenTheCardEndsInCredit_SaysNoFigure(self):
+        from obdi.reader_findings import findings_html, findings_of
+
+        findings = findings_of(pdf(pages_in_credit()))
+
+        assert "150" not in findings_html(findings, lambda token: token)
 
 
 class TestRecognition:

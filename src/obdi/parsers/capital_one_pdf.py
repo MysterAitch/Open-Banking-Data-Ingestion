@@ -68,6 +68,16 @@ _POUND = r"(?:Â?£)?\s*"
 _AMOUNT = r"[\d,]*\d\.\d{2}"
 _FIGURE = f"({_AMOUNT})"
 
+#: A balance's figure with its sign: a minus before the pound ("-£99.99"), after it ("£-99.99"),
+#: or with no pound at all. A balance owed prints bare, so a minus is a balance the card owes its
+#: owner - a card in credit - and is the only marker this reader understands. The lookahead
+#: refuses two minuses ("-£-99.99"), which no layout is known to print and which a reader
+#: choosing one of them would be guessing at.
+_SIGNED = (
+    r"(?!-\s*(?:Â?£)?\s*-)(?:(?P<before>-)\s*)?(?:Â?£\s*)?(?:(?P<after>-)\s*)?"
+    rf"(?P<figure>{_AMOUNT})"
+)
+
 #: Characters between a figure's end and its column heading's end beyond which
 #: the figure is not attributed to that column.
 _COLUMN_SLACK = 4
@@ -81,19 +91,29 @@ _COLUMN_SLACK = 4
 _MAX_AGE_DAYS = 100
 
 _STATEMENT_DATE = re.compile(r"\bStatement date\s+(\d{1,2})\s+([A-Za-z]+)\s+(\d{4}|\d{2})\b")
-_HEADING = re.compile(r"^\s*Your transaction details\s+(Paid in)\s+(Paid out)\s*$")
+#: The table's heading. The cover's right-hand panel ("Your interest rates") prints beside the
+#: table on page one, so a figure of the panel's may follow "Paid out" on the same row, apart
+#: from it or fused to it; nothing after "Paid out" is the table's, and the column ends are
+#: measured at the two labels alone.
+_HEADING = re.compile(r"^\s*Your transaction details\s+(Paid in)\s+(Paid out)(?:\s*£.*|\s+\S.*)?$")
 
 #: Anchored at the line's end: the figure on a label's own line, with nothing
-#: after it - so a marker the shapes never showed (CR, a minus) fails to match
-#: and is refused rather than dropped.
-_COVER_PREVIOUS = re.compile(rf"Previous balance\s+{_POUND}{_FIGURE}\s*$")
-_COVER_NEW = re.compile(rf"Your new balance\s+{_POUND}{_FIGURE}\s*$")
+#: after it - so a marker the shapes never showed (CR) fails to match and is
+#: refused rather than dropped. A balance may carry a minus (`_SIGNED`); the credit limit
+#: is never negative.
+_COVER_PREVIOUS = re.compile(rf"Previous balance\s+{_SIGNED}\s*$")
+_COVER_NEW = re.compile(rf"Your new balance\s+{_SIGNED}\s*$")
 _COVER_LIMIT = re.compile(rf"Credit limit\s+{_POUND}{_FIGURE}\s*$")
 
 _CLOSING = re.compile(r"\bCLOSING BALANCE\b(.*)$", re.I)
-_CLOSING_FIGURE = re.compile(rf"^\s*{_POUND}{_FIGURE}\s*$")
+_CLOSING_FIGURE = re.compile(rf"^\s*{_SIGNED}\s*$")
 _TOTALS = re.compile(r"^\s*(?:\d{1,2}\s+[A-Za-z]{3,4}\s+)?STATEMENT TOTALS\b")
-_TABLE_PREVIOUS = re.compile(rf"^\s*Previous balance\s+{_POUND}{_FIGURE}\s*$", re.I)
+_TABLE_PREVIOUS = re.compile(rf"^\s*Previous balance\s+{_SIGNED}\s*$", re.I)
+
+#: A line the table prints a page's "Page 1 of 2" on. Every page reprints the table's heading,
+#: so a page's rows are attributed by the heading above them on THAT page and never by the
+#: previous page's.
+_PAGE = re.compile(r"\bPage\s+\d+\s+of\s+\d+\b")
 
 #: `<day> <Mon> <description> <figure>`. A gap of two spaces or more ahead of
 #: the figure, because the figure is right-aligned beneath its heading and a
@@ -108,8 +128,15 @@ def _minor(text: str) -> int:
     return int(whole) * 100 + int(pence or "0")
 
 
+def _owed(found: re.Match[str]) -> int:
+    """The amount a balance figure says is owed, in minor units: negative for a card in credit."""
+    owed = _minor(found.group("figure"))
+    return -owed if found.group("before") or found.group("after") else owed
+
+
 def _money(minor: int) -> str:
-    return f"{abs(minor) // 100:,}.{abs(minor) % 100:02d}"
+    sign = "-" if minor < 0 else ""
+    return f"{sign}{abs(minor) // 100:,}.{abs(minor) % 100:02d}"
 
 
 def _tidy(text: str) -> str:
@@ -147,7 +174,7 @@ def _cover_figure(
     pattern: re.Pattern[str], cover: list[str], label: str, notes: list[str]
 ) -> int | None:
     """The one figure the cover states under `label`, or None after saying why not."""
-    found = {_minor(match.group(1)) for line in cover if (match := pattern.search(line))}
+    found = {_owed(match) for line in cover if (match := pattern.search(line))}
     if len(found) != 1:
         notes.append(
             f"the cover states {len(found)} different figures for '{label}' - "
@@ -164,6 +191,28 @@ def _column(end: int, paid_in_end: int, paid_out_end: int) -> str | None:
     if min(to_in, to_out) > _COLUMN_SLACK:
         return None
     return "in" if to_in < to_out else "out"
+
+
+#: A figure the table could have printed: bare (the table's figures carry no pound), and ending
+#: the word it is in, so "9.99%" and "£9.99." are a panel's.
+_TABLE_FIGURE = re.compile(rf"(?<![\d£.,\-])({_AMOUNT})(?=\s|$)")
+
+
+def _without_side_panel(raw: str, paid_in_end: int, paid_out_end: int) -> str:
+    """The line as far as the table prints it.
+
+    A figure that ends at one of the two columns' edges is the table's, and whatever follows the
+    last such figure is the cover's right-hand panel: its words, its percentages, a figure of
+    its own that ends nowhere near a column. A line with no figure at a column's edge is
+    returned whole, so a row whose only figure is the panel's is refused as a row with a figure
+    in neither column rather than being read from the panel.
+    """
+    aligned = [
+        found
+        for found in _TABLE_FIGURE.finditer(raw)
+        if _column(found.end(), paid_in_end, paid_out_end) is not None
+    ]
+    return raw[: aligned[-1].end()] if aligned else raw
 
 
 def _row_date(
@@ -247,14 +296,15 @@ def read_statement(lines: list[str]) -> StatementReading:
                 "plain figure owed - a marker the layout has not shown is not guessed at"
             )
         else:
-            reading.closing_balance_minor = -_minor(figure.group(1))
+            reading.closing_balance_minor = -_owed(figure)
+            reading.closing_in_credit = reading.closing_balance_minor > 0
     if previous is not None:
         reading.opening_balance_minor = -previous
     closing_minor = reading.closing_balance_minor
     if new is not None and closing_minor is not None and -new != closing_minor:
         notes.append(
             f"the cover's 'Your new balance' is {_money(new)} but the closing "
-            f"balance line says {_money(closing_minor)} - two "
+            f"balance line says {_money(-closing_minor)} - two "
             "accounts of one fact, and no way to say which is right"
         )
     if closing_at is None:
@@ -262,24 +312,34 @@ def read_statement(lines: list[str]) -> StatementReading:
 
     totals: dict[str, int] | None = None
     summed = {"in": 0, "out": 0}
-    paid_in_end, paid_out_end = _heading_ends(lines[start])
+    # The columns of the page being read: None from a page's top until its own heading, so a
+    # row on a page that reprints none is refused rather than measured against another page's.
+    ends: tuple[int, int] | None = _heading_ends(lines[start])
     rows: list[StatementRow] = []
     for raw in lines[start + 1 : closing_at]:
         line = raw.strip()
         if not line:
             continue
-        heading = _HEADING.match(raw)
-        if heading:
-            paid_in_end, paid_out_end = _heading_ends(raw)
+        if _HEADING.match(raw):
+            ends = _heading_ends(raw)
+            continue
+        if _PAGE.search(raw):
+            ends = None
             continue
         if _TOTALS.match(raw):
             if totals is not None:
                 notes.append("the table has more than one STATEMENT TOTALS line")
                 continue
             totals = {"in": 0, "out": 0}
+            if ends is None:
+                notes.append(
+                    "the STATEMENT TOTALS line has no 'Paid in' and 'Paid out' heading "
+                    "above it on its own page, so its figures cannot be attributed"
+                )
+                continue
             for figure in re.finditer(_AMOUNT, raw[raw.index("TOTALS") :]):
                 end = raw.index("TOTALS") + figure.end()
-                column = _column(end, paid_in_end, paid_out_end)
+                column = _column(end, *ends)
                 if column is None:
                     notes.append(
                         f"a figure on the STATEMENT TOTALS line ends at {end}, in "
@@ -290,19 +350,28 @@ def read_statement(lines: list[str]) -> StatementReading:
             continue
         carried = _TABLE_PREVIOUS.match(raw)
         if carried:
-            if previous is not None and _minor(carried.group(1)) != previous:
+            if previous is not None and _owed(carried) != previous:
                 notes.append(
-                    f"the table's previous balance is {carried.group(1)} but the "
+                    f"the table's previous balance is {_money(_owed(carried))} but the "
                     f"cover's is {_money(previous)} - two accounts of one fact"
                 )
             continue
+        if ends is not None:
+            raw = _without_side_panel(raw, *ends)
+            line = raw.strip()
         found = _ROW.match(raw)
         if found:
             if totals is not None:
                 notes.append(f"the row {line!r} comes after the STATEMENT TOTALS line")
                 continue
             stated = _row_date(found, reading.statement_date, notes)
-            column = _column(len(raw.rstrip()), paid_in_end, paid_out_end)
+            if ends is None:
+                notes.append(
+                    f"the row {line!r} has no 'Paid in' and 'Paid out' heading above it "
+                    "on its own page, so no column can be attributed to its figure"
+                )
+                continue
+            column = _column(len(raw.rstrip()), *ends)
             if column is None:
                 notes.append(
                     f"the row {line!r} has a figure in neither the 'Paid in' nor "
