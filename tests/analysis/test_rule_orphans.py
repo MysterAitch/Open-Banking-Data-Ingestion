@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import date
 from typing import ClassVar
 
-from obdi.categorise import apply_rules
+from obdi.analysis.categorise import apply_rules
 from obdi.core.models import SourceTier, Transaction
 from obdi.ingest.pipeline import pair_transfers_across_store, reconcile_batch
 from obdi.ingest.store import Store

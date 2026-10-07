@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from obdi.categorise import defer_group, uncategorised_summary
+from obdi.analysis.categorise import defer_group, uncategorised_summary
 from obdi.core.models import SourceTier, Transaction
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.store import Store
@@ -112,7 +112,7 @@ class TestDeferringIsNotAnswering:
             assert (amazon.count, amazon.deferred) == (3, 2)
 
     def test_ADeferredRow_CanStillBeAnsweredLater(self, tmp_path):
-        from obdi.categorise import apply_to_group
+        from obdi.analysis.categorise import apply_to_group
 
         with Store(tmp_path / "s.sqlite3") as store:
             _seed(store)
@@ -124,7 +124,7 @@ class TestDeferringIsNotAnswering:
             assert len(store.annotations("category")) == 2
 
     def test_ARuleSweep_NeverUndefers(self, tmp_path):
-        from obdi.categorise import apply_rules
+        from obdi.analysis.categorise import apply_rules
 
         with Store(tmp_path / "s.sqlite3") as store:
             _seed(store)

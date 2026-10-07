@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from obdi.analysis.recurring import HABIT, PULLED, RecurringFindings, Series
 from obdi.ingest.connections import ConnectionStore
-from obdi.recurring import HABIT, PULLED, RecurringFindings, Series
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 sync_api = pytest.importorskip("playwright.sync_api")

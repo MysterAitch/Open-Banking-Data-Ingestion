@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from obdi.entities import (
+from obdi.analysis.entities import (
     OPENING_WORDS,
     SAME_WORDS,
     count_shapes,

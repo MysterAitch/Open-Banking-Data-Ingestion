@@ -12,7 +12,8 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 
-from .core.errors import DataError
+from ..core.errors import DataError
+from ..ingest.identity import normalise_description
 from .entity_tokens import (
     Token,
     align_initials,
@@ -21,7 +22,6 @@ from .entity_tokens import (
     is_method_only,
     tokens_of,
 )
-from .ingest.identity import normalise_description
 
 #: The rules that can join two shapes into one proposed group, said once here and by name
 #: everywhere else. OPENING_WORDS: they begin with the same two or more words. SAME_WORDS: once

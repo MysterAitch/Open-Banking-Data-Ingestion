@@ -61,7 +61,7 @@ packages = ["src/obdi"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "tests", "tests/core", "tests/ingest", "tests/verify", "tests/read"]
+pythonpath = ["src", "tests", "tests/core", "tests/ingest", "tests/verify", "tests/read", "tests/analysis"]
 # A misspelt marker is an error, not a test that nobody selects. Which file gets which marker is
 # decided once, in tests/conftest.py; docs/BUILDING.md says how to select them.
 addopts = "--strict-markers"
@@ -77,7 +77,7 @@ markers = [
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests", "tests/core", "tests/ingest", "tests/verify", "tests/read"]
+src = ["src", "tests", "tests/core", "tests/ingest", "tests/verify", "tests/read", "tests/analysis"]
 # The scripts under docs/design are the record of a design exercise: they made the prototype
 # pages that sit beside them and are kept as they were written, not maintained as project code.
 # Holding them to these rules stopped a release at the lint gate with 91 findings in three files.

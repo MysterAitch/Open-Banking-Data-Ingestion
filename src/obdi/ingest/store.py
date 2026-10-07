@@ -29,6 +29,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import ClassVar
 
+from ..analysis.entities import OWNER_ROLE, Entity, EntityRefused
 from ..core.errors import DataError
 from ..core.models import (
     BASIS_FOLD,
@@ -47,7 +48,6 @@ from ..core.namespaces import (
     stored_provenance_rank,
 )
 from ..core.plural import plural
-from ..entities import OWNER_ROLE, Entity, EntityRefused
 from .accounts import (
     AccountId,
     AccountRecord,

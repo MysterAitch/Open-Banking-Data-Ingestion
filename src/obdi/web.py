@@ -42,7 +42,7 @@ from secrets import token_urlsafe
 from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
-from . import entity_actions, values_sitting
+from . import values_sitting
 from .actual_audit import (
     NAMED_DIFFERENCES as _AUDIT_NAMED_DIFFERENCES,
 )
@@ -57,6 +57,9 @@ from .actual_audit import (
 )
 from .actual_push import NothingQueued, valid_progress
 from .actual_verdict import APPLIER_STALE_SECONDS
+from .analysis import entity_actions
+from .analysis.entities import EntitiesView
+from .analysis.recurring import RecurringFindings
 from .callback import render_page
 from .core.classification import redact_summary
 from .core.errors import DataError
@@ -79,7 +82,6 @@ from .core.page_words import (
 from .core.plural import plural, word
 from .core.secrets import SecretError, read_secret
 from .core.timings import Timings
-from .entities import EntitiesView
 from .ingest.accounts import AccountRecord, ArchiveOutcome
 from .ingest.asked_coverage import Hole, describe_spans
 from .ingest.attended_fetch import PRESS_KIND, PressRefused
@@ -105,7 +107,6 @@ from .read.known_accounts import DeclareOutcome, KnownAccounts, ParentOutcome, P
 from .read.ledger import LedgerData
 from .read.overview import Overview
 from .read.position import Position
-from .recurring import RecurringFindings
 from .statement_listing_page import statement_listing_html
 from .verify.coverage import DoubtReport, SourceCoverage
 from .verify.period_reconciliation import PeriodReport

@@ -20,12 +20,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
-from .callback import render_page
-from .core.logs import say
-from .core.masking import mask_text
-from .core.money import format_amount
-from .core.plural import agree, plural
-from .entities import (
+from .analysis.entities import (
     COVERED_SHOWN,
     OPENING_WORDS,
     OWNER_NAME,
@@ -38,6 +33,11 @@ from .entities import (
     Proposal,
     Suggestion,
 )
+from .callback import render_page
+from .core.logs import say
+from .core.masking import mask_text
+from .core.money import format_amount
+from .core.plural import agree, plural
 from .navigation import page_name
 from .read.account_names import AccountShown
 from .web_recurring import values_mode

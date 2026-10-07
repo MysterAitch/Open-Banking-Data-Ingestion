@@ -10,11 +10,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from .core.plural import plural
+from ..core.plural import plural
 from .entities import OWNER_NAME, EntityRefused
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
-    from .ingest.store import Store
+    from ..ingest.store import Store
 
 MERGE = "merge"
 SPLIT = "split"

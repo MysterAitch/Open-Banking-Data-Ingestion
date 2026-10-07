@@ -24,12 +24,12 @@ from datetime import date
 import httpx
 import pytest
 
+from obdi.analysis.entities import shape_of
+from obdi.analysis.recurring import find_recurring
 from obdi.cli import build_web_config
 from obdi.core.models import SourceTier, Transaction
-from obdi.entities import shape_of
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
-from obdi.recurring import find_recurring
 from page_dom import elements, parse
 from section_harness import environment, serve_config
 

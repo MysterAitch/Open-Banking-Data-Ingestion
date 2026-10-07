@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from obdi.categorise import (
+from obdi.analysis.categorise import (
     apply_rules,
     propagation_proposals,
     uncategorised_summary,

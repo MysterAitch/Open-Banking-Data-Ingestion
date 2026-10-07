@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from obdi.categorise import explain, uncategorised_summary
+from obdi.analysis.categorise import explain, uncategorised_summary
 from obdi.core.models import SourceTier, Transaction
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.store import Store

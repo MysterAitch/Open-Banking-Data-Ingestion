@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from obdi.entities import Covered, EntitiesView, Entity, view_of
+from obdi.analysis.entities import Covered, EntitiesView, Entity, view_of
 from obdi.ingest.connections import ConnectionStore
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 

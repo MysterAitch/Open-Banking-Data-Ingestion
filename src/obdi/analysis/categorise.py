@@ -16,9 +16,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .core.models import Transaction
-from .core.plural import plural
-from .ingest.store import Store
+from ..core.models import Transaction
+from ..core.plural import plural
+from ..ingest.store import Store
 
 
 def load_rules(path: Path) -> dict[str, list[dict[str, str]]]:
@@ -528,7 +528,7 @@ class Explanation:
         return ""
 
     def describe(self) -> str:
-        from .core.money import format_amount
+        from ..core.money import format_amount
 
         if not self.count:
             return f"no transaction matches '{self.needle}'"

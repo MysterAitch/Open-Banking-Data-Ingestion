@@ -22,6 +22,7 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
 from . import values_sitting
+from .analysis.recurring import HABIT, PULLED, SCHEDULED, RecurringFindings, Series
 from .callback import render_page
 from .core.logs import say
 from .core.masking import MASKED_TOTAL, mask_text
@@ -30,7 +31,6 @@ from .core.plural import plural
 from .navigation import page_name
 from .read.account_names import AccountsShown
 from .read.ledger import Money
-from .recurring import HABIT, PULLED, SCHEDULED, RecurringFindings, Series
 from .web_accounts import submit_button
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone

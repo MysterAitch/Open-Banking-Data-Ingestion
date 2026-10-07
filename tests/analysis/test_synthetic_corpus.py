@@ -333,7 +333,7 @@ class TestThePatternFeaturesAgainstKnownAnswers:
         subscription, and one too aggressive quietly files a supermarket and a
         train fare under the same label.
         """
-        from obdi.categorise import uncategorised_summary
+        from obdi.analysis.categorise import uncategorised_summary
 
         directory, world, _ = corpus
         store_path = tmp_path / "store.sqlite3"

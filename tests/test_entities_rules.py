@@ -34,10 +34,10 @@ from typing import ClassVar
 
 import pytest
 
-from obdi import entities, payment_methods
+from obdi.analysis import entities, payment_methods
+from obdi.analysis.entities import BANK_NAMES, count_shapes, propose_groups, shape_of, view_of
+from obdi.analysis.recurring import _TYPE_WORDS, find_recurring
 from obdi.core.models import SourceTier, Transaction
-from obdi.entities import BANK_NAMES, count_shapes, propose_groups, shape_of, view_of
-from obdi.recurring import _TYPE_WORDS, find_recurring
 from obdi.web_entities import render_entities
 
 

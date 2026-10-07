@@ -68,9 +68,9 @@ from datetime import date, timedelta
 from itertools import pairwise
 from statistics import median_low
 
-from .core.models import Transaction, TransactionStatus
+from ..core.models import Transaction, TransactionStatus
+from ..ingest.stated_words import words_in
 from .entities import shape_of
-from .ingest.stated_words import words_in
 from .payment_methods import METHODS
 
 #: Fewest occurrences that make a series. Two is a coincidence of a payee and a gap.

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from obdi.categorise import apply_to_group, group_members
+from obdi.analysis.categorise import apply_to_group, group_members
 from obdi.core.models import SourceTier, Transaction
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.store import Store
@@ -122,7 +122,7 @@ class TestApplyingToAWholeGroup:
     def test_WhatIsConfirmedHere_OutranksALaterRuleSweep(self, tmp_path):
         # The point of writing at human rank: a rules file edit cannot
         # silently change an answer a person gave.
-        from obdi.categorise import apply_rules
+        from obdi.analysis.categorise import apply_rules
 
         with Store(tmp_path / "s.sqlite3") as store:
             _seed(store)

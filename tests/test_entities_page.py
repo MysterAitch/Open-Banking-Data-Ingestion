@@ -22,8 +22,8 @@ import httpx
 import pytest
 
 from obdi import values_sitting
+from obdi.analysis.entities import EntitiesView, view_of
 from obdi.cli import build_web_config
-from obdi.entities import EntitiesView, view_of
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from obdi.web_entities import render_entities
@@ -483,7 +483,7 @@ class TestThePaymentsBetweenYourOwnAccounts:
 class TestWhatAFirstMergeTeaches:
     @pytest.fixture
     def taught(self, world, monkeypatch):
-        from obdi import entities
+        from obdi.analysis import entities
 
         monkeypatch.setattr(entities, "COMMON_TOKENS", 0)
         base, db = world

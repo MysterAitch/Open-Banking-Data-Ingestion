@@ -25,6 +25,8 @@ from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 
 from .actual_push import ACTUAL_NOT_CONFIGURED, ENVELOPE_VERSION, NothingQueued
+from .analysis.entities import EntitiesView
+from .analysis.recurring import RecurringFindings
 from .core.errors import DataError
 from .core.money import parse_amount
 from .core.namespaces import UNASSIGNED_ACCOUNT
@@ -32,7 +34,6 @@ from .core.outbound import install_if_requested as install_outbound_refusal_if_r
 from .core.page_times import instant_of
 from .core.plural import agree, plural
 from .core.secrets import SecretError, read_secret, truelayer_readiness
-from .entities import EntitiesView
 from .ingest import fingerprint
 from .ingest.accounts import (
     AccountBinding,
@@ -100,7 +101,6 @@ from .read.ledger import Ledger, LedgerWindow
 from .read.overview import Overview, OverviewCache, build_overview
 from .read.position import Position
 from .read.scheduler_status import StepHandle, run_step
-from .recurring import RecurringFindings
 from .replay import (
     ActualAccountBinding,
     build_opening_entries,
@@ -2916,7 +2916,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
     def categorise_overview() -> dict[str, object]:
         """The worklist as data, with each group's evidence attached."""
-        from .categorise import uncategorised_summary
+        from .analysis.categorise import uncategorised_summary
 
         with Store(db_path) as store:
             worklist = uncategorised_summary(store, limit=30)
@@ -2941,13 +2941,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         }
 
     def categorise_defer(label: str) -> int:
-        from .categorise import defer_group
+        from .analysis.categorise import defer_group
 
         with Store(db_path) as store:
             return defer_group(store, label)
 
     def categorise_apply(label: str, value: str, kind: str) -> int:
-        from .categorise import apply_to_group
+        from .analysis.categorise import apply_to_group
 
         with Store(db_path) as store:
             return apply_to_group(store, label, value, kind=kind or "category")
@@ -3866,9 +3866,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def recurring_data() -> RecurringFindings:
         """What recurs across every account's held transactions, judged against today on the
         owner's clock - two whole-table reads, whatever the store's size."""
+        from .analysis.recurring import find_recurring
         from .core.page_times import local_day
         from .ingest.statement_terms import statement_balances
-        from .recurring import find_recurring
 
         with Store(db_path) as store:
             transactions = store.all_transactions()
@@ -3884,8 +3884,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return RecurringFindings(found, today)
 
     def _shape_counts(store: Store) -> dict[str, int]:
-        from .entities import count_shapes
-        from .recurring import counts_as_occurrence
+        from .analysis.entities import count_shapes
+        from .analysis.recurring import counts_as_occurrence
 
         return count_shapes(
             t.description for t in store.all_transactions() if counts_as_occurrence(t)
@@ -3894,7 +3894,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
     def entities_data() -> EntitiesView:
         """Every payee name held across every account with its transactions, and the entities
         made from them - one whole-table read of the transactions, whatever the store's size."""
-        from .entities import (
+        from .analysis.entities import (
             COVERED_SHOWN,
             Covered,
             count_row_legs,
@@ -3903,8 +3903,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             shape_of,
             view_of,
         )
+        from .analysis.recurring import counts_as_occurrence
         from .read.ledger import row_anchor
-        from .recurring import counts_as_occurrence
 
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
@@ -3935,7 +3935,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
-        from .entity_actions import MERGE, OWN, apply_action
+        from .analysis.entity_actions import MERGE, OWN, apply_action
 
         with Store(db_path) as store:
             known = _shape_counts(store) if action in (MERGE, OWN) else {}
@@ -5901,7 +5901,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "push-actual":
         return run_step(db_path, "push-actual", lambda step: _push_actual(db_path, step))
     if args.command == "categorise":
-        from .categorise import apply_rules, load_rules, uncategorised_summary
+        from .analysis.categorise import apply_rules, load_rules, uncategorised_summary
 
         rules_path = args.rules or Path(
             os.getenv("OBDI_RULES", "").strip() or Path(db_path).with_name("rules.json")
@@ -5978,14 +5978,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if shape.readable else 1
 
     if args.command == "explain":
-        from .categorise import explain
+        from .analysis.categorise import explain
 
         with Store(db_path) as store:
             print(explain(store, args.needle).describe())
         return 0
 
     if args.command == "propagate":
-        from .categorise import (
+        from .analysis.categorise import (
             PROPAGATION_AMOUNT_TOLERANCE,
             apply_propagation,
             propagation_proposals,
