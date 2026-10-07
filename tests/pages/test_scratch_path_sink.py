@@ -38,7 +38,7 @@ REPO = Path(__file__).resolve().parent.parent.parent
 PROBE_HEADER = """\
 from pathlib import Path
 
-from obdi.web import _in_scratch, _scratch_name
+from obdi.pages.web import _in_scratch, _scratch_name
 """
 
 

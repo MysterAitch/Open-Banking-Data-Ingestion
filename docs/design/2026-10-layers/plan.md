@@ -1,5 +1,17 @@
 # Layers: a measured plan for splitting `src/obdi`
 
+**Done (2026-10-07, 0.4.363):** the seven steps below were run by `move.py` from `mapping.toml`
+on the 0.4.362 tree, each judged by `check.py` and committed on its own; every one of the 590
+pages over 41 routes was byte-identical to the baseline afterwards, and the whole suite passed
+on the moved tree with the same tests apart from those the move was expected to break (the
+markers guard, which globbed the old flat directory, and the import-direction guard's expected
+failures, which it was time to remove). One upward import was found that the plan's twenty did
+not have, added by the Entities page between the measurement and the move (`ingest.store`
+importing the `Entity` record from `analysis.entities`); it is the twenty-first line of
+`ALLOWED_UPWARD`, with its smallest fix beside it. The marker table was replaced by the
+directory rule as planned. What remains of the plan is the removal of the twenty-one, each in
+its own commit, starting with the settle-after-landing group under cure A.
+
 The owner's ask (2026-10-07): an architectural review that allows a good separation of data
 ingestion, reporting (the web pages), analysis (learning and local models), exports to Actual,
 and so on, so that a change touching one part runs only that part's test suites. `src/obdi` is a

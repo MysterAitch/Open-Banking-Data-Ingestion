@@ -63,6 +63,11 @@ ALLOWED_UPWARD: frozenset[tuple[str, str]] = frozenset(
         ("ingest.typed_transactions", "verify.protection"),
         ("ingest.typed_transactions", "verify.review_settlement"),
         ("verify.protection", "read.ledger"),
+        # Added after the plan's twenty were measured (the Entities page, 0.4.359 to 0.4.361):
+        # the store's entity methods return the `Entity` record and raise `EntityRefused`, both
+        # defined beside the grouping rules. Removed by moving the record, the refusal, and
+        # `OWNER_ROLE` down to ingest beside the store; the rules then import them from there.
+        ("ingest.store", "analysis.entities"),
     }
 )
 
@@ -431,18 +436,16 @@ class TestTheAllowedListCanOnlyShrink:
         for importer, target in ALLOWED_UPWARD:
             assert RANK[importer.split(".")[0]] < RANK[target.split(".")[0]], (importer, target)
 
-    def test_AllowedList_Itself_IsTheTwentyTheSplitStartedWith(self):
-        assert len(ALLOWED_UPWARD) == 20
+    def test_AllowedList_Itself_IsTheTwentyTheSplitStartedWithAndTheOneAddedBeforeIt(self):
+        # The plan measured twenty; the Entities page added one (the store importing the entity
+        # record) between the measurement and the move. The number only goes down from here.
+        assert len(ALLOWED_UPWARD) == 21
 
 
 class TestOverTheRealTree:
     def test_ImportDirection_OverTheRealTree_FindsMoreThanTwoHundredModules(self):
         assert len(source_tree()) >= MINIMUM_MODULES
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the packages do not exist yet; becomes strict in the move's last step",
-    )
     def test_ImportDirection_OverTheRealTree_NoModuleImportsAHigherLayer(self):
         sources = source_tree()
 
@@ -450,9 +453,5 @@ class TestOverTheRealTree:
 
         assert found == [], "\n" + "\n".join(found)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="the packages do not exist yet; becomes strict in the move's last step",
-    )
     def test_ImportDirection_OverTheRealTree_EveryAllowedImportStillOccurs(self):
         assert stale_allowances(source_tree(), ALLOWED_UPWARD) == []

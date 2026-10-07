@@ -62,15 +62,19 @@ packages = ["src/obdi"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests", "tests/core", "tests/ingest", "tests/verify", "tests/read", "tests/analysis", "tests/export", "tests/cli", "tests/pages"]
-# A misspelt marker is an error, not a test that nobody selects. Which file gets which marker is
-# decided once, in tests/conftest.py; docs/BUILDING.md says how to select them.
+# A misspelt marker is an error, not a test that nobody selects. A test file's layer marker is
+# the name of the directory it lives in under tests/, applied once in tests/conftest.py, and
+# the directories mirror the packages of src/obdi; docs/BUILDING.md says how to select them.
 addopts = "--strict-markers"
 markers = [
-    "ingest: providers, parsers, store, rebuild, extraction, matching, ingest",
+    "core: records, money, masking, logs, errors, the clock, and the shared page vocabulary",
+    "ingest: providers, parsers, the store, rebuild, extraction, matching, identity",
     "verify: agreement, standing, trust, coverage, statements, spans, protection, balances",
-    "analysis: recurring series and what the commitments phase will add",
-    "pages: every web module's tests, navigation, stylesheet, layout and scale, page wording",
-    "export: Actual, YNAB, push, audit",
+    "read: the read models the pages show - ledger, overview, position, to-do, charts, timelines",
+    "analysis: the recurring detector, categorisation, entities, and what the commitments phase adds",
+    "export: Actual, the push, audit, verdict, replay, and the declared-layer export",
+    "pages: every web page, navigation, stylesheets, layout and scale, page wording",
+    "cli: tests that drive the command line and so reach every layer",
     "guards: cross-cutting tests every change must pass, whatever layer it touched",
     "slow: builds the large stores; leave out of a quick pass with -m 'not slow'",
 ]

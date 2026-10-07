@@ -1054,9 +1054,9 @@ class TestTheResultRow:
         base = serve(
             [],
             empty_actual=Calls(),
-            actual_queue=lambda: __import__("obdi.export.actual_push", fromlist=["x"]).queued_requests(
-                actual_dir
-            ),
+            actual_queue=lambda: __import__(
+                "obdi.export.actual_push", fromlist=["x"]
+            ).queued_requests(actual_dir),
         )
 
         page = page_of(base)

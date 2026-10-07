@@ -85,24 +85,29 @@ commit.
 ## Which tests to run
 
 The suite is over ten thousand tests and takes a quarter of an hour, so a builder runs the layer
-the change touched plus the guards, and the whole suite runs once, at the CI gate. A test file
-belongs to the layer of the module it tests; the one table that places every file, and names the
-guards and the slow tests, is at the top of `tests/conftest.py`. A new test file must be added
-there or collection refuses it.
+the change touched plus the guards, and the whole suite runs once, at the CI gate. `src/obdi` is
+split into packages in one direction (`core <- ingest <- verify <- read <- analysis <- export <-
+pages`, with `cli.py` the composition root above all; `docs/design/2026-10-layers/` is the
+record, and `tests/test_import_direction.py` refuses an import the wrong way), and the tests
+mirror them: a test file lives in `tests/<package>/` for the highest package it exercises, or
+`tests/cli/` when it drives the command line, and its layer marker is that directory's name
+(`tests/conftest.py` applies it; a file outside every layer directory is refused at
+collection). The guards and the slow tests are named by file at the top of `tests/conftest.py`.
 
-- Layers: `ingest` (providers, parsers, store, rebuild, extraction, matching), `verify`
-  (agreement, standing, trust, coverage, statements, spans, protection, balances), `analysis`
-  (recurring), `pages` (the web modules, navigation, stylesheet, layout, page wording), `export`
-  (Actual, push, audit).
+- Layers, lowest first: `core`, `ingest`, `verify`, `read`, `analysis`, `export`, `pages`, and
+  `cli`. A change in one layer can break the tests of every layer above it, since the pages'
+  tests serve real pages over real stores; a change in `core` runs everything.
 - `guards` are the cross-cutting tests that enforce a house rule across the tree (no stored value
   on a GET, navigation, hardening, page wording, speed budgets, account names, fixture write
   doors, the parser contract, the stylesheet as served). Every change passes them whatever layer
   it touched.
 - `slow` marks the tests that build the large stores.
 - A change in one layer runs that layer plus guards:
-  `python -m pytest -n 4 -m "ingest or guards"` (likewise `"verify or guards"`,
-  `"analysis or guards"`, `"pages or guards"`, `"export or guards"`). A change across layers
-  names each: `-m "ingest or pages or guards"`.
+  `python -m pytest -n 4 -m "analysis or guards"` (likewise `"read or guards"`,
+  `"pages or guards"`, and so on). A change across layers names each:
+  `-m "ingest or pages or guards"`. The `cli` tests reach every layer, so a change low down
+  (`core`, `ingest`) adds `cli` to the expression before the gate rather than discovering it
+  there.
 - `-m "not slow"` is the quick local pass over everything; `-m "guards and not slow"` is the
   quickest check that nothing across the tree broke.
 - The whole suite (no `-m`) is for the CI gate and for whoever merges.
