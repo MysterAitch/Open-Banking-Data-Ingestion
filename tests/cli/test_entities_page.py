@@ -407,83 +407,46 @@ def transfer_world(tmp_path, monkeypatch):
     stop()
 
 
-class TestThePaymentsBetweenYourOwnAccounts:
-    def test_EntitiesPage_WhenFetched_CountsTheOwnersNamesAndNamesNobody(self, transfer_world):
+class TestTransfersBetweenYourOwnAccounts:
+    """A transfer between the household's own accounts is a transfer: its other party is an
+    ACCOUNT, named "your <account>" and never from the text on the row. The 0.4.361 group that
+    attached the legs' shapes to an owner entity by name is withdrawn (entities.md 3a)."""
+
+    def test_EntitiesPage_WhenFetched_NamesNobodyAndOffersNoOwnerGroup(self, transfer_world):
         base, _db = transfer_world
 
         page = httpx.get(f"{base}/entities", timeout=60).text
 
-        assert "Payments between your own accounts" in page
-        assert "4 transactions across 2 names; 4 of them are the two sides" in page
+        assert "Payments between your own accounts" not in page
         assert "savings" not in page.casefold()
+        assert summary_of(page) == (
+            "3 payee names across every account; 0 names gathered into 0 entities. "
+            "Names: 2 from the other party's account number; 1 from the bank's merchant name. "
+            "No group of names looks like one payee."
+        )
 
-    def test_EntitiesPage_WhenValuesAreShown_OffersTheOwnerGroupBeforeAnyPayeeGroup(
+    def test_EntitiesPage_WhenValuesAreShown_NamesTheLegsByTheAccountTheyWentTo(
         self, transfer_world
     ):
         base, _db = transfer_world
 
         page = shown(base)
-
-        assert page.index("Payments between your own accounts") < page.index("Gather names")
-        (form,) = [
-            f for f in elements(parse(page), "form") if f.attrs.get("action") == "/entities-own"
+        names = [
+            n.text().strip()
+            for n in elements(parse(page), "span")
+            if "txt" in n.classes and n.text().strip()
         ]
-        ticked = [i.attrs["value"] for i in elements(form, "input")
-                  if i.attrs.get("type") == "checkbox" and "checked" in i.attrs]
-        assert sorted(ticked) == ["from current", "transfer to savings"]
-        name = next(i for i in elements(form, "input") if i.attrs.get("name") == "name")
-        assert name.attrs["value"] == "Me"
 
-    def test_Own_WhenPressed_MakesTheOwnerEntityAndOffersNothingFurther(self, transfer_world):
-        base, db = transfer_world
+        assert "your savings-pot" in names and "your current-main" in names
+        assert "transfer to savings" not in page.casefold()
+        assert "from current" not in page.casefold()
+        actions = {f.attrs.get("action") for f in elements(parse(page), "form")}
+        assert "/entities-own" not in actions
 
-        response = press(
-            base, "/entities-own", name="Me", shape=["transfer to savings", "from current"]
-        )
-
-        assert outcome_of(response.text) == (
-            "Made Me for payments between your own accounts, holding 2 names."
-        )
-        assert "Payments between your own accounts" not in response.text
-        with Store(db) as store:
-            assert store.owner_entity() is not None
-            (entity,) = store.entities_with_shapes()
-        assert entity.role == "owner"
-
-    def test_Own_WhenAShapeIsLeftUnticked_TheOwnerKeepsOnlyTheOthersAndTheRestIsStillOffered(
-        self, transfer_world
-    ):
+    def test_Own_WhenPressedByAnOldPage_IsNotARoute(self, transfer_world):
         base, _db = transfer_world
 
-        response = press(base, "/entities-own", name="Me", shape=["from current"])
-
-        assert "Payments between your own accounts" in response.text
-        assert "Add to Me" in response.text
-
-    def test_Own_WhenAShapeIsNotInTheTransactions_IsRefusedAndNothingIsMade(self, transfer_world):
-        base, db = transfer_world
-
-        response = press(base, "/entities-own", name="Me", shape=["a name nobody prints"])
-
-        assert response.status_code == 400
-        with Store(db) as store:
-            assert store.owner_entity() is None
-
-    def test_Own_WhenNoShapeIsTicked_IsRefused(self, transfer_world):
-        base, _db = transfer_world
-
-        assert press(base, "/entities-own", name="Me").status_code == 400
-
-    def test_Own_WhenTheOwnerWasRenamed_AddsToItUnderItsNewName(self, transfer_world):
-        base, db = transfer_world
-        press(base, "/entities-own", name="Me", shape=["from current"])
-        with Store(db) as store:
-            (entity,) = store.entities_with_shapes()
-        press(base, "/entities-rename", entity=entity.id, name="Roger")
-
-        response = press(base, "/entities-own", shape=["transfer to savings"])
-
-        assert outcome_of(response.text) == "1 name added to Roger."
+        assert press(base, "/entities-own", name="Me", shape=["from current"]).status_code == 404
 
     def test_EntitiesPage_WhenThereAreNoTransfers_OffersNoOwnerGroup(self, served):
         assert "Payments between your own accounts" not in shown(served)

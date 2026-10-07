@@ -146,7 +146,6 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/entities-split": "more",
     "/entities-rename": "more",
     "/entities-fold": "more",
-    "/entities-own": "more",
     "/entities-child": "more",
     "/entities-new": "more",
     "/entity": "more",

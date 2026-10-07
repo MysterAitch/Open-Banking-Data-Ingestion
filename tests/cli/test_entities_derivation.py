@@ -61,7 +61,7 @@ def _view(*printed: str):
     }
     # The names sit under an entity, where each is listed with the fold of its transactions.
     held = Entity(1, "Held", None, tuple(sorted(counts)))
-    return view_of(counts, [held], None, covers)
+    return view_of(counts, [held], covers)
 
 
 def _fold_for(page: str, name: str):

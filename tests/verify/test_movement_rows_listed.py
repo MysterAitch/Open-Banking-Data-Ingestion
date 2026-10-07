@@ -186,7 +186,8 @@ class TestARowListedIsHeldOnce:
         first, _second = export_sightings(store, -350, 3)
         store.connection.execute(
             "INSERT INTO transactions SELECT 'extra-twin', account_id, amount_minor, currency, "
-            "value_date, booking_date, description, counterparty, status, source, tier, "
+            "value_date, booking_date, description, counterparty, party_account, "
+            "party_source_id, status, source, tier, "
             "NULL, content_key, 9, artefact_digest, is_internal_transfer, match_tier, "
             "matched_entity_id, raw, first_seen_at, last_seen_at "
             "FROM transactions WHERE entity_id = ?",

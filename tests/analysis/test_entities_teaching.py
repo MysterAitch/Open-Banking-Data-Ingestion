@@ -150,15 +150,6 @@ class TestWhereAFreeNameIsOffered:
 
         assert view_of(counts, [owner]).suggestions == ()
 
-    def test_Suggestion_WhenTheNameIsTheOwnersLegs_IsNotOfferedUnderAPayeeEither(self):
-        entity = held("Savings Club", "savings club")
-        counts = {"savings club": 3, "transfer to savings": 4}
-
-        view = view_of(counts, [entity], {"transfer to savings": 4})
-
-        assert view.suggestions == ()
-        assert view.owner is not None
-
     def test_Suggestion_WhenTheNameIsAlreadyUnderAnotherEntity_IsNotOffered(self):
         first = held("Fernhollow", "fernhollow grocers", ident=1)
         second = held("Marketplace", "fernhollow marketplace", ident=2)

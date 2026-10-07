@@ -48,7 +48,7 @@ from obdi.analysis.entities import (
     resolve_form_value,
     shape_entities,
 )
-from obdi.analysis.entity_actions import MERGE, OWN, SPLIT, apply_action
+from obdi.analysis.entity_actions import MERGE, SPLIT, apply_action
 from obdi.analysis.recurring import find_recurring
 from obdi.core.models import SourceTier, Transaction
 from obdi.ingest.entity_records import (
@@ -171,11 +171,6 @@ class TestAMergeAttachesTheIdentifierTheRowsNameResolvedTo:
             (STATED_NAME, PARTY),
             (DESCRIPTION, "zephyr water board"),
         }
-
-    def test_Own_AttachesTheKindEachNameCarries(self, store):
-        press(store, water_rows(), OWN, {"name": ["Me"], "shape": ["zephyr water board"]})
-
-        assert store.entities_with_shapes()[0].identifiers[0].kind == DESCRIPTION
 
     def test_Merge_WithNoOriginsGiven_AttachesADescriptionShapeAndNothingStronger(self, store):
         apply_action(store, {"x": 1}, MERGE, {"name": ["X"], "shape": ["x"]})

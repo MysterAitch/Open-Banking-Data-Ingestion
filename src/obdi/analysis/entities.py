@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import TYPE_CHECKING, NamedTuple, TypeVar
 
+from ..core.models import Transaction
 from ..core.plural import plural
 from ..ingest.entity_records import (
     ACCOUNT,
@@ -510,6 +511,7 @@ def name_of(
     *,
     account: str = "",
     source_id: str = "",
+    held: str = "",
 ) -> Named:
     """What a row is called: the strongest rung of `LADDER` it carries - the other party's
     account, a source's identifier for it, the counterparty name it states - else the identifier
@@ -524,7 +526,13 @@ def name_of(
     payee two names by source and split its series into a stopped half and a new half (measured
     on the first real store). The alias is the join: a payment seen by a feed and a statement is
     one held row carrying the feed's counterparty (`learned_links`).
+
+    `held` is the account of the household's own that the row's other side is (`held_counterparts`):
+    a transfer between the household's accounts is a transfer, its other party an ACCOUNT named by
+    that account and never by a name printed on the row.
     """
+    if held:
+        return Named(HELD_PREFIX + held, ACCOUNT)
     for kind, text in ((ACCOUNT, account), (SOURCE_ID, source_id), (STATED_NAME, counterparty)):
         stated = _identifier_name(kind, text)
         if stated:
@@ -546,10 +554,19 @@ class Fields(NamedTuple):
     counterparty: str = ""
     account: str = ""
     source_id: str = ""
+    #: The household account the row's other side is, where it is a transfer between its own.
+    held: str = ""
+
+
+#: Begins the key of a party that is one of the household's own accounts; the rest is the
+#: account's name. Its label is "your <account's label>" (`display_names`).
+HELD_PREFIX = "held:"
 
 
 def _strong_name(row: Fields) -> Named | None:
     """The row named by its account or source id, or None where it states neither."""
+    if row.held:
+        return Named(HELD_PREFIX + row.held, ACCOUNT)
     for kind, text in ((ACCOUNT, row.account), (SOURCE_ID, row.source_id)):
         stated = _identifier_name(kind, text)
         if stated:
@@ -721,13 +738,90 @@ def names_of(rows: Sequence[Fields | tuple[str, str]]) -> list[Named]:
     fields = [Fields(*row) for row in rows]
     return [
         name_of(
-            f.description, f.counterparty, links, account=f.account, source_id=f.source_id
+            f.description,
+            f.counterparty,
+            links,
+            account=f.account,
+            source_id=f.source_id,
+            held=f.held,
         )
         for f in fields
     ]
 
 
-def display_names(rows: Sequence[Fields], named: Sequence[Named]) -> dict[str, str]:
+def held_counterparts(rows: Sequence[Transaction], pairs: Iterable[tuple[str, str]]) -> list[str]:
+    """For each row, the household account its other side is, or "" where it is not a transfer
+    between the household's own accounts.
+
+    Two kinds of evidence, both already held: the confirmed transfer pair the row is a leg of (its
+    other side is the opposite leg's account), and the account identifier the row states
+    (`Transaction.party_account`) where the pairs show that identifier to be one of the
+    household's accounts - a leg that states it is the other account's, so every row that states
+    the same identifier is a transfer to that account, paired or not. An identifier the pairs
+    show leading to two accounts is ambiguous and counts as neither, and a row is never its own
+    account's counterpart.
+
+    The household's own accounts' sort codes and numbers are not held anywhere (`ingest.identifiers`
+    reads them from landed account payloads and keeps nothing), so an identifier is learned only
+    from a pair that has been confirmed; a transfer to an account of the household that has no
+    confirmed leg and states an identifier no pair states is not known to be one.
+    """
+    by_id = {row.entity_id: row for row in rows if row.entity_id}
+    other: dict[str, str] = {}
+    leading: dict[str, set[str]] = {}
+    for leaving, arriving in pairs:
+        first, second = by_id.get(leaving), by_id.get(arriving)
+        if first is None or second is None or first.account_id == second.account_id:
+            continue
+        other[leaving], other[arriving] = second.account_id, first.account_id
+        if first.party_account:
+            leading.setdefault(first.party_account, set()).add(second.account_id)
+        if second.party_account:
+            leading.setdefault(second.party_account, set()).add(first.account_id)
+    known = {
+        identifier: next(iter(found)) for identifier, found in leading.items() if len(found) == 1
+    }
+    result = []
+    for row in rows:
+        found = other.get(row.entity_id) or known.get(row.party_account, "")
+        result.append("" if found == row.account_id else found)
+    return result
+
+
+def name_rows(
+    rows: Sequence[Transaction],
+    pairs: Iterable[tuple[str, str]] = (),
+    links: Mapping[str, Alias] | None = None,
+) -> tuple[list[Fields], Mapping[str, Alias], list[Named]]:
+    """What each held row states about its other party, the links learned from all of them, and
+    the name of each: the one place a row becomes a name, so the Entities page and the detector
+    cannot disagree. `pairs` is the pairing pass's (leaving, arriving) entity for each proved
+    transfer (`held_counterparts`); `links` is given where the caller has them already."""
+    held = held_counterparts(rows, pairs)
+    fields = [
+        Fields(r.description, r.counterparty, r.party_account, r.party_source_id, account)
+        for r, account in zip(rows, held, strict=True)
+    ]
+    learned = learned_links(fields) if links is None else links
+    named = [
+        name_of(
+            f.description,
+            f.counterparty,
+            learned,
+            account=f.account,
+            source_id=f.source_id,
+            held=f.held,
+        )
+        for f in fields
+    ]
+    return fields, learned, named
+
+
+def display_names(
+    rows: Sequence[Fields],
+    named: Sequence[Named],
+    held_labels: Mapping[str, str] | None = None,
+) -> dict[str, str]:
     """For each name that is an identifier (an account, a source's id), the readable name its
     rows are SHOWN under: the counterparty name most of them state, else the shape of the
     description most of them print, else `UNNAMED_PARTY`. Never the identifier itself.
@@ -735,11 +829,21 @@ def display_names(rows: Sequence[Fields], named: Sequence[Named]) -> dict[str, s
     Most common first, then alphabetical, so the answer does not depend on the order of the rows.
     A party's identity is its identifier; this is only what it is called to a reader, and two
     parties may be called alike (two people who share a stated name), which is why identity does
-    not rest on it."""
+    not rest on it.
+
+    A household account is called "your <label>", the label from `held_labels` (an account's
+    name to the label pages show for it; the account's own name where none is given) - never the
+    account's number, and never a name printed on the transfer's rows."""
     stated: dict[str, Counter[str]] = {}
     described: dict[str, Counter[str]] = {}
+    held = {
+        item.name: "your " + ((held_labels or {}).get(account) or account)
+        for item in named
+        if item.name.startswith(HELD_PREFIX)
+        for account in [item.name[len(HELD_PREFIX) :]]
+    }
     for row, item in zip(rows, named, strict=True):
-        if item.kind not in (ACCOUNT, SOURCE_ID) or not item.name:
+        if item.kind not in (ACCOUNT, SOURCE_ID) or not item.name or item.name in held:
             continue
         stated.setdefault(item.name, Counter())
         described.setdefault(item.name, Counter())
@@ -753,27 +857,17 @@ def display_names(rows: Sequence[Fields], named: Sequence[Named]) -> dict[str, s
     def best(counted: Counter[str]) -> str:
         return min(counted, key=lambda text: (-counted[text], text))
 
-    return {
+    labels = {
         key: best(stated[key]) if stated[key] else best(described[key]) if described[key]
         else UNNAMED_PARTY
         for key in stated
     }
+    return {**labels, **held}
 
 
 def count_shapes(descriptions: Iterable[str]) -> dict[str, int]:
     """How many of the descriptions have each shape; descriptions with no shape are not counted."""
     counted = Counter(shape_of(text) for text in descriptions)
-    counted.pop("", None)
-    return dict(counted)
-
-
-def count_row_legs(named: Iterable[tuple[str, bool]]) -> dict[str, int]:
-    """For each name, how many of the (name, is a transfer leg) rows that have it are legs;
-    names with no leg are left out."""
-    counted: Counter[str] = Counter()
-    for name, leg in named:
-        if leg:
-            counted[name] += 1
     counted.pop("", None)
     return dict(counted)
 
@@ -1363,8 +1457,6 @@ class EntitiesView:
     #: The newest `COVERED_SHOWN` transactions of each name, newest first, from the one read of
     #: the transactions the page already makes; `counts` says how many there are in all.
     covers: Mapping[str, tuple[Covered, ...]] = field(default_factory=dict)
-    #: The shapes that are mostly the legs of the owner's own transfers, offered before any payee.
-    owner: OwnerGroup | None = None
     #: Free names that share a distinctive word with an entity, offered under it.
     suggestions: tuple[Suggestion, ...] = ()
     #: How each name's rows came to have it (`name_origins`); empty where the view was made from
@@ -1387,39 +1479,6 @@ class EntitiesView:
         """The shapes under no entity, most-used first."""
         held = {shape for entity in self.entities for shape in entity.shapes}
         return sorted((s for s in self.counts if s not in held), key=lambda s: (-self.counts[s], s))
-
-
-@dataclass(frozen=True)
-class OwnerGroup:
-    """Shapes whose transactions are mostly legs of confirmed transfers between the owner's
-    accounts, so the payee is the owner and not anyone else."""
-
-    #: Most-used first, then alphabetical.
-    shapes: tuple[str, ...]
-    transactions: int
-    #: How many of those transactions are transfer legs.
-    legs: int
-
-
-def owner_group(
-    counts: Mapping[str, int], legs: Mapping[str, int], taken: Collection[str]
-) -> OwnerGroup | None:
-    """The free shapes more than half of whose transactions are transfer legs, or None.
-
-    More than half and not at least half: a shape that is as often a payment to someone as a leg
-    of a transfer is not shown to be the owner's, and the owner is the one to say so.
-    """
-    mine = sorted(
-        (s for s, n in counts.items() if s not in taken and legs.get(s, 0) * 2 > n),
-        key=lambda s: (-counts[s], s),
-    )
-    if not mine:
-        return None
-    return OwnerGroup(
-        shapes=tuple(mine),
-        transactions=sum(counts[s] for s in mine),
-        legs=sum(legs[s] for s in mine),
-    )
 
 
 @dataclass(frozen=True)
@@ -1509,7 +1568,6 @@ def entity_page_of(
 def view_of(
     counts: Mapping[str, int],
     entities: Iterable[Entity],
-    legs: Mapping[str, int] | None = None,
     covers: Mapping[str, tuple[Covered, ...]] | None = None,
     origins: Mapping[str, NameOrigin] | None = None,
     readings: Mapping[str, str] | None = None,
@@ -1521,16 +1579,11 @@ def view_of(
     `readings` is `name_readings`: the text each name is compared on where that is not the name.
     `labels` is `display_names`. A name that is an identifier is an exact link and not text, so
     it is never proposed for a merge by what its label looks like: nothing is asked of the owner
-    about a party the account or the bank's own id already settled.
-
-    `legs` is, for each shape, how many of its transactions are legs of confirmed transfers
-    between the owner's own accounts; the shapes it makes the owner's are set apart before the
-    rules look for payees, so they are never offered as one.
+    about a party the account or the bank's own id already settled. That includes a transfer
+    between the household's own accounts, whose other party is an account (`held_accounts`).
     """
     made = tuple(entities)
-    taken = {shape for entity in made for shape in entity.shapes}
-    owner = owner_group(counts, legs or {}, taken)
-    set_apart = taken | set(owner.shapes if owner else ())
+    set_apart = {shape for entity in made for shape in entity.shapes}
     text_names = {name: n for name, n in counts.items() if not is_identifier_key(name)}
     proposals = propose_groups(text_names, taken=set_apart, readings=readings)
     offered = {s for g in (*proposals.groups, *proposals.too_broad) for s in g.shapes}
@@ -1541,7 +1594,6 @@ def view_of(
         covers=covers or {},
         origins=origins or {},
         labels=labels or {},
-        owner=owner,
         suggestions=suggest_for_entities(text_names, made, set_apart | offered, readings),
     )
 

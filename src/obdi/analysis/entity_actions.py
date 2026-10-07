@@ -11,7 +11,7 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from ..core.plural import plural
-from ..ingest.entity_records import OWNER_NAME, EntityRefused
+from ..ingest.entity_records import EntityRefused
 from .entities import (
     NameOrigin,
     clean_rule,
@@ -31,13 +31,12 @@ MERGE = "merge"
 SPLIT = "split"
 RENAME = "rename"
 FOLD = "fold"
-OWN = "own"
 CHILD = "child"
 KEEP_RULE = "keep-rule"
 DROP_RULE = "drop-rule"
 NEW = "new"
 PARENT = "parent"
-ACTIONS = (MERGE, SPLIT, RENAME, FOLD, OWN, CHILD, KEEP_RULE, DROP_RULE, NEW, PARENT)
+ACTIONS = (MERGE, SPLIT, RENAME, FOLD, CHILD, KEEP_RULE, DROP_RULE, NEW, PARENT)
 
 
 def _one(form: Mapping[str, Sequence[str]], field: str) -> str:
@@ -86,14 +85,6 @@ def apply_action(
         if rule is None:
             return f"{said}."
         return f"{said}; {rule_phrase(*rule)} will join it."
-    if action == OWN:
-        shapes = _names_pressed(form, known)
-        identifiers = [identifier_for(s, held_origins.get(s)) for s in shapes]
-        _entity, kept, made = store.gather_into_owner(identifiers, _one(form, "name") or OWNER_NAME)
-        count = plural(len(set(shapes)), "name")
-        if made:
-            return f"Made {kept} for payments between your own accounts, holding {count}."
-        return f"{count} added to {kept}."
     if action == SPLIT:
         shape = resolve_form_value(_one(form, "shape"), known)
         kind = _one(form, "kind") or None

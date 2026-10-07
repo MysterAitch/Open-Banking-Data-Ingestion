@@ -25,7 +25,7 @@ from urllib.parse import parse_qs, urlparse
 from dotenv import load_dotenv
 
 from .analysis.entities import (
-    Alias,
+    HELD_PREFIX,
     Covered,
     EntitiesView,
     EntityPage,
@@ -33,11 +33,10 @@ from .analysis.entities import (
     NameOrigin,
     RuleTrial,
     display_names,
-    learned_links,
-    name_of,
     name_origins,
+    name_rows,
 )
-from .analysis.recurring import RecurringFindings, row_fields
+from .analysis.recurring import RecurringFindings
 from .core.errors import DataError
 from .core.money import parse_amount
 from .core.namespaces import UNASSIGNED_ACCOUNT
@@ -3905,7 +3904,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             from .analysis.entities import shape_entities
             from .analysis.recurring import counts_as_occurrence
 
-            links, named = _name_rows([t for t in transactions if counts_as_occurrence(t)])
+            occurrences = [t for t in transactions if counts_as_occurrence(t)]
+            _fields, links, named = name_rows(occurrences, pairs)
             held_names = {n: o.rows for n, o in name_origins(named).items()}
             gathered = {
                 key: name for key, (_id, name) in shape_entities(store, held_names).items()
@@ -3915,29 +3915,36 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             owed = (closing.day, closing.balance_minor)
             closings.setdefault(closing.account_ref, []).append(owed)
         today = local_day(datetime.now(UTC))
-        found = find_recurring(transactions, pairs, today, closings, entities=gathered, links=links)
+        found = find_recurring(
+            transactions, pairs, today, closings, entities=gathered, links=links
+        )
         return RecurringFindings(found, today)
 
-    def _name_rows(rows: Sequence[Transaction]) -> tuple[dict[str, Alias], list[Named]]:
-        """The links learned from the rows and the name of each, from the one read of the rows
-        a page already makes: no query per name."""
-        fields = [row_fields(t) for t in rows]
-        links = learned_links(fields)
-        return links, [
-            name_of(f.description, f.counterparty, links, account=f.account, source_id=f.source_id)
-            for f in fields
-        ]
-
-    def _labels(rows: Sequence[Transaction], named: Sequence[Named]) -> dict[str, str]:
-        """The readable name of each name that is an identifier (`display_names`)."""
-        return display_names([row_fields(t) for t in rows], named)
+    def _held_labels(
+        store: Store,
+        rows: Sequence[Transaction],
+        named: Sequence[Named],
+        names: AccountsShown | None = None,
+    ) -> dict[str, str]:
+        """The label pages show for each of the household's accounts a row is a transfer to
+        ("your <label>"). Nothing is read where no row is one, and `names` is passed where the
+        page has them already: reading them is a dozen statements the pages are budgeted without."""
+        wanted = {item.name for item in named if item.name.startswith(HELD_PREFIX)}
+        if not wanted:
+            return {}
+        shown = names if names is not None else account_names(store)
+        return {
+            ref: shown.of(ref).label
+            for ref in {t.account_id for t in rows}
+            if HELD_PREFIX + ref in wanted
+        }
 
     def _held_origins(store: Store) -> dict[str, NameOrigin]:
         """How each name the store holds came to have it, with the source of a stated one."""
         from .analysis.recurring import counts_as_occurrence
 
         rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
-        _links, named = _name_rows(rows)
+        _fields, _links, named = name_rows(rows, store.confirmed_transfer_pairs())
         return name_origins(named, [t.source for t in rows])
 
     def _shape_counts(store: Store) -> dict[str, int]:
@@ -3966,7 +3973,6 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         made from them - one whole-table read of the transactions, whatever the store's size."""
         from .analysis.entities import (
             COVERED_SHOWN,
-            count_row_legs,
             entities_of,
             name_readings,
             view_of,
@@ -3975,9 +3981,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
-            leg_ids = store.confirmed_transfer_entities()
             names = account_names(store)
-            _links, named = _name_rows(rows)
+            fields, _links, named = name_rows(rows, store.confirmed_transfer_pairs())
             listed: dict[str, list[Covered]] = {}
             order = sorted(
                 range(len(rows)),
@@ -3994,20 +3999,17 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return view_of(
                 counts,
                 entities_of(store, counts),
-                count_row_legs(
-                    (named[i].name, rows[i].entity_id in leg_ids) for i in range(len(rows))
-                ),
                 {shape: tuple(found) for shape, found in listed.items() if shape},
                 origins,
-                name_readings([(t.description, t.counterparty) for t in rows], named),
-                _labels(rows, named),
+                name_readings(fields, named),
+                display_names(fields, named, _held_labels(store, rows, named, names)),
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
-        from .analysis.entity_actions import CHILD, MERGE, OWN, SPLIT, apply_action
+        from .analysis.entity_actions import CHILD, MERGE, SPLIT, apply_action
 
         with Store(db_path) as store:
-            origins = _held_origins(store) if action in (MERGE, OWN, SPLIT, CHILD) else {}
+            origins = _held_origins(store) if action in (MERGE, SPLIT, CHILD) else {}
             known = {name: origin.rows for name, origin in origins.items()}
             return apply_action(store, known, action, form, origins=origins)
 
@@ -4019,7 +4021,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
-            _links, named = _name_rows(rows)
+            fields, _links, named = name_rows(rows, store.confirmed_transfer_pairs())
             origins = name_origins(named, [t.source for t in rows])
             counts = {n: o.rows for n, o in origins.items()}
             entities = entities_of(store, counts)
@@ -4048,7 +4050,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 counts,
                 {shape: tuple(covered) for shape, covered in listed.items()},
                 origins,
-                _labels(rows, named),
+                display_names(fields, named, _held_labels(store, rows, named, names)),
             )
 
     def entity_trial(entity_id: int, kind: str, words: str) -> RuleTrial:

@@ -14,11 +14,12 @@ from dataclasses import dataclass
 
 from ..core.errors import DataError
 
-#: The role of the entity that stands for the owner: the payee of every payment between his own
-#: accounts. No instance declares the owner's name anywhere, so the entity is made as `OWNER_NAME`
-#: unless the owner has typed another, and renamed like any entity.
+#: The role of the entity that stands for the owner. Nothing makes one today: the owner is reached
+#: through an account's declared ownership and never from a transaction's text
+#: (`docs/design/2026-10-commitments/entities.md` section 3a), and the 0.4.361 group that made one
+#: from the names of transfer legs was withdrawn for being first-order. The column and the role
+#: stay so an owner entity can exist when ownership is declared on accounts.
 OWNER_ROLE = "owner"
-OWNER_NAME = "Me"
 
 #: The two kinds of rule an entity keeps, said once here and everywhere else by name. BEGINS: the
 #: name begins with these words. CONTAINS: the name holds these words, in any order. A third kind

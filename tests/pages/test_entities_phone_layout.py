@@ -97,7 +97,7 @@ def _view() -> EntitiesView:
         )
         for shape, count in counts.items()
     }
-    return view_of(counts, gathered, None, covers)
+    return view_of(counts, gathered, covers)
 
 
 @pytest.fixture(scope="module")
@@ -197,11 +197,11 @@ class TestAWithheldGroupOnAPhone:
         brands = {"alder store": 1, "birch store": 1, "cedar store": 1}
         withheld = {f"store front {w}": 2 for w in words} | brands
         scattered = {f"{w} unrelated{'abcdefghi'[i]}": 2 for i, w in enumerate(words)} | brands
-        assert view_of(withheld, [], None, {}).proposals.too_broad
-        assert not view_of(scattered, [], None, {}).proposals.too_broad
+        assert view_of(withheld, [], {}).proposals.too_broad
+        assert not view_of(scattered, [], {}).proposals.too_broad
         heights = {}
         for label, counts in (("withheld", withheld), ("scattered", scattered)):
-            httpd = _serve(view_of(counts, [], None, {}))
+            httpd = _serve(view_of(counts, [], {}))
             try:
                 served = f"http://127.0.0.1:{httpd.server_port}"
                 heights[label], overflow = _measure(

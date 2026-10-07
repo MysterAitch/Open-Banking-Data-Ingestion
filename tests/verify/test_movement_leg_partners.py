@@ -101,7 +101,8 @@ def entity_of(store: Store, account: str, uid: str) -> str:
 def plant_copy(store: Store, like: str, entity_id: str, account: str, *, leg: bool) -> None:
     store.connection.execute(
         "INSERT INTO transactions SELECT ?, ?, amount_minor, currency, value_date, booking_date, "
-        "description, counterparty, status, source, tier, NULL, content_key, 7, artefact_digest, "
+        "description, counterparty, party_account, party_source_id, status, source, tier, NULL, "
+        "content_key, 7, artefact_digest, "
         "?, match_tier, matched_entity_id, raw, first_seen_at, last_seen_at "
         "FROM transactions WHERE entity_id = ?",
         (entity_id, account, int(leg), like),

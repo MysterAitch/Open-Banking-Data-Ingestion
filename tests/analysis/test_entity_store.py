@@ -414,8 +414,7 @@ class TestAStoreFromBeforeTheEntityRole:
             old.connection.commit()
 
         with Store(path) as opened:
-            opened.gather_into_owner(["a"], "Me", now=NOW)
-            assert opened.owner_entity() is not None
+            opened.create_entity("Me", ["a"], now=NOW, role="owner")
             assert [e.role for e in opened.entities_with_shapes()] == ["owner"]
 
 

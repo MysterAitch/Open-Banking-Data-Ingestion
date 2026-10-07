@@ -133,7 +133,7 @@ class TestAMatchedDescriptionSaysItMatchedTheMerchantNameExactly:
             )
         }
         held = Entity(1, "Depot", None, ("depot climb birmingham",))
-        view = view_of(counts, [held], None, covers, origins)
+        view = view_of(counts, [held], covers, origins)
 
         page = render_entities(view, unmasked=True).decode("utf-8")
 
@@ -188,7 +188,7 @@ class TestATruncatedDescriptionSaysItIsTheStartOfTheMerchantName:
             )
         }
         held = Entity(1, "Depot", None, ("depot climb birmingham",))
-        view = view_of(counts, [held], None, covers, origins)
+        view = view_of(counts, [held], covers, origins)
 
         page = render_entities(view, unmasked=True).decode("utf-8")
 

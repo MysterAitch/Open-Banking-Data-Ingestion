@@ -61,7 +61,6 @@ from .entity_records import (
     DESCRIPTION,
     IDENTIFIER_BASES,
     IDENTIFIER_KINDS,
-    OWNER_ROLE,
     RULE_KINDS,
     Entity,
     EntityRefused,
@@ -4780,41 +4779,6 @@ class Store:
             ).fetchone()
             is not None
         )
-
-    def gather_into_owner(
-        self, shapes: Iterable[Identifier | str], name: str, *, now: datetime | None = None
-    ) -> tuple[int, str, bool]:
-        """Put `shapes` (identifiers; a bare string is a description-shape) under the owner entity,
-        making it on first use; returns its id, its name as kept, and whether it was made.
-
-        The owner entity is the live one with the role "owner". Where none has it but an entity is
-        already called `name`, that entity is taken as the owner (the owner had made it by hand);
-        otherwise one is made called `name`. Refused whole for no shape or a shape another entity
-        holds, before anything is written.
-        """
-        chosen = _chosen_identifiers(shapes)
-        self._refuse_shapes_held(chosen)
-        owner = self.owner_entity()
-        if owner is not None:
-            self.attach_shapes(owner[0], chosen, now=now)
-            return owner[0], owner[1], False
-        clean = _entity_name(name)
-        named = self._live_entity_named(clean)
-        if named is None:
-            return self.create_entity(clean, chosen, now=now, role=OWNER_ROLE), clean, True
-        self.connection.execute(
-            "UPDATE entities SET role = ? WHERE id = ?", (OWNER_ROLE, named[0])
-        )
-        self.attach_shapes(named[0], chosen, now=now)
-        return named[0], named[1], False
-
-    def owner_entity(self) -> tuple[int, str] | None:
-        """The id and name of the live entity with the role "owner", or None."""
-        row = self.connection.execute(
-            "SELECT id, name FROM entities WHERE role = ? AND removed_at IS NULL ORDER BY id",
-            (OWNER_ROLE,),
-        ).fetchone()
-        return None if row is None else (int(row["id"]), str(row["name"]))
 
     def create_entity(
         self,

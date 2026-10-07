@@ -169,8 +169,10 @@ def _amount(series: Series, *, unmasked: bool) -> str:
     return f'<span class="mono nowrap fig">{_esc(text)}</span>'
 
 
-def _name(series: Series, *, unmasked: bool) -> str:
+def _name(series: Series, names: AccountsShown, *, unmasked: bool) -> str:
     text = series.shape or series.label
+    if series.held_account:
+        text = f"your {names.of(series.held_account).label or series.held_account}"
     if unmasked:
         return f'<span class="txt">{_esc(text)}</span>'
     return f'<span class="txt sealed">{_esc(mask_text(text))}</span>'
@@ -197,7 +199,8 @@ def _row(series: Series, names: AccountsShown, today: date, *, unmasked: bool) -
         kind += f", {_esc(series.dated_on)}"
     how = f'{rhythm} &middot; <span class="recur-kind">{kind}</span>'
     return (
-        f'<li class="{klass}"><span class="recur-name">{_name(series, unmasked=unmasked)}</span>'
+        f'<li class="{klass}"><span class="recur-name">'
+        f"{_name(series, names, unmasked=unmasked)}</span>"
         f'<span class="recur-fig">{_amount(series, unmasked=unmasked)}</span>'
         f'<span class="recur-how">{how}{_marks(series, names, today)}</span></li>'
     )

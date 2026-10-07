@@ -63,14 +63,14 @@ from __future__ import annotations
 import calendar
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from itertools import pairwise
 from statistics import median_low
 
 from ..core.models import Transaction, TransactionStatus
 from ..ingest.stated_words import words_in
-from .entities import Alias, Fields, display_names, entity_of, learned_links, name_of
+from .entities import HELD_PREFIX, Alias, display_names, entity_of, name_rows
 from .payment_methods import METHODS
 
 #: Fewest occurrences that make a series. Two is a coincidence of a payee and a gap.
@@ -224,6 +224,10 @@ class Series:
     #: `DATED_POSTED`, or `DATED_ONE`), so a reader knows whether "most Sundays" is the day the
     #: owner paid or the day the bank posted it.
     dated_on: str = DATED_ONE
+    #: For a payee-named series whose payee is one of the household's own accounts (an unpaired
+    #: leg that states that account's identifier): that account, which a page shows as "your" and
+    #: its label. `shape` is "your <account's name>" until a page has the label.
+    held_account: str = ""
 
 
 @dataclass(frozen=True)
@@ -634,11 +638,6 @@ def _split(
     return found
 
 
-def row_fields(row: Transaction) -> Fields:
-    """What a held row states about its other party, for `name_of` and `learned_links`."""
-    return Fields(row.description, row.counterparty, row.party_account, row.party_source_id)
-
-
 def counts_as_occurrence(row: Transaction) -> bool:
     """Whether the row is an occurrence of anything: not history, and not yet pending."""
     return not row.status.is_history and row.status is not TransactionStatus.PENDING
@@ -654,10 +653,13 @@ def find_recurring(
 ) -> list[Series]:
     """Every series the transactions hold, by account and then by what they are called.
 
-    A row is called what `name_of` says: the counterparty it states, else the one learned for its
-    description from rows seen by two sources (`links`, from `learned_links` over these rows when
-    not given), else its description's shape. A payee seen through a feed in some months and
-    statements in others is therefore one series.
+    A row is called what `name_of` says: the account or id it states, else the counterparty it
+    states, else the one learned for its description from rows seen by two sources (`links`, from
+    `learned_links` over these rows when not given), else its description's shape. A payee seen
+    through a feed in some months and statements in others is therefore one series. A series
+    named by an identifier is shown by the readable name of its rows (`display_names`); one whose
+    payee is a household account carries that account (`Series.held_account`) for the page to
+    label.
     `pairs` is the pairing pass's (leaving entity, arriving entity) for each proved transfer.
     `entities` maps an identifier (its kind and value, `entities.shape_entities`) to the name of
     the entity the owner gathered it under; a row finds its entity by the identifier its name
@@ -671,13 +673,8 @@ def find_recurring(
     replaced by its settlement, and history is not money.
     """
     rows = [row for row in transactions if counts_as_occurrence(row)]
-    fields = [row_fields(row) for row in rows]
-    if links is None:
-        links = learned_links(fields)
-    named = [
-        name_of(f.description, f.counterparty, links, account=f.account, source_id=f.source_id)
-        for f in fields
-    ]
+    pairs = list(pairs)
+    fields, links, named = name_rows(rows, pairs, links)
     labels = display_names(fields, named)
     by_entity = {row.entity_id: row for row in rows}
     arriving: dict[str, Transaction] = {}
@@ -696,6 +693,7 @@ def find_recurring(
 
     groups: dict[tuple[str, ...], list[_Leg]] = defaultdict(list)
     shapes: dict[tuple[str, ...], str] = {}
+    held_of: dict[tuple[str, ...], str] = {}
     for row, item in zip(rows, named, strict=True):
         if row.entity_id in arrivals:
             continue
@@ -718,10 +716,13 @@ def find_recurring(
             payee = ("payee", shape, row.currency, direction)
             # An identifier groups the rows and is never shown (`display_names`).
             shapes[payee] = labels.get(shape, shape)
+            if shape.startswith(HELD_PREFIX):
+                held_of[payee] = shape[len(HELD_PREFIX) :]
         groups[payee].append(_Leg(row, ""))
 
     found: list[Series] = []
     for key, legs in groups.items():
-        found.extend(_series_in_group(legs, shapes[key], reach, closings or {}, today))
+        for series in _series_in_group(legs, shapes[key], reach, closings or {}, today):
+            found.append(replace(series, held_account=held_of[key]) if key in held_of else series)
     found.sort(key=lambda s: (s.account, s.label.casefold(), s.cadence, s.usual_minor))
     return found

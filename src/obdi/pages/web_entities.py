@@ -51,14 +51,7 @@ from ..core.logs import say
 from ..core.masking import mask_text
 from ..core.money import format_amount
 from ..core.plural import agree, plural
-from ..ingest.entity_records import (
-    ACCOUNT,
-    DESCRIPTION,
-    OWNER_NAME,
-    OWNER_ROLE,
-    Entity,
-    EntityRefused,
-)
+from ..ingest.entity_records import ACCOUNT, DESCRIPTION, Entity, EntityRefused
 from ..read.account_names import AccountShown
 from .callback import render_page
 from .navigation import page_name
@@ -74,7 +67,6 @@ MERGE_ROUTE = "/entities-merge"
 SPLIT_ROUTE = "/entities-split"
 RENAME_ROUTE = "/entities-rename"
 FOLD_ROUTE = "/entities-fold"
-OWN_ROUTE = "/entities-own"
 CHILD_ROUTE = "/entities-child"
 NEW_ROUTE = "/entities-new"
 #: Where one entity's page is (`web_entity`); the name of each entity here links to it.
@@ -454,36 +446,6 @@ def _too_broad(view: EntitiesView, *, unmasked: bool) -> str:
     )
 
 
-def _owner(view: EntitiesView, *, unmasked: bool) -> str:
-    """The names that are legs of transfers between the owner's own accounts, offered first and
-    worded apart from the payees: they are not anyone else's."""
-    group = view.owner
-    if group is None:
-        return ""
-    across = _across(len(group.shapes), group.transactions)
-    heading = "<h2>Payments between your own accounts</h2>"
-    if not unmasked:
-        return (
-            f'{heading}<section class="ent-group"><p class="ent-why">{across}; '
-            f"{group.legs:,} of them are the two sides of a transfer between your accounts.</p>"
-            f"{_masked_days(group.shapes, view)}</section>"
-        )
-    owner = next((e for e in view.entities if e.role == OWNER_ROLE), None)
-    if owner is None:
-        field = _name_field(OWNER_NAME, "Attach", label="Your entity")
-    else:
-        field = (
-            f'<div class="ent-name-field"><button class="tap" type="submit">'
-            f"Add to {_esc(owner.name)}</button></div>"
-        )
-    return (
-        f'{heading}<section class="ent-group"><form method="post" action="{OWN_ROUTE}">'
-        f"{field}{_ticks(group.shapes, view, checked=True)}"
-        f'<p class="ent-why">{across}; {group.legs:,} of them are the two sides of a transfer '
-        "between your accounts, so the other side is you, not a payee.</p></form></section>"
-    )
-
-
 def _could_belong(
     entity: Entity, suggestion: Suggestion | None, view: EntitiesView, *, unmasked: bool
 ) -> str:
@@ -644,7 +606,6 @@ def render_entities(
         lead
         + values_mode(ROUTE, unmasked=unmasked)
         + f'<p class="ent-summary">{_esc(summary_line(view))}</p>'
-        + _owner(view, unmasked=unmasked)
         + _groups(view, unmasked=unmasked)
         + _too_broad(view, unmasked=unmasked)
         + _entities(view, unmasked=unmasked)
