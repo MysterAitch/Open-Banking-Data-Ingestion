@@ -22,6 +22,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from obdi.analysis.entities import detach_shape
 from obdi.cli import build_web_config
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
@@ -169,7 +170,7 @@ class TestPuttingEntitiesUnderOne:
     def test_PutUnder_AParentThatHasBeenRemoved_IsRefused(self, world):
         base, db, ids, _read = world
         with Store(db) as store:
-            store.detach_shape(PRODUCTS["Quillon Eats"])  # an entity left with no name is removed
+            detach_shape(store, PRODUCTS["Quillon Eats"])  # an entity left with no name is removed
 
         response = put_under(base, ids["Quillon One"], "Quillon Eats")
 
@@ -180,7 +181,7 @@ class TestPuttingEntitiesUnderOne:
     def test_PutUnder_AnEntityThatHasBeenRemoved_IsRefused(self, world):
         base, db, ids, _read = world
         with Store(db) as store:
-            store.detach_shape(PRODUCTS["Quillon Eats"])
+            detach_shape(store, PRODUCTS["Quillon Eats"])
 
         response = put_under(base, ids["Quillon Eats"], "Quillon")
 
