@@ -33,6 +33,7 @@ from .entity_tokens import (
     is_method_only,
     tokens_of,
 )
+from .payment_methods import strip_leading_methods
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from ..ingest.store import Store
@@ -189,12 +190,8 @@ def shape_of(text: str) -> str:
     Empty where nothing but codes is left. `SHAPE_STEPS` lists the steps in the order applied,
     each with the sentence the page states it in.
 
-    The one definition: the recurring detector and the Entities page both read it from here. It
-    reads the DESCRIPTION alone, never the counterparty a source may state: a bank names a
-    merchant only where it identified one and a statement row names none, so keying on it gave one
-    payee two shapes by source, and a series spanning both split into a stopped half and a new
-    half (measured on the first real store after the change). The stated counterparty is used
-    only as a reason to propose two shapes together (`BANK_NAMES`).
+    This is the shape of a DESCRIPTION alone, and a row's name is not always that: `name_of`
+    prefers the counterparty a source states, and uses this only where a row states none.
     """
     return _shape(text)
 
@@ -209,6 +206,126 @@ def shape_counterparties(rows: Iterable[tuple[str, str]]) -> dict[str, dict[str,
         if stated and shape:
             found.setdefault(shape, Counter())[stated] += 1
     return {shape: dict(counted) for shape, counted in found.items()}
+
+
+#: The kinds of identifier a row can be named by, strongest first
+#: (`docs/design/2026-10-commitments/entities.md` section 2 is the reasoning). `LADDER` is the
+#: order `name_of` walks: the first rung a row carries names it, and `Named.kind` says which.
+#: ACCOUNT and SOURCE_ID are on the ladder so that a row carrying them is named by them first; no
+#: derived row carries either yet, so they never match, and giving the rows those columns is a
+#: read added to `name_of` and nothing more. ALIAS is a weaker identifier (a description-shape)
+#: linked to a stronger one by rows seen by two sources (`learned_links`). RULE is an entity's
+#: rule matching a name, which acts on names and not on rows, so it is a kind of link and not a
+#: rung.
+ACCOUNT = "account"
+SOURCE_ID = "source id"
+STATED_NAME = "stated name"
+ALIAS = "alias"
+DESCRIPTION = "description"
+RULE = "rule"
+LADDER = (ACCOUNT, SOURCE_ID, STATED_NAME, ALIAS, DESCRIPTION)
+
+#: What each kind is said to be on a page, as the noun phrase after "from the" ("from the bank's
+#: merchant name"): the one table every page reads, so no page words a kind itself.
+KIND_SENTENCES: dict[str, str] = {
+    ACCOUNT: "other party's account number",
+    SOURCE_ID: "source's own identifier for the other party",
+    STATED_NAME: "bank's merchant name",
+    ALIAS: "description, named by the bank's merchant name through payments seen by both",
+    DESCRIPTION: "description",
+    RULE: "rule",
+}
+
+
+def _set_aside_methods(text: str) -> str:
+    return " ".join(strip_leading_methods(text.split()))
+
+
+#: The steps that make a name from a stated counterparty, in order, each with the sentence the
+#: Entities page says it in: the description's steps up to the digit step, then the payment
+#: method set aside. Not the printed-date cut, which a merchant name has no use for. A
+#: counterparty that nothing is left of (only digits, only payment methods) names no row.
+COUNTERPARTY_STEPS: tuple[tuple[str, Callable[[str], str]], ...] = (
+    *SHAPE_STEPS[: len(NORMALISATION_STEPS) + 1],
+    (
+        "a payment method printed before the name is set aside",
+        _set_aside_methods,
+    ),
+)
+
+
+def counterparty_name(counterparty: str) -> str:
+    """A stated counterparty reduced to a name (`COUNTERPARTY_STEPS`); "" where none is left."""
+    text = counterparty
+    for _sentence, step in COUNTERPARTY_STEPS:
+        text = step(text)
+    return text
+
+
+@dataclass(frozen=True)
+class Alias:
+    """The stronger identifier a weaker one (a description-shape) is learned to stand for, the kind
+    of that stronger identifier, and how many rows it is learned from: rows seen by two sources,
+    which carry both."""
+
+    name: str
+    rows: int
+    kind: str = STATED_NAME
+
+
+@dataclass(frozen=True)
+class Named:
+    """The name of one row and the kind of identifier it came from (`LADDER`). `name` is "" where
+    nothing is left to name the row. For an `ALIAS` name, `via` is the description-shape it was
+    learned for, `support` the rows it was learned from, and `linked_by` the kind of identifier
+    the shape was linked to."""
+
+    name: str
+    kind: str
+    via: str = ""
+    support: int = 0
+    linked_by: str = ""
+
+
+def _identifier_name(kind: str, text: str) -> str:
+    if kind == STATED_NAME:
+        return counterparty_name(text)
+    if kind == ACCOUNT:
+        return "".join(text.split()).replace("-", "").casefold()
+    return text.strip()
+
+
+def name_of(
+    description: str,
+    counterparty: str = "",
+    aliases: Mapping[str, Alias] | None = None,
+    *,
+    account: str = "",
+    source_id: str = "",
+) -> Named:
+    """What a row is called: the strongest rung of `LADDER` it carries - the other party's
+    account, a source's identifier for it, the counterparty name it states - else the identifier
+    learned for its description's shape (`ALIAS`), else that shape (`DESCRIPTION`).
+
+    The stated identifier is the primary one and the description only elaborates: two rows
+    printing one reference to different counterparties are two payees, and a payee printing a
+    different reference every month is one. A bank states a counterparty only where it identified
+    one and a statement row states none, so a name read from the counterparty alone gave one
+    payee two names by source and split its series into a stopped half and a new half (measured
+    on the first real store). The alias is the join: a payment seen by a feed and a statement is
+    one held row carrying the feed's counterparty (`learned_links`).
+    """
+    for kind, text in ((ACCOUNT, account), (SOURCE_ID, source_id), (STATED_NAME, counterparty)):
+        stated = _identifier_name(kind, text)
+        if stated:
+            return Named(stated, kind)
+    shape = _shape(description)
+    learned = (aliases or {}).get(shape)
+    if shape and learned is not None:
+        return Named(
+            learned.name, ALIAS, via=shape, support=learned.rows, linked_by=learned.kind
+        )
+    return Named(shape, DESCRIPTION)
 
 
 def count_shapes(descriptions: Iterable[str]) -> dict[str, int]:
