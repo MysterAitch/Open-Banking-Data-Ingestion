@@ -218,6 +218,7 @@ class TestMergingAGroup:
         assert outcome_of(response.text) == "Merged 3 names into Fernhollow Grocers."
         assert summary_of(response.text) == (
             "5 payee names across every account; 3 names gathered into 1 entity. "
+            "Linked 3 by the bank's name. "
             "Names: 5 from the bank's merchant name. "
             "No group of names looks like one payee."
         )

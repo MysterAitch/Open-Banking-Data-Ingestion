@@ -15,19 +15,30 @@ the names were used, with no form that carries a name. The unmasked page is a PO
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from ..analysis.entities import (
+    IDENTIFIER_HEADINGS,
+    RULE,
     EntityPage,
     RuleLine,
     RuleTrial,
     clean_rule,
+    name_shown,
     rule_parts,
     rule_phrase,
 )
 from ..core.logs import say
 from ..core.plural import agree, plural
-from ..ingest.entity_records import BEGINS, CONTAINS, OWNER_ROLE, EntityRefused
+from ..ingest.entity_records import (
+    BEGINS,
+    CONTAINS,
+    DECLARED,
+    OWNER_ROLE,
+    EntityRefused,
+    Identifier,
+)
 from .callback import render_page
 from .navigation import page_name
 from .web_entities import (
@@ -39,9 +50,11 @@ from .web_entities import (
     _by_rule_tag,
     _count_or_rows,
     _esc,
+    _linked_sentence,
     _masked_days,
     _name_field,
     _sealed,
+    split_form,
 )
 from .web_entities import ROUTE as ENTITIES_ROUTE
 from .web_recurring import values_mode
@@ -91,47 +104,92 @@ def _family(page: EntityPage, *, unmasked: bool) -> str:
     return "".join(lines)
 
 
+def _by_kind(
+    held: Iterable[tuple[str, str]],
+) -> list[tuple[str, list[str]]]:
+    """(kind, values) in the order the page lists kinds (`IDENTIFIER_HEADINGS`), kinds with
+    nothing left out, values in the order given."""
+    grouped: dict[str, list[str]] = {}
+    for kind, value in held:
+        grouped.setdefault(kind, []).append(value)
+    return [(kind, grouped[kind]) for kind in IDENTIFIER_HEADINGS if kind in grouped]
+
+
+def _basis_tag(identifier: Identifier | None) -> str:
+    """Whether the owner declared an identifier or the transactions taught it, with the support
+    when learned; nothing for a name a rule attaches, which says "by rule" itself."""
+    if identifier is None:
+        return ""
+    said = (
+        "declared"
+        if identifier.basis == DECLARED
+        else f"learned from {plural(identifier.support, 'payment')}"
+    )
+    source = f", stated by {_esc(identifier.source)}" if identifier.source else ""
+    return f'<span class="muted">{said}{source}</span>'
+
+
 def _names(page: EntityPage, *, unmasked: bool) -> str:
     entity = page.entity
+    view = page.view
     across = _across(len(entity.shapes), page.transactions)
     if not entity.shapes:
         return (
             "<h3>Names</h3><p class=\"ent-why\">No name is under it yet. A name joins it when "
             "you gather one under it, or when a rule below matches one.</p>"
         )
-    orphaned = page.orphaned
-    live = [shape for shape in entity.shapes if shape not in orphaned]
+    orphaned = page.orphaned_identifiers
+    gone = {(i.kind, i.value) for i in orphaned}
+    by_identifier = {(i.kind, i.value): i for i in entity.identifiers}
+    live = [(i.kind, i.value) for i in entity.identifiers if (i.kind, i.value) not in gone]
+    live += [(RULE, name) for name in entity.by_rule if name in view.counts]
     if not unmasked:
+        names = list(dict.fromkeys(value for _kind, value in live))
         return (
-            f'<h3>Names</h3><p class="ent-why">{across}.</p>'
-            f"{_masked_days(live, page.view)}{_orphans(orphaned, unmasked=False)}"
+            f'<h3>Names</h3><p class="ent-why">{across}.{_linked_sentence(view)}</p>'
+            f"{_masked_days(names, view)}{_orphans(orphaned, unmasked=False)}"
         )
-    lines = "".join(
-        f'<li><span class="txt">{_esc(shape)}</span>{_by_rule_tag(shape, entity)}'
-        f"{_count_or_rows(shape, page.view)}"
-        f'<form method="post" action="{SPLIT_ROUTE}">'
-        f'<input type="hidden" name="shape" value="{_esc(shape)}">{_hidden(entity.id)}'
-        '<button class="tap" type="submit">Split apart</button></form></li>'
-        for shape in live
-    )
+    sections = []
+    for kind, values in _by_kind(live):
+        lines = "".join(
+            f'<li><span class="txt">{_esc(name_shown(value, kind))}</span>'
+            f"{_by_rule_tag(value, entity)}{_basis_tag(by_identifier.get((kind, value)))}"
+            f"{_count_or_rows(value, view)}"
+            f"{split_form(value, entity, view, SPLIT_ROUTE, extra=_hidden(entity.id), kind=kind)}"
+            "</li>"
+            for value in values
+        )
+        sections.append(
+            f"<h4>{_esc(IDENTIFIER_HEADINGS[kind])}</h4>"
+            f'<ul class="ent-names">{lines}</ul>'
+        )
     return (
-        f'<h3>Names</h3><p class="ent-why">{across}.</p><ul class="ent-names">{lines}</ul>'
-        f"{_orphans(orphaned, unmasked=True)}"
+        f'<h3>Names</h3><p class="ent-why">{across}.{_linked_sentence(view)}</p>'
+        f"{''.join(sections)}{_orphans(orphaned, unmasked=True)}"
     )
 
 
-def _orphans(orphaned: tuple[str, ...], *, unmasked: bool) -> str:
-    """The names attached to the entity that no transaction has now, each as it was attached
-    (`EntityPage.orphaned` says why one can be left so); a count where the page is masked."""
+def _orphans(orphaned: tuple[Identifier, ...], *, unmasked: bool) -> str:
+    """The identifiers attached to the entity that no transaction carries now, each as it was
+    attached and under its kind (`EntityPage.orphaned_identifiers` says why one can be left so); a
+    count where the page is masked."""
     if not orphaned:
         return ""
     heading = f"Attached to a name no row has now: {len(orphaned):,}"
     if not unmasked:
         return f'<p class="ent-why ent-orphans">{heading}.</p>'
-    items = "".join(f'<li><span class="txt">{_esc(shape)}</span></li>' for shape in orphaned)
+    sections = "".join(
+        f'<p class="ent-why">{_esc(IDENTIFIER_HEADINGS[kind])}</p><ul class="ent-names">'
+        + "".join(
+            f'<li><span class="txt">{_esc(name_shown(value, kind))}</span></li>'
+            for value in values
+        )
+        + "</ul>"
+        for kind, values in _by_kind((i.kind, i.value) for i in orphaned)
+    )
     return (
         f'<p class="ent-why ent-orphans">{heading}: the transactions it was attached to now '
-        f'take their name from what their source states.</p><ul class="ent-names">{items}</ul>'
+        f"take their name from what their source states.</p>{sections}"
     )
 
 

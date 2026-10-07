@@ -22,6 +22,7 @@ from ..ingest.entity_records import (
     CONTAINS,
     DECLARED,
     DESCRIPTION,
+    IDENTIFIER_KINDS,
     OWNER_ROLE,
     RULE_KINDS,
     SOURCE_ID,
@@ -325,6 +326,16 @@ def entity_of(
         if key in held:
             return key[0], held[key]
     return None
+
+
+def held_kind(entity: Entity, shape: str) -> str:
+    """The kind an entity holds a name as: the strongest kind of identifier with that value,
+    `RULE` for a name only a rule of the entity attaches, "" for a name it does not hold."""
+    held = {identifier.kind for identifier in entity.identifiers if identifier.value == shape}
+    for kind in IDENTIFIER_KINDS:
+        if kind in held:
+            return kind
+    return RULE if shape in entity.by_rule else ""
 
 
 def name_shown(name: str, kind: str) -> str:

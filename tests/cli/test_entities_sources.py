@@ -37,6 +37,7 @@ from obdi.analysis.entities import (
     names_of,
     view_of,
 )
+from obdi.ingest.entity_records import Identifier
 from obdi.pages.web_entities import derivation_html, render_entities, summary_line
 from obdi.pages.web_entity import render_entity
 
@@ -227,7 +228,16 @@ class TestAnAttachmentToANameNoRowHasIsListed:
     COUNTS: ClassVar[dict[str, int]] = {"alex rowan": 12, "oakmere coffee": 3}
 
     def page(self):
-        held = Entity(1, "Housemate", None, ("oakmere coffee", "rent"))
+        held = Entity(
+            1,
+            "Housemate",
+            None,
+            ("oakmere coffee", "rent"),
+            identifiers=(
+                Identifier(DESCRIPTION, "oakmere coffee"),
+                Identifier(DESCRIPTION, "rent"),
+            ),
+        )
         return entity_page_of(1, [held], [], self.COUNTS, {})
 
     def test_Orphaned_ListsOnlyTheNamesNoRowHas(self):
@@ -246,9 +256,10 @@ class TestAnAttachmentToANameNoRowHasIsListed:
         assert ">rent<" not in page
 
     def test_Page_WhenEveryAttachmentStillHasRows_ListsNoOrphan(self):
-        held = Entity(1, "Housemate", None, ("alex rowan",))
+        alex = Identifier(DESCRIPTION, "alex rowan")
+        held = Entity(1, "Housemate", None, ("alex rowan",), identifiers=(alex,))
         page = entity_page_of(1, [held], [], self.COUNTS, {})
 
         assert page is not None
-        assert page.orphaned == ()
+        assert page.orphaned == () and page.orphaned_identifiers == ()
         assert "no row has now" not in render_entity(page, unmasked=True).decode("utf-8")

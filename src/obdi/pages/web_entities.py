@@ -27,8 +27,10 @@ from ..analysis.entities import (
     COVERED_SHOWN,
     KIND_SENTENCES,
     LADDER,
+    LINK_SENTENCES,
     MATCHED_NAME,
     OPENING_WORDS,
+    RULE,
     SAME_WORDS,
     SHAPE_STEPS,
     TRUNCATED_NAME,
@@ -38,6 +40,9 @@ from ..analysis.entities import (
     Proposal,
     Suggestion,
     derivation_of,
+    form_value,
+    held_kind,
+    name_shown,
     rule_phrase,
 )
 from ..analysis.entity_tokens import COMPARISON_SENTENCE, DROPPED, IGNORED_TRAILING
@@ -46,7 +51,14 @@ from ..core.logs import say
 from ..core.masking import mask_text
 from ..core.money import format_amount
 from ..core.plural import agree, plural
-from ..ingest.entity_records import OWNER_NAME, OWNER_ROLE, Entity, EntityRefused
+from ..ingest.entity_records import (
+    ACCOUNT,
+    DESCRIPTION,
+    OWNER_NAME,
+    OWNER_ROLE,
+    Entity,
+    EntityRefused,
+)
 from ..read.account_names import AccountShown
 from .callback import render_page
 from .navigation import page_name
@@ -107,8 +119,25 @@ def _sources_sentence(view: EntitiesView) -> str:
     return f" Names: {'; '.join(parts)}." if parts else ""
 
 
+def _linked_sentence(view: EntitiesView) -> str:
+    """How the identifiers the entities hold link a transaction to them, by kind in the words of
+    `LINK_SENTENCES` ("2 by the bank's name, 1 by rule"); counts only. Empty where no entity
+    holds one."""
+    by_kind: Counter[str] = Counter()
+    for entity in view.entities:
+        by_kind.update(identifier.kind for identifier in entity.identifiers)
+        by_kind[RULE] += len(entity.by_rule)
+    parts = [
+        f"{by_kind[kind]:,} {sentence}"
+        for kind, sentence in LINK_SENTENCES.items()
+        if by_kind[kind]
+    ]
+    return f" Linked {', '.join(parts)}." if parts else ""
+
+
 def summary_line(view: EntitiesView) -> str:
-    """Counts only: names held, how many are under an entity, and what the rules offer."""
+    """Counts only: names held, how many are under an entity, how they link, and what the rules
+    offer."""
     gathered = sum(len(entity.shapes) for entity in view.entities)
     groups = view.proposals.groups
     covered = sum(len(group.shapes) for group in groups)
@@ -117,6 +146,7 @@ def summary_line(view: EntitiesView) -> str:
         f"{plural(gathered, 'name')} gathered into "
         f"{plural(len(view.entities), 'entity', 'entities')}."
     )
+    held += _linked_sentence(view)
     held += _sources_sentence(view)
     if not groups:
         offered = "No group of names looks like one payee"
@@ -187,12 +217,16 @@ def _steps_list(steps: Sequence[str]) -> str:
     return f'<ol class="ent-steps">{items}</ol>'
 
 
-def derivation_html(derivation: Derivation) -> str:
+def derivation_html(derivation: Derivation, kind: str = "") -> str:
     """How a name was made, from the record alone: the field it was read from, each printed text
     it came from beside the name it was reduced to, and the steps that changed any of them. The
-    source is read from the record, so a name made from another field is stated as such."""
+    source is read from the record, so a name made from another field is stated as such. `kind`
+    is the strongest kind of the name's rows where the caller knows it; a name made from an
+    account number is shown by its ending whichever way it is learned."""
+    account = kind == ACCOUNT or ACCOUNT in derivation.kinds
+    shown = name_shown(derivation.name, ACCOUNT if account else DESCRIPTION)
     lines = "".join(
-        f'<li><span class="txt">{_esc(text)}</span> → <span class="txt">{_esc(derivation.name)}'
+        f'<li><span class="txt">{_esc(text)}</span> → <span class="txt">{_esc(shown)}'
         "</span></li>"
         for text in derivation.printed
     )
@@ -209,6 +243,13 @@ def derivation_html(derivation: Derivation) -> str:
     )
 
 
+def _kind_of(name: str, view: EntitiesView) -> str:
+    """The strongest kind of identifier the rows of a name carry; the description's where the
+    view holds no origins, which is all a view made from counts alone can say."""
+    origin = view.origins.get(name)
+    return origin.kind if origin is not None else DESCRIPTION
+
+
 def _count_or_rows(shape: str, view: EntitiesView) -> str:
     """The number of transactions a name has; where the page holds them, that number opens how the
     name was made and the newest of them (`COVERED_SHOWN`), so what a merge would capture can be
@@ -221,7 +262,7 @@ def _count_or_rows(shape: str, view: EntitiesView) -> str:
     tail = f'<li class="muted">and {more:,} more</li>' if more > 0 else ""
     return (
         f'<details class="ent-rows"><summary class="ent-count">{total:,}</summary>'
-        f"{derivation_html(derivation_of(shape, found))}"
+        f"{derivation_html(derivation_of(shape, found), _kind_of(shape, view))}"
         f'<ol class="ent-tx">{"".join(_covered_row(c) for c in found)}{tail}</ol></details>'
     )
 
@@ -282,7 +323,8 @@ def _ticks(
 ) -> str:
     items = []
     for shape in shapes:
-        box = f'<input type="checkbox" name="shape" value="{_esc(shape)}"'
+        kind = _kind_of(shape, view)
+        box = f'<input type="checkbox" name="shape" value="{_esc(form_value(shape, kind))}"'
         box += " checked>" if checked else ">"
         count = (
             _count_or_rows(shape, view)
@@ -290,10 +332,33 @@ def _ticks(
             else f'<span class="ent-count">{view.counts.get(shape, 0):,}</span>'
         )
         items.append(
-            f'<li><label class="tick">{box}<span class="txt">{_esc(shape)}</span></label>'
-            f"{count}</li>"
+            f'<li><label class="tick">{box}'
+            f'<span class="txt">{_esc(name_shown(shape, kind))}</span></label>{count}</li>'
         )
     return f'<ul class="ent-names">{"".join(items)}</ul>'
+
+
+def split_form(
+    shape: str,
+    entity: Entity,
+    view: EntitiesView,
+    route: str,
+    *,
+    extra: str = "",
+    kind: str | None = None,
+) -> str:
+    """The press that splits one name apart from its entity: it names the kind of identifier the
+    entity holds the name as (`held_kind` unless `kind` says; `RULE` for a name only a rule
+    attaches), so a name held two ways loses the one pressed. An account number goes as a
+    reference, never in the clear."""
+    kind = held_kind(entity, shape) if kind is None else kind
+    carried = form_value(shape, kind if kind != RULE else _kind_of(shape, view))
+    held = f'<input type="hidden" name="kind" value="{_esc(kind)}">' if kind != RULE else ""
+    return (
+        f'<form method="post" action="{route}">'
+        f'<input type="hidden" name="shape" value="{_esc(carried)}">{held}{extra}'
+        '<button class="tap" type="submit">Split apart</button></form>'
+    )
 
 
 def _by_rule_tag(shape: str, entity: Entity) -> str:
@@ -460,11 +525,9 @@ def _entity(
             f"{could}{inside}</section>"
         )
     lines = "".join(
-        f'<li><span class="txt">{_esc(shape)}</span>{_by_rule_tag(shape, entity)}'
-        f"{_count_or_rows(shape, view)}"
-        f'<form method="post" action="{SPLIT_ROUTE}">'
-        f'<input type="hidden" name="shape" value="{_esc(shape)}">'
-        '<button class="tap" type="submit">Split apart</button></form></li>'
+        f'<li><span class="txt">{_esc(name_shown(shape, _kind_of(shape, view)))}</span>'
+        f"{_by_rule_tag(shape, entity)}{_count_or_rows(shape, view)}"
+        f"{split_form(shape, entity, view, SPLIT_ROUTE)}</li>"
         for shape in entity.shapes
     )
     return (
@@ -475,11 +538,11 @@ def _entity(
         f'<form method="post" action="{RENAME_ROUTE}">'
         f'<input type="hidden" name="entity" value="{entity.id}">'
         f"{_name_field(entity.name, 'Rename', label='Name')}</form>"
-        f"{_child_form(entity, nested=nested)}</details>{inside}</section>"
+        f"{_child_form(entity, view, nested=nested)}</details>{inside}</section>"
     )
 
 
-def _child_form(entity: Entity, *, nested: bool) -> str:
+def _child_form(entity: Entity, view: EntitiesView, *, nested: bool) -> str:
     """Make one of the entity's names an entity of its own, under it: for a name that is a
     different thing (a retailer's subscription service billed under a similar name). Only one
     level is offered, and not for an entity with one name, which would be left with none; a name
@@ -487,7 +550,11 @@ def _child_form(entity: Entity, *, nested: bool) -> str:
     by_hand = [shape for shape in entity.shapes if shape not in entity.by_rule]
     if nested or len(by_hand) < 2:
         return ""
-    options = "".join(f'<option value="{_esc(shape)}">{_esc(shape)}</option>' for shape in by_hand)
+    options = "".join(
+        f'<option value="{_esc(form_value(shape, _kind_of(shape, view)))}">'
+        f"{_esc(name_shown(shape, _kind_of(shape, view)))}</option>"
+        for shape in by_hand
+    )
     return (
         f'<form method="post" action="{CHILD_ROUTE}">'
         f'<input type="hidden" name="entity" value="{entity.id}">'
