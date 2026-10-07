@@ -70,6 +70,7 @@ from statistics import median_low
 
 from .entities import shape_of
 from .models import Transaction, TransactionStatus
+from .payment_methods import METHODS
 from .stated_words import words_in
 
 #: Fewest occurrences that make a series. Two is a coincidence of a payee and a gap.
@@ -112,11 +113,18 @@ HABIT = "habit"
 #: documented word) and any word the bank's feed uses for a standing order, which is why a
 #: standing order paid through the feed is told by its shape. A card or faster payment says
 #: nothing about who started it, so it is not here.
+#:
+#: The coded words themselves are `payment_methods.METHODS`', shared with the Entities page, which
+#: sets the same methods' printed phrases aside; this table only says what each decides.
+_KIND_OF_METHOD: dict[str, tuple[str, str]] = {
+    "direct-debit": (PULLED, "Direct Debit"),
+    "card-subscription": (PULLED, "card subscription"),
+    "standing-order": (SCHEDULED, "standing order"),
+}
 _TYPE_WORDS: dict[tuple[str, str], tuple[str, str]] = {
-    ("source", "DIRECT_DEBIT"): (PULLED, "Direct Debit"),
-    ("transaction_category", "DIRECT_DEBIT"): (PULLED, "Direct Debit"),
-    ("sourceSubType", "CARD_SUBSCRIPTION"): (PULLED, "card subscription"),
-    ("transaction_category", "STANDING_ORDER"): (SCHEDULED, "standing order"),
+    pair: _KIND_OF_METHOD[method.key]
+    for method in METHODS
+    for pair in method.coded
 }
 
 #: name -> (period in days, tolerance in days) for the cadences counted in days.
@@ -597,7 +605,7 @@ def find_recurring(
             shapes[between] = ""
             groups[between].append(_Leg(row, opposite.account_id))
             continue
-        shape = shape_of(row.description)
+        shape = shape_of(row.description, row.counterparty)
         if not shape:
             continue
         gathered = (entities or {}).get(shape)

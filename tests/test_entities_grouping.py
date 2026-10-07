@@ -32,12 +32,14 @@ def proposals(*descriptions: str, taken: frozenset[str] = frozenset()):
 
 class TestAnOpeningThatNamesHowAndNotWho:
     """The first measurement over the invented large store joined 25 merchants under the opening
-    words of a payment method. Eight shapes sharing an opening are still offered, since one
-    retailer prints a town per branch; nine are counted and never offered."""
+    words of a payment method; method words are now set aside before grouping (see
+    `test_entities_rules`), but an opening of two ordinary words can still join many payees. Eight
+    shapes sharing an opening are still offered, since one retailer prints a town per branch; nine
+    are counted and never offered, unless the opening is a distinctive word (a brand)."""
 
-    def test_Proposal_WhenAPaymentMethodOpensNineShapes_NothingIsOfferedAndItIsCounted(self):
+    def test_Proposal_WhenOrdinaryWordsOpenNineShapes_NothingIsOfferedAndItIsCounted(self):
         words = ["alpha", "bravo", "coral", "delta", "ember", "frost", "grove", "haven", "ivory"]
-        descriptions = [f"FASTER PAYMENT {w.upper()} 12" for w in words]
+        descriptions = [f"THE STORE {w.upper()} 12" for w in words]
 
         found = propose_groups(count_shapes(descriptions))
 
@@ -56,7 +58,7 @@ class TestAnOpeningThatNamesHowAndNotWho:
 
     def test_Proposal_WhenABroadGroupSitsBesideASmallOne_OnlyTheSmallOneIsOffered(self):
         words = ["alpha", "bravo", "coral", "delta", "ember", "frost", "grove", "haven", "ivory"]
-        descriptions = [f"FASTER PAYMENT {w.upper()}" for w in words]
+        descriptions = [f"THE STORE {w.upper()}" for w in words]
         descriptions += ["FERNHOLLOW GROCERS LONDON", "FERNHOLLOW GROCERS READING"]
 
         found = propose_groups(count_shapes(descriptions))
@@ -115,7 +117,7 @@ class TestTwoFirmsThatOnlyShareAWord:
         assert proposals("MARLOWE BAKERY 12", "MARLOWE INSURANCE 99", "MARLOWE ROOFING 3") == []
 
     def test_Proposal_WhenOneWordShapesAreShared_NothingIsProposed(self):
-        assert proposals("NETFLIX 123", "NETFLIX COM 456") == []
+        assert proposals("NETFLIX 123", "NETFLIX PREMIUM 456") == []
 
     def test_Proposal_WhenTwoGroupsShareAFirstWord_TheyStayTwoGroups(self):
         found = proposals(
@@ -157,9 +159,9 @@ class TestTheSameWordsDifferently:
         assert len(group.shapes) == 4
 
     def test_Proposal_WhenNoOpeningIsCommon_IsNamedForItsCommonestShape(self):
-        (group,) = proposals("LIDL GB", "LIDL GB", "LIDL GB", "GB LIDL")
+        (group,) = proposals("LIDL GB LONDON", "LIDL GB LONDON", "LIDL GB LONDON", "GB LIDL LONDON")
 
-        assert group.name == "Lidl Gb"
+        assert group.name == "Lidl Gb London"
 
 
 class TestShapesTheOwnerHasAlreadyPlaced:
@@ -192,7 +194,7 @@ class TestTheOrderTheyArriveIn:
     def test_Proposal_WhenTheShapesArriveInAnyOrder_IsTheSame(self):
         descriptions = [
             "FERNHOLLOW GROCERS LONDON", "FERNHOLLOW GROCERS READING", "MARLOWE BAKERY LEEDS",
-            "MARLOWE BAKERY YORK", "LIDL GB", "GB LIDL", "ZEPHYR", "4471 9921",
+            "MARLOWE BAKERY YORK", "LIDL LONDON", "LONDON LIDL", "ZEPHYR", "4471 9921",
         ]
         expected = proposals(*descriptions)
         assert len(expected) == 3

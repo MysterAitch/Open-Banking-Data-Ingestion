@@ -3884,11 +3884,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return RecurringFindings(found, today)
 
     def _shape_counts(store: Store) -> dict[str, int]:
-        from .entities import count_shapes
+        from .entities import count_row_shapes
         from .recurring import counts_as_occurrence
 
-        return count_shapes(
-            t.description for t in store.all_transactions() if counts_as_occurrence(t)
+        return count_row_shapes(
+            (t.description, t.counterparty)
+            for t in store.all_transactions()
+            if counts_as_occurrence(t)
         )
 
     def entities_data() -> EntitiesView:

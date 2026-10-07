@@ -8,9 +8,16 @@ from raw); this module holds what is computed from the transactions alone.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
+from .entity_tokens import (
+    Token,
+    align_initials,
+    distinctive_words,
+    is_method_only,
+    tokens_of,
+)
 from .errors import DataError
 from .identity import normalise_description
 
@@ -41,21 +48,61 @@ class Entity:
     shapes: tuple[str, ...]
 
 
-def shape_of(text: str) -> str:
-    """The shape of a counterparty as printed: the normalised description without any word that
-    holds a digit, since a reference, a store number, a mandate, or a card tail is what changes
-    between two sightings of one payee. Empty where nothing but codes is left.
+#: The words a bank prints for the date a card payment was made ("ON 12 APR"), which change with
+#: every sighting of one payee. The number is dropped as a word that holds a digit; this is what
+#: that leaves behind. "sept" and "tues" and the like are the abbreviations banks print.
+_DATE_WORDS = frozenset(
+    {
+        "january", "february", "march", "april", "may", "june", "july", "august", "september",
+        "october", "november", "december",
+        "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+        "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun",
+    }
+)
+
+
+def _shape(text: str) -> str:
+    words = [w for w in normalise_description(text).split() if not any(c.isdigit() for c in w)]
+    kept: list[str] = []
+    index = 0
+    while index < len(words):
+        if words[index] == "on" and index + 1 < len(words) and words[index + 1] in _DATE_WORDS:
+            index += 2
+            continue
+        kept.append(words[index])
+        index += 1
+    # A month or a weekday left at the very end is the date's remnant; one in the middle may be
+    # part of a name, so only the end is cut.
+    while kept and kept[-1] in _DATE_WORDS:
+        kept.pop()
+    return " ".join(kept)
+
+
+def shape_of(text: str, counterparty: str = "") -> str:
+    """The shape of a counterparty as printed: the normalised name without any word that holds a
+    digit, since a reference, a store number, a mandate, or a card tail is what changes between
+    two sightings of one payee, and without the date a card payment prints ("on 12 apr").
+
+    Read from the `counterparty` where a source states one - the bank's or the aggregator's own
+    cleaned name - and from the description otherwise, or where the counterparty is only codes.
+    Empty where nothing but codes is left.
 
     The one definition: the recurring detector and the Entities page both read it from here.
     """
-    return " ".join(
-        w for w in normalise_description(text).split() if not any(c.isdigit() for c in w)
-    )
+    return _shape(counterparty) or _shape(text)
 
 
 def count_shapes(descriptions: Iterable[str]) -> dict[str, int]:
     """How many of the descriptions have each shape; descriptions with no shape are not counted."""
     counted = Counter(shape_of(text) for text in descriptions)
+    counted.pop("", None)
+    return dict(counted)
+
+
+def count_row_shapes(named: Iterable[tuple[str, str]]) -> dict[str, int]:
+    """`count_shapes` over (description, counterparty) pairs, so a stated counterparty is read."""
+    counted = Counter(shape_of(text, counterparty) for text, counterparty in named)
     counted.pop("", None)
     return dict(counted)
 
@@ -77,23 +124,55 @@ class Proposal:
     opening: str = ""
 
 
-def _words(shape: str) -> frozenset[str]:
+def _words(named: Sequence[Token]) -> frozenset[str]:
     """The words that tell a shape apart: its own, without the one-letter codes."""
-    return frozenset(word for word in shape.split() if len(word) > 1)
+    return frozenset(token.norm for token in named if len(token.norm) > 1)
 
 
-def _common_opening(shapes: Collection[str]) -> list[str]:
-    run: list[str] | None = None
-    for shape in shapes:
-        words = shape.split()
+def _common_opening(members: Collection[Sequence[Token]]) -> int:
+    """How many leading tokens every member shares (compared, not printed)."""
+    run: Sequence[str] | None = None
+    for named in members:
+        norms = [token.norm for token in named]
         if run is None:
-            run = words
+            run = norms
             continue
         keep = 0
-        while keep < min(len(run), len(words)) and run[keep] == words[keep]:
+        while keep < min(len(run), len(norms)) and run[keep] == norms[keep]:
             keep += 1
         run = run[:keep]
-    return run or []
+    return len(run or [])
+
+
+#: How many of the commonest words across all shapes are too ordinary to say who a payee is. A
+#: word printed in only one shape is never counted common, however few words the store holds:
+#: with nothing repeated there is no ordinary word, and a tie among singletons would be settled by
+#: the alphabet.
+COMMON_TOKENS = 50
+
+#: Fewest shapes that must open with one distinctive word for it alone to join them. Two shapes
+#: that share a single word are far more often two payees than one; three is the first count a
+#: coincidence stops explaining, measured by the owner's reading of thirteen towns of one chain.
+MIN_ONE_WORD_VARIANTS = 3
+
+
+def common_tokens(named: Mapping[str, Sequence[Token]]) -> frozenset[str]:
+    """The `COMMON_TOKENS` words found in the most shapes, among those found in at least two."""
+    found: Counter[str] = Counter()
+    for shape_tokens in named.values():
+        found.update({token.norm for token in shape_tokens})
+    ranked = sorted((n for n in found if found[n] >= 2), key=lambda n: (-found[n], n))
+    return frozenset(ranked[:COMMON_TOKENS])
+
+
+def is_distinctive(norm: str, common: Collection[str]) -> bool:
+    """Whether a compared word can say who a payee is: not one letter, not a payment method, not
+    a country or company code, and not one of the commonest words."""
+    return (
+        len(norm) > 1
+        and norm not in common
+        and norm in distinctive_words((Token(norm, norm),))
+    )
 
 
 #: Most shapes a proposed group may hold. Measured on the invented household's large store: the
@@ -145,7 +224,13 @@ def propose_groups(
     where they are and never proposed again. A group is at least two shapes and at most
     `MAX_SHAPES_PROPOSED`, largest first.
     """
-    free = sorted(shape for shape in counts if shape not in taken and _words(shape))
+    named = align_initials({shape: tokens_of(shape) for shape in counts})
+    common = common_tokens(named)
+    free = sorted(
+        shape
+        for shape in counts
+        if shape not in taken and not is_method_only(shape) and _words(named[shape])
+    )
     parent = {shape: shape for shape in free}
 
     def root(shape: str) -> str:
@@ -154,14 +239,24 @@ def propose_groups(
             shape = parent[shape]
         return shape
 
+    # (rule, key) -> the shapes that share it, and how many it takes to join them.
     buckets: dict[tuple[str, object], list[str]] = {}
+    needs: dict[tuple[str, object], int] = {}
     for shape in free:
-        words = shape.split()
-        if len(words) >= MIN_OPENING_WORDS:
-            opening = tuple(words[:MIN_OPENING_WORDS])
+        tokens = named[shape]
+        if len(tokens) >= MIN_OPENING_WORDS:
+            opening = tuple(t.norm for t in tokens[:MIN_OPENING_WORDS])
             buckets.setdefault((OPENING_WORDS, opening), []).append(shape)
-        buckets.setdefault((SAME_WORDS, _words(shape)), []).append(shape)
-    for members in buckets.values():
+            needs[(OPENING_WORDS, opening)] = 2
+        first = tokens[0].norm
+        if is_distinctive(first, common):
+            buckets.setdefault((OPENING_WORDS, (first,)), []).append(shape)
+            needs[(OPENING_WORDS, (first,))] = MIN_ONE_WORD_VARIANTS
+        buckets.setdefault((SAME_WORDS, _words(tokens)), []).append(shape)
+        needs[(SAME_WORDS, _words(tokens))] = 2
+    for key, members in buckets.items():
+        if len(members) < needs[key]:
+            continue
         for other in members[1:]:
             parent[root(other)] = root(members[0])
 
@@ -169,30 +264,36 @@ def propose_groups(
     for shape in free:
         groups.setdefault(root(shape), []).append(shape)
     found: list[Proposal] = []
+    broad: list[Proposal] = []
     for members in groups.values():
         if len(members) < 2:
             continue
         rules = frozenset(
             rule
-            for (rule, _), joined in buckets.items()
-            if len(joined) >= 2 and root(joined[0]) == root(members[0])
+            for (rule, key), joined in buckets.items()
+            if len(joined) >= needs[(rule, key)] and root(joined[0]) == root(members[0])
         )
         ordered = tuple(sorted(members, key=lambda s: (-counts[s], s)))
-        shared = _common_opening(members)
-        # No common opening (the words were reordered): the commonest shape, of those the
-        # shortest, since a longer one carries a town or a branch.
-        words = shared or min(members, key=lambda s: (-counts[s], len(s.split()), s)).split()
-        found.append(
-            Proposal(
-                name=" ".join(word.capitalize() for word in words),
-                shapes=ordered,
-                rules=rules,
-                transactions=sum(counts[s] for s in members),
-                opening=" ".join(shared),
-            )
+        # The commonest shape, of those the shortest, since a longer one carries a town or a
+        # branch: its printed words name the group, cut to what every member opens with.
+        best = min(members, key=lambda s: (-counts[s], len(named[s]), s))
+        shared = _common_opening([named[s] for s in members])
+        printed = [token.printed for token in named[best]]
+        words = " ".join(printed[:shared] if shared else printed).split()
+        proposal = Proposal(
+            name=" ".join(word.capitalize() for word in words),
+            shapes=ordered,
+            rules=rules,
+            transactions=sum(counts[s] for s in members),
+            opening=" ".join(" ".join(printed[:shared]).split()),
         )
+        # A group held together by an opening word that says who (the brand of thirteen towns) is
+        # as wide as the chain is; one held together by anything else is capped.
+        by_brand = shared > 0 and is_distinctive(named[best][0].norm, common)
+        if len(members) <= MAX_SHAPES_PROPOSED or by_brand:
+            found.append(proposal)
+        else:
+            broad.append(proposal)
     found.sort(key=lambda p: (-p.transactions, p.name, p.shapes))
-    return Proposals(
-        groups=tuple(p for p in found if len(p.shapes) <= MAX_SHAPES_PROPOSED),
-        too_broad=tuple(p for p in found if len(p.shapes) > MAX_SHAPES_PROPOSED),
-    )
+    broad.sort(key=lambda p: (-p.transactions, p.name, p.shapes))
+    return Proposals(groups=tuple(found), too_broad=tuple(broad))
