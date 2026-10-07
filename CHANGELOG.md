@@ -26,6 +26,46 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.369] - 2026-10-07
+
+### Changed
+- **A transaction's name is the strongest field it carries about the other
+  party, and says which.** The owner, 2026-10-07: "Using the description for
+  the counterparty details is the wrong default. It is acceptable as a means
+  to elaborate or enhance, but not as the primary identifier." And: "if I
+  live with one person and send half of October's rent to one payee, then
+  next year ... I'm living with someone else and send half of October's
+  rent... The description has zero influence on whether that transaction
+  involves the same other party." Under the description-shape, two
+  housemates paying `rent` were one name and one housemate across twelve
+  monthly references was twelve. A name is now made by walking a ladder of
+  kinds (`entities.md`: the party's account identifier, a source's own id,
+  the stated counterparty name, a learned link, the printed description),
+  strongest first, and carries its kind: today the stated name where a
+  source gives one, else the description. What joins the two is learned
+  from obdi's own evidence, which is what 0.4.361's attempt lacked: a
+  payment seen by a feed and a statement is one row carrying both the
+  feed's counterparty and the statement's description, so every such row
+  maps a description-shape to the party it was seen with, with a count; a
+  statement-only row whose shape maps to exactly one party takes it, "named
+  by the bank's merchant name through N payments seen by both", and an
+  ambiguous shape stays a description-name, visibly. The detector keys a
+  series by entity, else by that name; "the bank names both as X" is
+  withdrawn as a proposal, since those rows are one name with no question
+  to ask. Each name's derivation states its kind, the summary line counts
+  names by kind, a rule reads as matching the name, and an entity whose
+  attached name no row carries any more lists it rather than losing it. The
+  two top rungs (account identifier, source id) are in the ladder and never
+  match yet: the fields are in the raw layer and reach the derived row in
+  the next build. Pinned by constructed cases: two housemates with one
+  reference are two names; twelve references to one party are one; six
+  statement rows and six feed rows are one live series where one payment
+  was seen by both, and two series, said so, where none was. On the large
+  invented store: 79 names to 68 (9 from the merchant name), series and
+  stopped unchanged at 18 and 7 - the invented stores exercise the fall-back
+  and not the join. Predicted for the real store, counts only: the habit
+  stays 1, stopped near 31, names well under 1,297.
+
 ## [0.4.368] - 2026-10-07
 
 ### Added
