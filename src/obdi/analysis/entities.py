@@ -182,7 +182,18 @@ def _printed_text(row: Covered) -> str:
 
 
 def _reads_counterparty(row: Covered) -> bool:
-    return row.kind == STATED_NAME or (row.kind in (ACCOUNT, SOURCE_ID) and bool(row.counterparty))
+    """Whether the text a row's name was read from is the counterparty it states: it named the
+    row (`STATED_NAME`), or it is what the row is shown under, or it is what linked the row to an
+    identifier (an `ALIAS` whose `via` is that stated name and not a description-shape)."""
+    if row.kind == STATED_NAME:
+        return True
+    if row.kind in (ACCOUNT, SOURCE_ID):
+        return bool(row.counterparty)
+    return (
+        row.kind == ALIAS
+        and bool(row.counterparty)
+        and row.via == counterparty_name(row.counterparty)
+    )
 
 
 def derivation_of(
@@ -208,15 +219,16 @@ def derivation_of(
     kinds = [k for k in LADDER if any(row.kind == k for row in covered)]
     if source is None:
         support = sum({row.via: row.support for row in covered if row.kind == ALIAS}.values())
-        linked_by = next(
-            (r.linked_by for r in covered if r.kind == ALIAS and r.linked_by in _STRONG), ""
-        )
+        linked = next((r for r in covered if r.kind == ALIAS), None)
 
         def said(kind: str) -> str:
-            sentence = KIND_SENTENCES[kind].format(payments=plural(support, "payment"), name=shape)
-            if kind == ALIAS and linked_by:
-                return sentence.replace(KIND_SENTENCES[STATED_NAME], KIND_SENTENCES[linked_by])
-            return sentence
+            if kind == ALIAS and linked is not None:
+                return alias_sentence(
+                    _reads_counterparty(linked),
+                    linked.linked_by or STATED_NAME,
+                    plural(support, "payment"),
+                )
+            return KIND_SENTENCES[kind].format(payments=plural(support, "payment"), name=shape)
 
         source = ", and from the ".join(said(kind) for kind in kinds)
     return Derivation(
@@ -406,6 +418,13 @@ def resolve_form_value(value: str, known: Iterable[str]) -> str:
     return found[0]
 
 
+def alias_sentence(reads_counterparty: bool, linked_by: str, payments: str) -> str:
+    """How a row taken through a link says so: what it was read from (its description, or the
+    merchant name it states) and the kind of identifier that links it to its party."""
+    read = KIND_SENTENCES[STATED_NAME] if reads_counterparty else KIND_SENTENCES[DESCRIPTION]
+    return f"{read}, named by the {KIND_SENTENCES[linked_by]} through {payments} seen by both"
+
+
 def _set_aside_methods(text: str) -> str:
     return " ".join(strip_leading_methods(text.split()))
 
@@ -535,6 +554,16 @@ def name_of(
         return Named(HELD_PREFIX + held, ACCOUNT)
     for kind, text in ((ACCOUNT, account), (SOURCE_ID, source_id), (STATED_NAME, counterparty)):
         stated = _identifier_name(kind, text)
+        if stated and kind == STATED_NAME:
+            standing = (aliases or {}).get(STATED_PREFIX + stated)
+            if standing is not None:
+                return Named(
+                    standing.name,
+                    ALIAS,
+                    via=stated,
+                    support=standing.rows,
+                    linked_by=standing.kind,
+                )
         if stated:
             return Named(stated, kind)
     shape = _shape(description)
@@ -557,6 +586,10 @@ class Fields(NamedTuple):
     #: The household account the row's other side is, where it is a transfer between its own.
     held: str = ""
 
+
+#: Begins the key, in the links `learned_links` returns, of a STATED NAME that stands for a party
+#: named by an identifier; a description-shape has no punctuation, so it cannot be mistaken for one.
+STATED_PREFIX = "stated: "
 
 #: Begins the key of a party that is one of the household's own accounts; the rest is the
 #: account's name. Its label is "your <account's label>" (`display_names`).
@@ -613,14 +646,35 @@ def learned_links(rows: Iterable[Fields | tuple[str, str]]) -> dict[str, Alias]:
     stated_forms: dict[tuple[str, ...], set[str]] = {}
     form_cache: dict[str, tuple[str, ...]] = {}
     bare: dict[str, Counter[tuple[str, ...]]] = {}
-    for row in rows:
-        fields = Fields(*row)
+    held = [Fields(*row) for row in rows]
+    # A stated name that rows carrying an account or id state with ONE of them stands for that
+    # party: the same bank states the name on months it states no id (an export covering years
+    # the feed does not), and without this join those months are a second name with the same
+    # label and a series splits into a stopped half and a new one (measured on the invented
+    # large store: 40 names became 78). A name stated with two different identifiers (two people
+    # sharing one) stands for neither.
+    carried: dict[str, Counter[str]] = {}
+    loose: set[str] = set()
+    for fields in held:
+        stated = counterparty_name(fields.counterparty)
+        strong = _strong_name(fields)
+        if strong is not None:
+            kind_of[strong.name] = strong.kind
+            if stated:
+                carried.setdefault(stated, Counter())[strong.name] += 1
+        elif stated:
+            loose.add(stated)
+    standing = {name: next(iter(found)) for name, found in carried.items() if len(found) == 1}
+    stated_links = {
+        STATED_PREFIX + name: Alias(key, carried[name][key], kind_of[key])
+        for name, key in standing.items()
+        if name in loose
+    }
+    for fields in held:
         description, counterparty = fields.description, fields.counterparty
         stated = counterparty_name(counterparty)
         strong = _strong_name(fields)
-        party = strong.name if strong is not None else stated
-        if strong is not None:
-            kind_of[strong.name] = strong.kind
+        party = strong.name if strong is not None else standing.get(stated, stated)
         shape = _shape(description)
         if party and shape:
             seen.setdefault(shape, Counter())[party] += 1
@@ -643,6 +697,7 @@ def learned_links(rows: Iterable[Fields | tuple[str, str]]) -> dict[str, Alias]:
         if len(counted) == 1
         for name in counted
     }
+    links.update(stated_links)
     index: _OpeningIndex | None = None
     for shape, forms in bare.items():
         if shape in seen:

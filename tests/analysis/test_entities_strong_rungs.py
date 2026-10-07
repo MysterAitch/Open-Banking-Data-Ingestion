@@ -22,6 +22,7 @@ invented.
 from __future__ import annotations
 
 from collections import Counter
+from datetime import date
 
 from obdi.analysis.entities import (
     ACCOUNT,
@@ -29,11 +30,13 @@ from obdi.analysis.entities import (
     DESCRIPTION,
     SOURCE_ID,
     STATED_NAME,
+    STATED_PREFIX,
     UNNAMED_PARTY,
     EntitiesView,
     Fields,
     display_names,
     is_identifier_key,
+    learned_links,
     name_origins,
     name_readings,
     names_of,
@@ -173,6 +176,87 @@ class TestAStatementRowJoinsThePartyItsDescriptionWasSeenWith:
         rows = [Fields("FEB RENT", "Alex Rowan", ALEX), Fields("JAN RENT", "")]
 
         assert names_of(rows)[1].kind == DESCRIPTION
+
+
+class TestAStatedNameStandsForThePartyItWasStatedWith:
+    """The measured fault: an export states "Oakmere Coffee" for the years the feed does not, the
+    feed states the same name with the merchant's uid, and the uid made the feed's months one name
+    and the export's months another (40 names became 78 on the invented large store)."""
+
+    def test_Names_WhenAFeedAndAnExportStateOneName_AreOnePartyAndTheExportRowsSayHow(self):
+        rows = [Fields("OAKMERE COFFEE 1", "Oakmere Coffee", "", "starling:uid-oak")] * 6 + [
+            Fields("OAKMERE COFFEE", "Oakmere Coffee")
+        ] * 6
+
+        named = names_of(rows)
+
+        assert len({n.name for n in named}) == 1
+        assert Counter(n.kind for n in named) == {SOURCE_ID: 6, ALIAS: 6}
+        linked = [n for n in named if n.kind == ALIAS]
+        assert {(n.linked_by, n.support, n.via) for n in linked} == {
+            (SOURCE_ID, 6, "oakmere coffee")
+        }
+
+    def test_Names_WhenTwoPeopleShareAStatedName_AStatedOnlyRowJoinsNeither(self):
+        rows = [
+            Fields("RENT", "Sam Okafor", SAM_ONE),
+            Fields("RENT", "Sam Okafor", SAM_TWO),
+            Fields("RENT", "Sam Okafor"),
+        ]
+
+        named = names_of(rows)
+
+        assert named[2].kind == STATED_NAME
+        assert named[2].name == "sam okafor"
+        assert len({n.name for n in named}) == 3
+
+    def test_Names_WhenNoRowStatedTheNameWithAnIdentifier_NothingIsInvented(self):
+        rows = [Fields("COFFEE", "Oakmere Coffee")] * 3
+
+        assert not [key for key in learned_links(rows) if key.startswith(STATED_PREFIX)]
+        assert {n.kind for n in names_of(rows)} == {STATED_NAME}
+
+    def test_Label_OfAPartyJoinedThroughItsStatedName_IsThatName(self):
+        rows = [
+            Fields("COFFEE", "Oakmere Coffee", "", "starling:uid-oak"),
+            Fields("X", "Oakmere Coffee"),
+        ]
+
+        named = names_of(rows)
+
+        assert display_names(rows, named) == {named[0].name: "oakmere coffee"}
+
+    def test_Derivation_OfAStatedRowJoinedToAnIdentifier_SaysSoInTheWordsOfBothKinds(self):
+        from obdi.analysis.entities import Covered, derivation_of
+
+        def covered(kind: str, via: str, linked_by: str) -> Covered:
+            return Covered(
+                date(2026, 1, 1), "current", "", -100, "GBP", "COFFEE", "a", "Oakmere Coffee",
+                kind, via, 6, linked_by,
+            )
+
+        found = derivation_of(
+            "oakmere coffee", [covered(ALIAS, "oakmere coffee", SOURCE_ID)]
+        )
+
+        assert found.source == (
+            "bank's merchant name, named by the bank's own id for the party "
+            "through 6 payments seen by both"
+        )
+        assert found.printed == ("Oakmere Coffee",)
+
+    def test_Derivation_OfADescriptionJoinedToAnAccount_SaysTheDescriptionWasLinked(self):
+        from obdi.analysis.entities import Covered, derivation_of
+
+        row = Covered(
+            date(2026, 1, 1), "current", "", -100, "GBP", "JAN RENT", "a", "",
+            ALIAS, "rent", 3, ACCOUNT,
+        )
+
+        assert derivation_of("alex rowan", [row]).source == (
+            "description, named by the other party's account number "
+            "through 3 payments seen by both"
+        )
 
 
 class TestTheSummaryCountsNamesByEveryKind:

@@ -266,10 +266,7 @@ def _feed_raw(day: date, uid: str, minor: int, name: str) -> dict[str, object]:
         "sourceSubType": "CONTACTLESS",
         "status": "SETTLED",
         "transactingApplicationUserUid": "user-1",
-        "counterPartyType": "MERCHANT",
-        "counterPartyUid": f"merchant-{abs(hash(name)) % 997}",
-        "counterPartyName": name,
-        "counterPartySubEntityUid": "sub-1",
+        **_party_fields(name, minor),
         "reference": name.upper(),
         "country": "GB",
         "spendingCategory": "GROCERIES",
@@ -327,6 +324,36 @@ class _Item:
     body: dict[str, object]
 
 
+def _party_fields(name: str, minor: int, transfer_with: str = "") -> dict[str, object]:
+    """What the bank's feed states about the other party, in the shape the real API uses.
+
+    The merchant's uid is the merchant's, not the payment's: every payment to one merchant
+    states one uid. (This builder once hashed the whole payment name, which gave a merchant a
+    new uid for each payment and so measured a bank that does not exist.) A payment IN is a bank
+    transfer: its party is a payee with a sort code and an account number, as a transfer states
+    them, and the uid; a card payment states the uid and no account. All invented.
+    """
+    if transfer_with:
+        return {
+            "counterPartyType": "CATEGORY",
+            "counterPartyUid": transfer_with,
+            "counterPartyName": "Space",
+            "counterPartySubEntityUid": "sub-1",
+        }
+    merchant = name.rsplit(" ", 1)[0]
+    digest = zlib.crc32(merchant.encode())
+    fields: dict[str, object] = {
+        "counterPartyType": "PAYEE" if minor > 0 else "MERCHANT",
+        "counterPartyUid": f"merchant-{digest:08x}",
+        "counterPartyName": merchant,
+        "counterPartySubEntityUid": "sub-1",
+    }
+    if minor > 0:
+        fields["counterPartySubEntityIdentifier"] = f"{digest % 900000 + 100000}"
+        fields["counterPartySubEntitySubIdentifier"] = f"{digest // 7 % 90000000 + 10000000}"
+    return fields
+
+
 def _feed_item(
     uid: str,
     category: str,
@@ -360,11 +387,7 @@ def _feed_item(
             "sourceSubType": "CONTACTLESS",
             "status": "SETTLED",
             "transactingApplicationUserUid": "user-1",
-            "counterPartyType": "CATEGORY" if internal else "MERCHANT",
-            "counterPartyUid": transfer_with
-            or f"merchant-{zlib.crc32(name.encode()) % 997}",
-            "counterPartyName": "Space" if internal else name.rsplit(" ", 1)[0],
-            "counterPartySubEntityUid": "sub-1",
+            **_party_fields(name, minor, transfer_with),
             "reference": name,
             "country": "GB",
             "spendingCategory": "GROCERIES",

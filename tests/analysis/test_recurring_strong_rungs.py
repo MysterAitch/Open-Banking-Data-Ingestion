@@ -86,6 +86,29 @@ class TestARentSeriesKeyedByAccount:
         assert (found.cadence, found.count) == ("monthly", 12)
         assert found.shape == "alex rowan"
 
+    def test_ExportMonthsThatStateOnlyTheName_AndFeedMonthsThatAlsoStateAnId_AreOneSeries(self):
+        # The measured split: an export states "Gym" for the years the feed does not, the feed
+        # states the same name with the merchant's uid, and the two were a stopped series and a
+        # new one.
+        export = [
+            row(i, when, "GYM MEMBERSHIP", counterparty="Gym", source="starling-csv")
+            for i, when in enumerate(months(6))
+        ]
+        feed = [
+            Transaction(
+                account_id=ACCOUNT, amount_minor=-85000, value_date=when, booking_date=when,
+                description="GYM MEMBERSHIP", counterparty="Gym",
+                party_source_id="starling:uid-gym", source="starling",
+                tier=SourceTier.SYNTHETIC, entity_id=f"f{i:03}",
+            )
+            for i, when in enumerate(months(6, start=7))
+        ]
+
+        (found,) = series_of([*export, *feed])
+
+        assert (found.cadence, found.count) == ("monthly", 12)
+        assert found.shape == "gym"
+
     def test_TheSameRentToTwoAccountsInTurn_IsTwoSeriesNotOne(self):
         # The landlord's account changed halfway: the reference is the same all year, and the
         # two accounts are two parties however alike the rows look.
