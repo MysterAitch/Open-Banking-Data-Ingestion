@@ -321,7 +321,23 @@ acted), a pulled payment's day on the posting date (when the collector took it, 
 it fitted on. Constructed test: a Sunday habit whose rows post on Mondays and Tuesdays is
 still "most Sundays".
 
+BUILT (the date meanings, then the per-kind fit). `value_date` is the transaction date and
+`booking_date` the day the bank posted, entered, or settled it, where a source states both
+(Starling: `transactionTime` and `settlementTime`; card statements: the row's date and its
+entered date). TrueLayer states one date, `timestamp`, which its notes call the posting date,
+and no separate transaction time, so both fields carry it and `Transaction.states_transaction_date`
+is false for it. The detector fits a pulled series on `booking_date` and a habit or scheduled
+series on `value_date`, falling back to the other where the preferred date keeps no cadence, and
+`Series.dated_on` says which. Not solved: a habit seen only through the aggregator has only
+posting days, so a Sunday habit it posts on Mondays and Tuesdays splits the weekday share and is
+not found; and the fold keeps the latest sighting's `value_date`, so a row seen by both an
+aggregator and a statement may carry either's meaning.
+
 ## Rejected so far
+
+- **Moving TrueLayer's `value_date` to a transaction time**: there is none to move to, and
+  `value_date` feeds the content key, so changing any source's `value_date` would change row
+  identities. Only `booking_date` (not in the key) was changed, for Starling and statements.
 
 - **The withdrawn "bank names" proposal rule** (0.4.364, withdrawn with R2c): offered two names
   as a merge to tick because their rows state one merchant. Rows that state one merchant are one

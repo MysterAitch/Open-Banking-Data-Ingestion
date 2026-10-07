@@ -127,6 +127,21 @@ _TYPE_WORDS: dict[tuple[str, str], tuple[str, str]] = {
     for pair in method.coded
 }
 
+#: WHICH DATE A RHYTHM IS MEASURED ON, decided by kind in `_series_of`. A habit's or a scheduled
+#: payment's rhythm is when the owner acted, so it is fitted on the transaction date
+#: (`Transaction.value_date`); a pulled payment's day is when the collector took it ("due on the
+#: 27th"), so it is fitted on the posting date (`booking_date`). A card feed that posts a Sunday
+#: payment on the Monday or Tuesday would otherwise spread a habit across the weekdays, and a
+#: Direct Debit whose card statement lists it on the last day of the month would be fitted on
+#: that day and not on the 1st it was taken.
+DATED_MADE = "on the day the payment was made"
+DATED_TAKEN = "on the day it was taken"
+#: The source states no transaction date, only the day the payment posted (`Transaction.
+#: states_transaction_date`), so a habit's rhythm here is the posting day's.
+DATED_POSTED = "on the posting date, the only date its source states"
+#: Every row of the series carries one date; there is no second to measure on.
+DATED_ONE = "on the one date its rows state"
+
 #: name -> (period in days, tolerance in days) for the cadences counted in days.
 _DAY_CADENCES: tuple[tuple[str, int], ...] = (
     ("weekly", 7),
@@ -205,6 +220,10 @@ class Series:
     is_income: bool
     stopped: bool
     changed: bool
+    #: Which date the cadence was fitted on, said as a phrase (`DATED_MADE`, `DATED_TAKEN`,
+    #: `DATED_POSTED`, or `DATED_ONE`), so a reader knows whether "most Sundays" is the day the
+    #: owner paid or the day the bank posted it.
+    dated_on: str = DATED_ONE
 
 
 @dataclass(frozen=True)
@@ -429,24 +448,75 @@ def _kind_of(
     return HABIT, "by shape: weekday rhythm, " + ("amounts vary" if not steady else "gaps allowed")
 
 
+@dataclass(frozen=True)
+class _Frame:
+    """A group's legs in the order of one of their dates, and the cadence fitted on that date.
+
+    `fit` is None where the dates do not keep a cadence. The two frames of a group are fitted
+    before its kind is known, because the kind is read from the coded type words and, failing
+    those, from the shape of whichever fit exists; the kind then says which frame is the series.
+    """
+
+    legs: Sequence[_Leg]
+    fit: _Fit | None
+    taken: bool
+
+
+def _day_of(row: Transaction, frame: _Frame) -> date:
+    """The row's date in the frame's terms: the posting date for a posting frame."""
+    return row.booking_date if frame.taken else row.value_date
+
+
+def _is_transfer(legs: Sequence[_Leg]) -> bool:
+    transfers = sum(
+        1 for leg in legs if leg.other or leg.row.is_internal_transfer or leg.row.transfer_confirmed
+    )
+    return transfers * 2 >= len(legs)
+
+
+def _dating(chosen: _Frame, kind: str) -> str:
+    """The phrase for the date `chosen` was fitted on, for a series of `kind`."""
+    legs = chosen.legs
+    if all(leg.row.booking_date == leg.row.value_date for leg in legs):
+        posting_only = sum(not leg.row.states_transaction_date for leg in legs) * 2 > len(legs)
+        return DATED_POSTED if posting_only else DATED_ONE
+    if chosen.taken:
+        return DATED_TAKEN
+    posting_only = sum(not leg.row.states_transaction_date for leg in legs) * 2 > len(legs)
+    return DATED_POSTED if posting_only and kind != PULLED else DATED_MADE
+
+
 def _series_of(
-    legs: Sequence[_Leg],
-    fit: _Fit,
+    made: _Frame,
+    taken: _Frame,
     *,
     shape: str,
     reach: dict[str, date],
     closings: Closings,
     today: date,
 ) -> Series:
+    first_fit = made.fit or taken.fit
+    if first_fit is None:  # pragma: no cover - the caller fits at least one frame
+        raise ValueError("a series needs a cadence fitted on one of its dates")
+    steady0 = _usual_amount([abs(leg.row.amount_minor) for leg in made.legs])[1]
+    kind, basis = _kind_of(
+        made.legs, first_fit, steady=steady0, is_transfer=_is_transfer(made.legs)
+    )
+    # The kind is read first (from the coded type words, else the shape of the first fit that
+    # exists) and then says which date the rhythm is measured on; the other date is the fallback
+    # where the preferred one keeps no cadence.
+    frames = (taken, made) if kind == PULLED else (made, taken)
+    chosen = frames[0] if frames[0].fit is not None else frames[1]
+    fit = chosen.fit
+    if fit is None:  # pragma: no cover - one frame fits, and the choice prefers one that does
+        raise ValueError("a series needs a cadence fitted on one of its dates")
+    legs = chosen.legs
     newest = legs[-1].row
     magnitudes = [abs(leg.row.amount_minor) for leg in legs]
     usual, steady = _usual_amount(magnitudes)
     latest = magnitudes[-1]
     drift = (latest - usual) / usual * 100 if usual else 0.0
-    transfers = sum(
-        1 for leg in legs if leg.other or leg.row.is_internal_transfer or leg.row.transfer_confirmed
-    )
-    is_transfer = transfers * 2 >= len(legs)
+    is_transfer = _is_transfer(legs)
     direction = "in" if newest.amount_minor > 0 else "out"
     paid_from = Counter(leg.row.account_id for leg in legs)
     # The account most often paid from; of two as common, the one paid from most recently.
@@ -460,7 +530,6 @@ def _series_of(
     # Where a series was paid from more than one account, none has stopped while any account it
     # uses still reaches a day past the expected one.
     horizon = min(today, max(reach.get(ref, today) for ref in paid_from))
-    kind, basis = _kind_of(legs, fit, steady=steady, is_transfer=is_transfer)
     habit = kind == HABIT
     grace = timedelta(days=_GRACE_DAYS[fit.cadence])
     # A pulled series collected by a card account the store holds statements for: a slot the
@@ -502,13 +571,14 @@ def _series_of(
         basis=basis,
         periods=len(legs) + fit.missed,        explained=explained_inside + explained_after,
         missed=0 if habit else fit.missed - explained_inside,
-        first_seen=legs[0].row.value_date,
-        last_seen=newest.value_date,
+        first_seen=_day_of(legs[0].row, chosen),
+        last_seen=_day_of(legs[-1].row, chosen),
         next_expected=fit.next_expected,
         is_transfer=is_transfer,
         is_income=direction == "in" and not is_transfer,
         stopped=stopped,
         changed=steady and abs(drift) > CHANGE_PERCENT,
+        dated_on=_dating(chosen, kind),
     )
 
 
@@ -541,12 +611,16 @@ def _split(
     today: date,
     splits: Sequence[Callable[[_Leg], object]],
 ) -> list[Series]:
-    legs.sort(key=lambda leg: (leg.row.value_date, leg.row.entity_id))
     if len(legs) < MIN_OCCURRENCES:
         return []
-    fit = _fit([leg.row.value_date for leg in legs])
-    if fit is not None:
-        return [_series_of(legs, fit, shape=shape, reach=reach, closings=closings, today=today)]
+    legs.sort(key=lambda leg: (leg.row.value_date, leg.row.entity_id))
+    made = _Frame(legs, _fit([leg.row.value_date for leg in legs]), taken=False)
+    taken = made
+    if any(leg.row.booking_date != leg.row.value_date for leg in legs):
+        posted = sorted(legs, key=lambda leg: (leg.row.booking_date, leg.row.entity_id))
+        taken = _Frame(posted, _fit([leg.row.booking_date for leg in posted]), taken=True)
+    if made.fit is not None or taken.fit is not None:
+        return [_series_of(made, taken, shape=shape, reach=reach, closings=closings, today=today)]
     if not splits:
         return []
     parts: dict[object, list[_Leg]] = defaultdict(list)
@@ -602,8 +676,11 @@ def find_recurring(
 
     reach: dict[str, date] = {}
     for row in rows:
-        if row.value_date > reach.get(row.account_id, date.min):
-            reach[row.account_id] = row.value_date
+        # The newest day the account holds on either date, since a series fitted on the posting
+        # date is judged "stopped" against the newest posting as well as the newest purchase.
+        newest = max(row.value_date, row.booking_date)
+        if newest > reach.get(row.account_id, date.min):
+            reach[row.account_id] = newest
 
     groups: dict[tuple[str, ...], list[_Leg]] = defaultdict(list)
     shapes: dict[tuple[str, ...], str] = {}

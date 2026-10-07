@@ -21,7 +21,14 @@ import html
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
-from ..analysis.recurring import HABIT, PULLED, SCHEDULED, RecurringFindings, Series
+from ..analysis.recurring import (
+    DATED_POSTED,
+    HABIT,
+    PULLED,
+    SCHEDULED,
+    RecurringFindings,
+    Series,
+)
 from ..core.logs import say
 from ..core.masking import MASKED_TOTAL, mask_text
 from ..core.page_times import date_with_age, percent_text, span_words
@@ -184,6 +191,10 @@ def _row(series: Series, names: AccountsShown, today: date, *, unmasked: bool) -
     else:
         rhythm = f"{_esc(cadence_words(series))} &middot; {plural(series.count, 'time')} {ending}"
     kind = f"{_esc(series.kind)}, {_esc(series.basis)}"
+    if series.dated_on == DATED_POSTED:
+        # Said only where it is not what the reader would assume: a rhythm that is the bank's
+        # posting day because that is the one date the source states.
+        kind += f", {_esc(series.dated_on)}"
     how = f'{rhythm} &middot; <span class="recur-kind">{kind}</span>'
     return (
         f'<li class="{klass}"><span class="recur-name">{_name(series, unmasked=unmasked)}</span>'

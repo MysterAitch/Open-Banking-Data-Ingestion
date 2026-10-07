@@ -16,7 +16,15 @@ from datetime import UTC, date, datetime, timedelta
 import httpx
 import pytest
 
-from obdi.analysis.recurring import HABIT, PULLED, SCHEDULED, RecurringFindings, Series
+from obdi.analysis.recurring import (
+    DATED_MADE,
+    DATED_POSTED,
+    HABIT,
+    PULLED,
+    SCHEDULED,
+    RecurringFindings,
+    Series,
+)
 from obdi.cli import build_web_config
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
@@ -172,6 +180,36 @@ def _list_names(root: Node) -> list[list[str]]:
         for ul in elements(root, "ul")
         if "recur-list" in ul.classes
     ]
+
+
+class TestWhichDateTheRhythmIsOn:
+    """A rhythm fitted on a posting date, because that is the one date its source states, says so.
+
+    KNOWN ANSWER, decided first: the row of a series dated on the posting date carries the
+    words "on the posting date"; the same series dated on the day the payment was made, which is
+    what a reader assumes, carries nothing extra.
+    """
+
+    def test_RecurringPage_WhenRhythmIsOnThePostingDate_SaysSo(self):
+        series = replace(
+            _stopped_series("acct-x", "alpha", date(2026, 9, 10), stopped=False),
+            dated_on=DATED_POSTED,
+        )
+
+        text = _rendered([series]).text()
+
+        assert "on the posting date" in text
+
+    def test_RecurringPage_WhenRhythmIsOnTheDayItWasMade_SaysNothingExtra(self):
+        series = replace(
+            _stopped_series("acct-x", "alpha", date(2026, 9, 10), stopped=False),
+            dated_on=DATED_MADE,
+        )
+
+        text = _rendered([series]).text()
+
+        assert "posting date" not in text
+        assert "day the payment was made" not in text
 
 
 class TestStoppedLongAgoFold:
