@@ -195,7 +195,7 @@ def pages_month_after(
     return _two_pages(
         [
             _figure_row("21 Jun", "EXAMPLE SHOP LTD   LONDON   GBR   on 20 Jun", "300.00", "out"),
-            _figure_row("25 Jun", "REFUND EXAMPLE SHOP LTD   LONDON   GBR   on 24 Jun", "20.00", "in"),
+            _figure_row("25 Jun", "REFUND EXAMPLE SHOP LTD   LONDON   on 24 Jun", "20.00", "in"),
         ],
         [_figure_row("28 Jun", "EXAMPLE CAFE   LEEDS   GBR   on 27 Jun", "25.00", "out")],
         previous=previous,

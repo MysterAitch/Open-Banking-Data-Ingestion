@@ -73,6 +73,11 @@ class StatementReading:
     #: The label the closing balance was read from, as the document prints it; empty where none
     #: was found, or where the reader does not say.
     closing_label: str = ""
+    #: True where the statement itself states the closing balance as money the account owes its
+    #: owner (a card in credit, printed with a minus), for a reader that tells; False otherwise.
+    #: Evidence for the reader report like `closing_label`, so it is not kept with the reading:
+    #: what is kept is the signed balance, and a page that wants the words reads the document.
+    closing_in_credit: bool = False
 
     @property
     def discrepancy_minor(self) -> int:
