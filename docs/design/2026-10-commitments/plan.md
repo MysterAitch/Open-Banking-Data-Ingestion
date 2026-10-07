@@ -523,6 +523,42 @@ The same projection as a YNAB import file, or a CSV, is the same code with a dif
 - Still open with the defaults standing: 1 (product), 2 (one list), 4 (fixed amount), 5
   (declared), 6 (the card's), 8 (the thresholds), 9, 10, 11, 12, 13 (gated), 14.
 
+## 6a. The line between obdi and a budgeting tool, and when it would move
+
+The owner, 2026-10-07: "initially OBDI was intended as just a data aggregator that will then
+feed into other mature budgeting and planning software. To be able to populate the other
+software programmatically means needing to have things categorised and budgets defined and
+payees normalised and so forth, else this needs to be done repeatedly for every full rebuild
+and every software combination - hence building this functionality in now. While it was
+initially out of scope, it seems like we're being led into the path of rebuilding what already
+exists but as our own custom and tailor made version out of necessity. At what point do our
+own developments and features/functionality outpace the third parties and at what point do we
+declare 'build ynab but with these features extra and take this other feature from actual and
+so forth'?"
+
+The line, stated once: **obdi owns facts and derived truths; the budgeting tool owns
+allocation.** What this phase pulls into obdi - entities, commitments and their terms, flows
+and receivables, categories and rules, splits, goals - are facts that must survive a rebuild
+and a change of tool, which is why they cannot live in Actual; that is the master-record rule,
+not budgeting. What Actual keeps is envelope arithmetic and the daily act of allocating:
+available to spend, moving money between categories, month rollover, a phone app for doing it
+in a shop. obdi's forward calendar and Position REPORT what each envelope should hold; they do
+not let the owner spend from one.
+
+The line moves only on evidence, any one of these sustained for a couple of months:
+
+1. the projection to Actual drops what Actual cannot represent (flows, receivables, the
+   funding stance, goals with their target types), so the budget seen there stops meaning what
+   obdi knows;
+2. the owner does hand work in Actual despite the rule, because the projection did not say it;
+3. the owner opens obdi's calendar to decide and Actual only to confirm.
+
+When one fires, what is built is the envelope view and a phone layout for it - one more page
+over data, verification, and projection that are already obdi's - and not a rewrite. Before
+one fires, building it is the expensive kind of nice-to-have. Until then "Actual is a
+disposable view" stands, and the projection (R8) is made complete enough that sign 1 is a
+measurement, not an impression: the projection reports what it could not carry.
+
 ## 7. Pushing the boundaries
 
 Each with what it would take and what would justify it.
