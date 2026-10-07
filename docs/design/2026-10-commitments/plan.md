@@ -122,31 +122,54 @@ statement budgets as the Recurring page does.
 
 ## 3. The model, drawn out
 
-Nine kinds of thing. Four are declared (a person says so), three are derived (computed from the
-transactions and the declarations), two are both.
+Eight kinds of thing, and ONE of them carries every role a person or an organisation can play.
+Four are declared (a person says so), two are derived (computed from the transactions and the
+declarations), two are both.
+
+The owner, 2026-10-07, on an earlier draft that had a "party" beside a "payee entity": "A party
+is just a specialist variation of a payee/entity/something ... `me` can be an entity which has
+accounts and transactions in the same way that wife/partner/parent/child/nursery/Microsoft/
+anthropic/utility company/Sainsbury's/Lidl is an entity, and that entity can be a
+payer/payee/service provider/account owner/whatever? Santander can be an entity too, where that
+entity charges interest on a credit card and so forth while also being a provider of that
+account?" So: one ENTITY kind, and roles are relations.
 
 ```
-Provider ──< Product ──< Commitment ──< Term window (amount, billed currency, cadence, day,
-   │                        │   │          period covered, my share)          [declared]
-   │                        │   └──── Flow ──< Leg (payer, from, to, via; external or held)
-   │                        │                                                  [declared]
-   │                        └──< Occurrence (a matched transaction, or a leg's match)
-   │                                                                           [derived]
-   └──< Payee entity ──< Variant (source text as printed, source, location, metadata)
-                                                                          [declared + derived]
-Category ──< Rule (payee entity or shape → category; a commitment implies one)   [declared]
-Transaction ──< Split part (amount, category, note; parts sum to the amount)    [declared]
+Entity ──< Variant (source text as printed, source, location, merchant id, address)
+  │                                                                       [declared + derived]
+  ├── is the counterparty of ──> Transaction                                   [derived]
+  ├── provides ──< Product ──< Commitment ──< Term window (amount, billed currency, cadence,
+  │                              │   │          day, period covered, my share, stance) [declared]
+  │                              │   └──── Flow ──< Leg (from entity, to entity, via account;
+  │                              │                  held or external; outgoing or receivable)
+  │                              │                                              [declared]
+  │                              └──< Occurrence (a matched transaction, or a leg's match)
+  │                                                                             [derived]
+  ├── owns ──> Account (sole, or jointly with a share)                         [declared]
+  └── is party to ──> Leg                                                      [declared]
+Category ──< Rule (entity or shape → category; a commitment implies one)       [declared]
+Transaction ──< Split part (amount, category, note; parts sum to the amount)   [declared]
 Target / accrual (what a category must hold by when; what a prepaid period costs a month)
                                                                                [derived]
 ```
 
-- **Provider.** Who is paid: Microsoft, Octopus, the landlord, a registrar. A human name; one or
-  more payee entities belong to it (the bank prints "MSFT*" and "Microsoft Ireland" for one
-  provider).
-- **Product.** What is bought from the provider: M365 Family, 1 TB extra storage, Xbox Live. One
-  provider, several products, each its own commitment. This is the owner's "noting e.g. Microsoft
-  offer m365 plus additional storage plus Xbox live".
-- **Commitment.** One recurring thing: a product, the payee entity it is paid through, and its
+- **Entity.** Anyone or anything that pays, is paid, provides, owns, or charges: `me`, the
+  partner, a child, the nursery, Microsoft, Octopus, the landlord, a registrar, Sainsbury's,
+  Santander. One display name over every variant the sources print (the bank prints "MSFT*" and
+  "Microsoft Ireland" for one entity); a variant is kept exactly as printed with the source that
+  printed it and any location, merchant id, or address a feed gives. Nothing is overwritten. The
+  entity is what rules, commitments, and the ledger name; the variants are what the fold shows.
+  A model may propose an entity for a shape; a person confirms it. Its ROLES are relations, and
+  one entity holds several: Santander provides the card AND is the counterparty of the interest
+  it charges on it - one entity, two relations, no special case. `me` is an entity: the household
+  is the set of entities whose accounts obdi holds, and Position is what the entities I am
+  count. The one distinction that stays is HELD versus EXTERNAL, and it is a fact about an
+  account, not an entity: a leg from or to an account obdi holds is checked; one from or to an
+  account it does not hold is declared and never checked.
+- **Product.** What is bought from an entity that provides: M365 Family, 1 TB extra storage,
+  Xbox Live. One provider, several products, each its own commitment. This is the owner's
+  "noting e.g. Microsoft offer m365 plus additional storage plus Xbox live".
+- **Commitment.** One recurring thing: a product, the entity it is paid through, and its
   terms as **dated windows** - amount, the currency it is billed in, cadence, usual day, and two
   fields the Recurring page does not have: the **period a payment covers** (a month; a year; 36
   months for a domain) and **my share** (all of it; half; a fixed amount; the rest after a
@@ -167,14 +190,9 @@ Target / accrual (what a category must hold by when; what a prepaid period costs
 - **Occurrence.** One instance of a commitment happening: the transaction (or transactions, one
   per held leg) obdi matched to it, with the day, the amount, the account, and which window it
   fell in. The detector's occurrences are these without the declaration.
-- **Payee entity.** The owner's display text, over every variant the sources print. A variant is
-  kept exactly as printed with the source that printed it and any location, merchant id, or
-  address a feed gives. The entity is what rules, commitments, and the ledger name; the variants
-  are what the fold shows. Nothing is overwritten. A model may propose an entity for a shape; a
-  person confirms it.
 - **Category and Rule.** A category is a name in a tree (Household > Energy > Gas). A rule maps
-  a payee entity (or, before one exists, a shape) to a category; a commitment implies a rule for
-  its payee. A bank's own category is a suggestion with its basis. A rule applied is recorded on
+  an entity (or, before one exists, a shape) to a category; a commitment implies a rule for
+  its entity. A bank's own category is a suggestion with its basis. A rule applied is recorded on
   the row as derived state with its basis: "by rule R", "confirmed", "the bank says".
 - **Split.** Parts of one transaction, each with an amount, a category, and a note, summing to the
   row's amount. Declared on the transaction; the row is untouched.
@@ -407,19 +425,19 @@ The same projection as a YNAB import file, or a CSV, is the same code with a dif
 6. **Where does interest on a carried card balance go?** (a) attributed pro rata to the
    commitments in the balance; (b) the card's own cost. Recommended: (b). The pro-rata share is
    true and useless (pence), and the card's interest is a thing to reduce as a whole.
-7. **How is an external partner represented?** (a) a named party, with legs to and from; (b) an
-   account of kind "external" in the registry. Recommended: (a), a party is not an account and
-   must never appear on Today or in Position; but its incoming legs need a payee entity, which
-   (a) gives. A party is also what a JOINT ACCOUNT needs (the owner, 2026-10-07: "On the
-   horizon is a shared/joint account ... the framing and metadata may be important/relevant to
-   build in/take into account early"): an account's ownership becomes a declared fact - sole,
-   or joint with its parties and their shares - like its kind and parent, and a transaction on
-   a joint account is attributed to a party or to the household, by rule (the card used, the
-   payee, the flow it belongs to) or by hand, defaulting to the household. Position and the
-   forward calendar then count the owner's share of the account's balance and of what leaves
-   it; a shared bill's flow may name the joint account as the payer with both parties'
-   contributions as incoming legs into it. Nothing else in the model changes. The party and
-   the ownership fact are built in R3 so the joint account fits when it arrives.
+7. **How is an external partner represented?** Answered by the owner's own framing (section
+   3): as an ENTITY, the same kind of thing as Microsoft or Sainsbury's or `me`, with the roles
+   it plays as relations - counterparty of the transfers it sends, party to a leg, joint owner
+   of an account. Not an account; never on Today or in Position by itself. A JOINT ACCOUNT then
+   needs nothing new (the owner, 2026-10-07: "On the horizon is a shared/joint account ... the
+   framing and metadata may be important/relevant to build in/take into account early"): an
+   account's ownership is a declared fact - which entities own it and in what shares - like its
+   kind and parent, and a transaction on a joint account is attributed to an entity or to the
+   household, by rule (the card used, the counterparty, the flow it belongs to) or by hand,
+   defaulting to the household. Position and the forward calendar count the owner's share of
+   the account's balance and of what leaves it; a shared bill's flow may name the joint account
+   as the payer with both owners' contributions as incoming legs into it. The entity is built
+   in R2 and ownership in R3, so the joint account fits when it arrives.
 8. **What does "fully funded without going overboard" mean in numbers for a space?** Needed:
    the sum of the shares due from the space in the month, by the earliest draw-down day. Surplus:
    the balance beyond that sum after the last draw-down. Recommended thresholds: say "needed" at
@@ -521,27 +539,30 @@ answered "not a commitment" is a detector fault to record. Tests: one item per s
 at four; never a fault item; gone once answered; "Later" returns on the next occurrence and not
 before; the masked page carries no payee or amount in the item.
 
-**R2. The payee entity and the display name on the ledger.**
-Build: the entity table with variants; the ledger row shows the entity's name where one exists
-and the fold lists the variants as each source printed them with their metadata; a press on a
-row names it, and names every row sharing the shape; a commitment points at the entity. The
-detector groups by entity where one exists and by shape otherwise. Measure: on the real store,
+**R2. The entity and the display name on the ledger.**
+Build: the one entity kind with its variants, and its first two roles - counterparty of a
+transaction, and provider of a product; `me` is created as an entity with the store; the ledger
+row shows the entity's name where one exists and the fold lists the variants as each source
+printed them with their metadata; a press on a row names it, and names every row sharing the
+shape; a commitment points at the entity. The detector groups by entity where one exists and
+by shape otherwise. The later roles (owns an account, is party to a leg) are added in R3.
+Measure: on the real store,
 how many rows gain a name from how many presses (shapes per entity). Tests: naming one row
 names its siblings; a source's text is never altered; the masked page shows neither name nor
 variant; a merge of two shapes into one entity joins two series into one history.
 
 **R3. Flows and shares, with the bills space's sum on Today.**
-Build: a PARTY as a declared thing (named, never an account, never on Today or in Position) and
-an account's OWNERSHIP as a declared fact (sole, or joint with its parties and shares) - both
-small, built here so a joint account fits when it arrives (question 7); a commitment's share
-and its flow as legs, incoming legs as receivables; the leg matcher (entity, amount window, day
-tolerance); the space's monthly sum by draw-down day; Today's line when the space is short from
-the 25th of the month before, and "owed to you" when a receivable is past its day; the account
-page's "Expected" fold for a space. Measure: on the real store, the bills space's computed need
+Build: the entity's OWNS and IS PARTY TO roles - an account's ownership as a declared fact
+(which entities, in what shares; `me` solely by default) and a leg's entities - built here so
+a joint account fits when it arrives (question 7); a commitment's share and its flow as legs,
+incoming legs as receivables; the leg matcher (entity, amount window, day tolerance); the
+space's monthly sum by draw-down day; Today's line when the space is short from the 25th of the
+month before, and "owed to you" when a receivable is past its day; the account page's
+"Expected" fold for a space. Measure: on the real store, the bills space's computed need
 against what the owner actually transfers. Tests: the three-leg rent example end to end, each
 leg matched or reported missing; the receivable reported and then closed by a transfer; the
 external leg never checked; the sum over three commitments by day; silence once funded; a
-joint account declared with two parties shows the owner's share in Position.
+joint account declared with two owning entities shows the owner's share in Position.
 
 Then, each its own slice:
 
