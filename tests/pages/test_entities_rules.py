@@ -144,8 +144,10 @@ class TestPaymentMethodWordsAreNotThePayee:
         assert _TYPE_WORDS == {
             ("source", "DIRECT_DEBIT"): ("pulled", "Direct Debit"),
             ("transaction_category", "DIRECT_DEBIT"): ("pulled", "Direct Debit"),
+            ("method", "Direct debit"): ("pulled", "Direct Debit"),
             ("sourceSubType", "CARD_SUBSCRIPTION"): ("pulled", "card subscription"),
             ("transaction_category", "STANDING_ORDER"): ("scheduled", "standing order"),
+            ("method", "Standing order"): ("scheduled", "standing order"),
         }
 
     def test_MethodList_WhenAPhraseIsListedTwice_IsRefused(self):

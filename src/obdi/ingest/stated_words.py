@@ -13,9 +13,10 @@ listed field is a closed vocabulary the source owns (a payment's kind, never its
 value that is not a short word of that kind is not kept. A field a source adds later is kept by
 adding its name to `CODED_FIELDS`, which a rebuild then applies to every landed artefact.
 
-WHICH SOURCES. The bank's feed and the aggregator state coded kinds. A file export and a
-statement state none, so a sighting of theirs holds no words, and a round-up leg derived from
-an item holds none of the item's (it is not the item).
+WHICH SOURCES. The bank's feed and the aggregator state coded kinds. A file export and most
+statements state none, so a sighting of theirs holds no words; the exception is a statement whose
+layout separates a payment's method from its party, which `CODED_FIELDS` lists. A round-up leg
+derived from an item holds none of the item's (it is not the item).
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from ..core.models import Transaction
-from .payment_links import AGGREGATORS, FIRST_PARTY_FEEDS
+from .payment_links import FIRST_PARTY_FEEDS
 
 #: The coded fields each source states, whose values are kept. The one place they are named.
 CODED_FIELDS: Mapping[str, tuple[str, ...]] = {
@@ -43,6 +44,9 @@ CODED_FIELDS: Mapping[str, tuple[str, ...]] = {
         "transaction_classification",
         "currency",
     ),
+    # The one statement layout that separates a payment's method from its party
+    # (`nationwide_pdf.METHOD_PHRASES`): the method it printed, in the reader's spelling.
+    "nationwide-statement-pdf": ("method",),
 }
 
 #: The longest value kept. A coded word is short; anything longer is text and is not kept.
@@ -72,7 +76,7 @@ def recorded_words(transaction: Transaction) -> list[tuple[str, str]]:
     """What to keep of this sighting: every coded word its source states for it."""
     from .providers.starling import ROUND_UP_LEG_SUFFIX
 
-    if transaction.source not in FIRST_PARTY_FEEDS | AGGREGATORS:
+    if transaction.source not in CODED_FIELDS:
         return []
     if transaction.source in FIRST_PARTY_FEEDS and (
         not transaction.source_id or transaction.source_id.endswith(ROUND_UP_LEG_SUFFIX)

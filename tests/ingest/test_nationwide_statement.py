@@ -26,6 +26,7 @@ fixture it belongs to.
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -920,3 +921,172 @@ class TestBalancesForAnchors:
 
         assert usable == []
         assert unusable == 1
+
+
+# A STATEMENT WHOSE ROWS STATE THEIR PARTY. Start balance 1,000.00 (100,000). Hand working:
+#
+#   row  date    first line                      second line                   movement
+#   1    06 Jul  Direct debit TESCO MOBILE       phone bill                    -  4,000
+#   2    07 Jul  Payment to ALEX ROWAN           jan rent                      - 10,000
+#   3    08 Jul  Bank credit EXAMPLE EMPLOYER    Effective Date 09 Jul 2026    +200,000
+#   4    10 Jul  EXAMPLE SHOP LTD                (none: one line)              -    500
+#   5    11 Jul  Direct debit EXAMPLE WATER      (none: one line)              -  2,000
+#   6    12 Jul  Payment tomorrow CLUB           ref 77                        -    300
+#   7    13 Jul  Standing order EXAMPLE LETTINGS ref 12                        - 50,000
+#
+# Row 6 begins "Payment to" as a string but not as a phrase: it ends mid-word.
+# 100,000 - 4,000 - 10,000 + 200,000 - 500 - 2,000 - 300 - 50,000 = 233,200 -> End 2,332.00.
+WITH_PARTIES = [
+    "TOP|3|31 July 2026|1000.00|2332.00",
+    "HEAD",
+    "OPENING|2026|1000.00|2|30/06/2026",
+    "ROW|06 Jul|Direct debit TESCO MOBILE|40.00||",
+    "WRAP|phone bill",
+    "ROW|07 Jul|Payment to ALEX ROWAN|100.00||",
+    "WRAP|jan rent",
+    "ROW|08 Jul|Bank credit EXAMPLE EMPLOYER||2,000.00|",
+    "WRAP|Effective Date 09 Jul 2026",
+    "ROW|10 Jul|EXAMPLE SHOP LTD|5.00||",
+    "ROW|11 Jul|Direct debit EXAMPLE WATER|20.00||",
+    "ROW|12 Jul|Payment tomorrow CLUB|3.00||",
+    "WRAP|ref 77",
+    "ROW|13 Jul|Standing order EXAMPLE LETTINGS|500.00||2,332.00",
+    "WRAP|ref 12",
+    "END",
+]
+
+
+def party_rows():
+    reading = read(WITH_PARTIES)
+    assert reading.reconciles, reading.notes
+    return {row.value_date.day: row for row in reading.transactions}
+
+
+class TestARowThatStatesItsParty:
+    def test_Row_WhenTwoLinesAreMethodAndPartyThenReference_StatesThePartyAndKeepsTheReference(
+        self,
+    ):
+        row = party_rows()[6]
+
+        assert (row.counterparty, row.description) == ("TESCO MOBILE", "phone bill")
+        assert row.method == "Direct debit"
+
+    def test_Row_WhenPaidToAPerson_StatesThePersonWithoutTheMethodPhrase(self):
+        row = party_rows()[7]
+
+        assert (row.counterparty, row.description, row.method) == (
+            "ALEX ROWAN", "jan rent", "Payment to",
+        )
+
+    def test_Row_WhenTheSecondLineIsAnEffectiveDate_IsAPostingDateAndNotTheReference(self):
+        row = party_rows()[8]
+
+        assert row.counterparty == "EXAMPLE EMPLOYER"
+        assert row.posted == date(2026, 7, 9)
+        assert "Effective" not in row.description
+        assert row.description == "Bank credit EXAMPLE EMPLOYER"
+
+    def test_Row_WhenOnlyOneLineIsPrinted_StatesNoParty(self):
+        shop, water = party_rows()[10], party_rows()[11]
+
+        assert (shop.counterparty, shop.method, shop.description) == (
+            "", "", "EXAMPLE SHOP LTD",
+        )
+        assert (water.counterparty, water.description) == ("", "Direct debit EXAMPLE WATER")
+
+    def test_Row_WhenTheFirstLineMerelyBeginsLikeAMethod_StatesNoParty(self):
+        row = party_rows()[12]
+
+        assert row.counterparty == ""
+        assert row.description == "Payment tomorrow CLUB ref 77"
+
+    def test_Row_WhenTheMethodIsStandingOrder_StatesItAsTheMethod(self):
+        row = party_rows()[13]
+
+        assert (row.counterparty, row.method) == ("EXAMPLE LETTINGS", "Standing order")
+
+    def test_Row_WhenNoMethodPhraseBeginsTheFirstLine_ALongNameThatWrapsIsNotAParty(self):
+        # The existing statement's second row wraps its description; with no method phrase on
+        # its first line, nothing says the second line is a reference rather than more name.
+        rows = read(STATEMENT).transactions
+
+        assert all(row.counterparty == "" for row in rows)
+        assert rows[1].description.endswith("(REF 12345) (AB12345678)")
+
+
+class TestAPartyStatingRowKeepsItsIdentity:
+    def test_Transactions_CarryThePartyAndKeyOnTheWholePrintedLine(self):
+        from obdi.ingest.identity import content_key
+
+        rows = list(
+            NationwideStatementPdfParser().parse(
+                build_nationwide_pdf(WITH_PARTIES), account_id="a"
+            )
+        )
+        first = rows[0]
+
+        assert (first.counterparty, first.description) == ("TESCO MOBILE", "phone bill")
+        assert first.content_key == content_key(
+            amount_minor=-4000,
+            value_date=date(2026, 7, 6),
+            description="Direct debit TESCO MOBILE phone bill",
+        )
+        assert first.raw["method"] == "Direct debit"
+
+    def test_StoredRows_WhenTheKeyRepairRunsAtALaterSchemaBump_KeepTheirKey(self, tmp_path):
+        """The repair re-keys a row from its stored description; these rows store only the
+        reference and key on the whole line, so it must recognise that key as current."""
+        with Store(tmp_path / "s.sqlite3") as store:
+            path = tmp_path / "july.pdf"
+            path.write_bytes(build_nationwide_pdf(WITH_PARTIES))
+            import_file(store, path, account_id="nationwide-current")
+            before = sorted(t.content_key for t in store.all_transactions())
+
+            store._migrate_content_keys()
+            after = sorted(t.content_key for t in store.all_transactions())
+
+        assert len(before) == 7
+        assert before == after
+
+    def test_Reading_WhenKeptAndReadBack_IsEqual(self):
+        from obdi.ingest.parsers.statement_reading import reading_from_json, reading_to_json
+
+        reading = read(WITH_PARTIES)
+
+        assert reading_from_json(reading_to_json(reading)).transactions == reading.transactions
+
+    def test_Reading_WhenKeptBeforeRowsStatedAParty_ReadsAsStatingNone(self):
+        from obdi.ingest.parsers.statement_reading import reading_from_json, reading_to_json
+
+        text = json.loads(reading_to_json(read(WITH_PARTIES)))
+        text["transactions"] = [item[:4] for item in text["transactions"]]
+        del text["format"]
+
+        older = reading_from_json(json.dumps(text))
+
+        assert all(row.counterparty == "" and row.method == "" for row in older.transactions)
+
+
+class TestTheMethodReachesTheDetector:
+    def test_Words_WhenARowStatesAMethod_ArePairedLikeAFeedsCodedType(self):
+        from obdi.ingest.stated_words import recorded_words, words_in
+
+        row = next(
+            NationwideStatementPdfParser().parse(
+                build_nationwide_pdf(WITH_PARTIES), account_id="a"
+            )
+        )
+
+        assert words_in(row.source, row.raw) == [("method", "Direct debit")]
+        assert recorded_words(row) == [("method", "Direct debit")]
+
+    def test_Words_WhenARowStatesNoMethod_AreNone(self):
+        from obdi.ingest.stated_words import recorded_words
+
+        rows = list(
+            NationwideStatementPdfParser().parse(
+                build_nationwide_pdf(WITH_PARTIES), account_id="a"
+            )
+        )
+
+        assert recorded_words(rows[3]) == []

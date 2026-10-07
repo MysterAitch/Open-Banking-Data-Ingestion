@@ -21,6 +21,20 @@ class StatementRow:
     #: posted or entered it, beside the date of the transaction), or None where it states one.
     #: Never the row's own date: that is `value_date`.
     posted: date | None = None
+    #: The other party, where the format's layout SEPARATES it from the rest of the line (the
+    #: Nationwide FlexAccount prints `<method> <party>` on a row's first line and the reference on
+    #: its second); empty for a format that prints one undifferentiated narrative, which is most
+    #: of them. A capability a reader declares from its layout, never a guess over the text.
+    counterparty: str = ""
+    #: The payment method the layout printed before the party ("Direct debit"), in the reader's
+    #: own spelling; empty where none was separated. Carried like a feed's coded type, so the
+    #: detector reads it for months only a statement covers.
+    method: str = ""
+    #: The row's whole text as the document printed it, where `description` is only part of it:
+    #: the payment's identity (its content key) is made from this, so a reader that begins to
+    #: separate a party does not move the key of rows it already read. Empty where `description`
+    #: is the whole text.
+    printed: str = ""
 
 
 @dataclass(frozen=True)
@@ -109,7 +123,9 @@ class StatementReading:
 #: lacking it (`kept_format`) and read again from the document, rather than being taken to say
 #: the document states nothing. 2: every layout that prints a start day or a day beside its
 #: opening balance keeps it as `period_start`, and `produced` is kept.
-READING_FORMAT = 2
+#: 3: a row may state the party its layout separates, the payment method printed before it, and
+#: its whole printed text (`StatementRow.counterparty`, `.method`, `.printed`).
+READING_FORMAT = 3
 
 
 def kept_format(text: str) -> int:
@@ -141,7 +157,15 @@ def reading_to_json(reading: StatementReading) -> str:
             "credit_limit_minor": reading.credit_limit_minor,
             "account_name": reading.account_name,
             "transactions": [
-                [row.value_date.isoformat(), row.description, row.amount_minor, _day(row.posted)]
+                [
+                    row.value_date.isoformat(),
+                    row.description,
+                    row.amount_minor,
+                    _day(row.posted),
+                    row.counterparty,
+                    row.method,
+                    row.printed,
+                ]
                 for row in reading.transactions
             ],
             "end_of_day_minor": [
@@ -160,9 +184,11 @@ def reading_to_json(reading: StatementReading) -> str:
 
 
 def _row_from_json(item: list[object]) -> StatementRow:
-    """One row as `reading_to_json` wrote it: three fields, or four with the posting date.
+    """One row as `reading_to_json` wrote it: three fields, four with the posting date, seven
+    with the party, the method, and the printed text.
 
-    A reading kept before rows carried a posting date has three, and reads as having none.
+    A reading kept before rows carried a posting date has three, and reads as having none; one
+    kept before they carried a party has four, and reads as stating none.
     """
     day, description, minor, *rest = item
     return StatementRow(
@@ -170,6 +196,9 @@ def _row_from_json(item: list[object]) -> StatementRow:
         str(description),
         int(str(minor)),
         _maybe_day(rest[0]) if rest else None,
+        str(rest[1]) if len(rest) > 1 else "",
+        str(rest[2]) if len(rest) > 2 else "",
+        str(rest[3]) if len(rest) > 3 else "",
     )
 
 

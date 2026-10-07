@@ -1661,6 +1661,11 @@ class Store:
         against fresh sightings of the same payments. Every input to the key
         lives in stored columns, so this is a deterministic recompute - and a
         no-op on every open after the first.
+
+        One input does not live in a stored column: a statement row whose reader separates a
+        party stores only the reference as its description and keys on the whole printed line
+        (`StatementRow.printed`, kept in `raw`). A key that agrees with that line is not
+        stale, or the next schema bump would silently move every such row's identity.
         """
         from .identity import content_key as compute
 
@@ -1675,13 +1680,33 @@ class Store:
                 value_date=date.fromisoformat(row["value_date"]),
                 description=row["description"],
             )
-            if row["content_key"] != expected:
+            if row["content_key"] != expected and not self._keyed_on_printed_line(row):
                 updates.append((expected, row["entity_id"]))
         if updates:
             self.connection.executemany(
                 "UPDATE transactions SET content_key = ? WHERE entity_id = ?", updates
             )
             self.connection.commit()
+
+    def _keyed_on_printed_line(self, row: sqlite3.Row) -> bool:
+        """Whether the row's key is the one made from the whole line a statement printed."""
+        from .identity import content_key as compute
+
+        stored = self.connection.execute(
+            "SELECT raw FROM transactions WHERE entity_id = ?", (row["entity_id"],)
+        ).fetchone()
+        try:
+            printed = json.loads(stored["raw"]).get("printed")
+        except (TypeError, ValueError, AttributeError):
+            return False
+        if not isinstance(printed, str) or not printed:
+            return False
+        keyed = compute(
+            amount_minor=row["amount_minor"],
+            value_date=date.fromisoformat(row["value_date"]),
+            description=printed,
+        )
+        return bool(row["content_key"] == keyed)
 
     # The request_meta and record_count columns had their own migration here. It
     # was removed as unreachable, not as unused: _migrate_raw_artefact_key runs

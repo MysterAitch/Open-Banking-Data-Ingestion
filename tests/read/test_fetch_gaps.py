@@ -14,6 +14,7 @@ from datetime import date
 import pytest
 
 from fetch_gaps_world import TODAY, load_household
+from obdi.ingest.parsers.statement_reading import READING_FORMAT
 from obdi.ingest.statement_terms import keep_statement_readings, statement_periods
 from obdi.ingest.store import Store
 from obdi.read.fetch_gaps import (
@@ -277,7 +278,9 @@ class TestWhatAStatementStatesOfItsOwnPeriod:
             store.connection.commit()
 
             assert keep_statement_readings(store) >= 1
-            assert json.loads(store.stored_statement_reading(digest)[1])["format"] == 2
+            assert json.loads(store.stored_statement_reading(digest)[1])["format"] == (
+                READING_FORMAT
+            )
 
     def test_KeptReading_WhenAlreadyHoldingAPeriod_IsNotReadAgain(self, world):
         with Store(world.db) as store:

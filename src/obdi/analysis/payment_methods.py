@@ -43,7 +43,11 @@ METHODS: tuple[PaymentMethod, ...] = (
     PaymentMethod(
         "direct-debit",
         ("direct debit", "direct debits"),
-        (("source", "DIRECT_DEBIT"), ("transaction_category", "DIRECT_DEBIT")),
+        (
+            ("source", "DIRECT_DEBIT"),
+            ("transaction_category", "DIRECT_DEBIT"),
+            ("method", "Direct debit"),
+        ),
     ),
     PaymentMethod(
         "card-subscription",
@@ -53,7 +57,7 @@ METHODS: tuple[PaymentMethod, ...] = (
     PaymentMethod(
         "standing-order",
         ("standing order", "standing orders"),
-        (("transaction_category", "STANDING_ORDER"),),
+        (("transaction_category", "STANDING_ORDER"), ("method", "Standing order")),
     ),
     PaymentMethod("faster-payment", ("faster payment", "faster payments")),
     PaymentMethod("contactless-payment", ("contactless payment", "contactless payments")),

@@ -412,15 +412,20 @@ class PdfStatementParser(StatementParser):
                 # The day the bank entered it where the statement states one, else its one date.
                 booking_date=row.posted or row.value_date,
                 description=row.description,
+                counterparty=row.counterparty,
                 source=self.source,
                 source_id=None,
                 # A statement carries no transaction id, so identity rests
-                # entirely on content - the same footing as a CSV export.
+                # entirely on content - the same footing as a CSV export. The content is the
+                # row's whole printed text where the reader separates a party from the
+                # reference: a reader that learns to do so must not move the key of rows it
+                # already read, which an export's dedupe and the Actual replay's imported id
+                # both rest on.
                 tier=SourceTier.SYNTHETIC,
                 content_key=content_key(
                     amount_minor=row.amount_minor,
                     value_date=row.value_date,
-                    description=row.description,
+                    description=row.printed or row.description,
                 ),
                 # Every date the row states, ISO, so each is kept against the payment
                 # (`stated_times.recorded_for`) and none is lost to the one that became its date.
@@ -429,6 +434,9 @@ class PdfStatementParser(StatementParser):
                     "transaction_date": row.value_date.isoformat(),
                     **({"posting_date": row.posted.isoformat()} if row.posted else {}),
                     "description": row.description,
+                    **({"counterparty": row.counterparty} if row.counterparty else {}),
+                    **({"method": row.method} if row.method else {}),
+                    **({"printed": row.printed} if row.printed else {}),
                     "amount": row.amount_minor / 100,
                 },
             )

@@ -585,6 +585,91 @@ class _Reader:
             )
 
 
+#: The phrases the layout prints before the party on a row's first line, in the spelling this
+#: reader gives them. Taken from the invented-and-masked shapes seen so far, and grown from real
+#: statements: a first line that begins with none of them states no party, and the row stays
+#: named by its description rather than by a guess about where a name begins.
+METHOD_PHRASES: tuple[str, ...] = (
+    "Direct debit",
+    "Standing order",
+    "Payment to",
+    "Bank credit",
+    "Transfer from",
+    "Transfer to",
+)
+
+#: A second line that is a date fact and no reference: "Effective Date 21 Jun 2026".
+_EFFECTIVE_DATE = re.compile(
+    r"^effective\s*date:?\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$", re.IGNORECASE
+)
+
+
+def _after_phrase(text: str, phrase: str) -> str | None:
+    """What follows `phrase` at the start of `text`, or None where text does not begin with it.
+
+    Compared without regard to case or the spaces inside the phrase (the word grid sometimes runs
+    them together), but the phrase must END at a space: "Payment tomorrow" does not begin with
+    "Payment to", and a party is only what follows a boundary."""
+    wanted = "".join(phrase.split()).casefold()
+    seen = ""
+    for index, char in enumerate(text):
+        if not char.isspace():
+            seen += char.casefold()
+        if seen == wanted:
+            rest = text[index + 1 :]
+            return rest.strip() if rest[:1].isspace() else None
+        if not wanted.startswith(seen):
+            return None
+    return None
+
+
+def _effective_date(text: str) -> date | None:
+    found = _EFFECTIVE_DATE.match(tidy(text))
+    month = _month(found.group(2)) if found else None
+    if found is None or month is None:
+        return None
+    try:
+        return date(int(found.group(3)), month, int(found.group(1)))
+    except ValueError:
+        return None
+
+
+def _row_of(entry: _Entry) -> StatementRow:
+    """A row, stating the party only where the layout separates it.
+
+    A two-line row is `<method> <party>` and then a reference (or a date fact). One line, or a
+    first line that begins with no method this reader knows, is one narrative and states nothing:
+    a wrapped long party name looks exactly like a second line, which is why the method phrase
+    must be there. The reference becomes the description; "Effective Date ..." is a posting date
+    and not a reference, so the description is then the first line as printed. The whole printed
+    text stays on the row, which is what the payment's identity is made from."""
+    printed = tidy(" ".join(entry.words))
+    first, rest = tidy(entry.words[0]), tidy(" ".join(entry.words[1:]))
+    if rest:
+        for phrase in sorted(METHOD_PHRASES, key=len, reverse=True):
+            party = _after_phrase(first, phrase)
+            if party:
+                effective = _effective_date(rest)
+                if effective is not None:
+                    description, posted = first, effective
+                elif rest.casefold().replace(" ", "").startswith("effectivedate"):
+                    description, posted = printed, None
+                else:
+                    description, posted = rest, None
+                return StatementRow(
+                    value_date=entry.day,
+                    description=description,
+                    amount_minor=entry.amount_minor,
+                    posted=posted,
+                    counterparty=party,
+                    method=phrase,
+                    printed=printed,
+                )
+    return StatementRow(
+        value_date=entry.day, description=printed, amount_minor=entry.amount_minor
+    )
+
+
 def read_statement(table: list[Row]) -> StatementReading:
     """Read the whole document's rows of positioned cells into a reading.
 
@@ -600,14 +685,7 @@ def read_statement(table: list[Row]) -> StatementReading:
     for row in table:
         reader.feed(row)
 
-    reading.transactions = [
-        StatementRow(
-            value_date=entry.day,
-            description=tidy(" ".join(entry.words)),
-            amount_minor=entry.amount_minor,
-        )
-        for entry in reader.entries
-    ]
+    reading.transactions = [_row_of(entry) for entry in reader.entries]
     if not reader.heading_seen:
         notes.append(
             "the transaction table's heading could not be found - a statement "
