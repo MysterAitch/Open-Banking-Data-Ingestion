@@ -68,7 +68,7 @@ from datetime import date, timedelta
 from itertools import pairwise
 from statistics import median_low
 
-from .identity import normalise_description
+from .entities import shape_of
 from .models import Transaction, TransactionStatus
 from .stated_words import words_in
 
@@ -226,13 +226,6 @@ class RecurringFindings:
 
     series: list[Series]
     today: date
-
-
-def _words_of(text: str) -> str:
-    """The payee shape: the normalised description without any word that holds a digit."""
-    return " ".join(
-        w for w in normalise_description(text).split() if not any(c.isdigit() for c in w)
-    )
 
 
 def _month_index(day: date) -> int:
@@ -597,7 +590,7 @@ def find_recurring(
             shapes[between] = ""
             groups[between].append(_Leg(row, opposite.account_id))
             continue
-        shape = _words_of(row.description)
+        shape = shape_of(row.description)
         if not shape:
             continue
         payee = ("payee", shape, row.currency, direction)
