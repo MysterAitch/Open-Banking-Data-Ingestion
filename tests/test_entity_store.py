@@ -317,6 +317,84 @@ class TestFoldingOneEntityIntoAnother:
             store.fold_entity(second, "  ", now=NOW)
 
 
+class TestAChildEntity:
+    def parent(self, store) -> int:
+        return store.create_entity("Fernhollow", GROCER, now=NOW)
+
+    def test_Child_WhenMadeFromOneName_MovesThatNameAndRecordsTheParent(self, store):
+        parent = self.parent(store)
+
+        child = store.make_child_entity(parent, GROCER[2], "Fernhollow Express", now=NOW)
+
+        found = {e.name: e for e in store.entities_with_shapes()}
+        assert found["Fernhollow Express"].parent_id == parent
+        assert found["Fernhollow Express"].shapes == (GROCER[2],)
+        assert found["Fernhollow"].shapes == tuple(sorted(GROCER[:2]))
+        assert found["Fernhollow Express"].id == child
+        assert store.shape_entities()[GROCER[2]] == (child, "Fernhollow Express")
+
+    def test_Child_WhenItsOnlyNameIsSplitApart_IsRemovedAndTheNameIsFree(self, store):
+        parent = self.parent(store)
+        store.make_child_entity(parent, GROCER[2], "Fernhollow Express", now=NOW)
+
+        store.detach_shape(GROCER[2], now=NOW)
+
+        assert names_and_shapes(store) == {"Fernhollow": tuple(sorted(GROCER[:2]))}
+        store.create_entity("Fernhollow Express", GROCER[2:], now=NOW)
+
+    def test_Child_WhenTheNameIsInUse_IsRefusedAndNothingMoves(self, store):
+        parent = self.parent(store)
+        store.create_entity("Express", ("other shape",), now=NOW)
+
+        with pytest.raises(EntityRefused, match="already an entity"):
+            store.make_child_entity(parent, GROCER[2], "EXPRESS", now=NOW)
+
+        assert store.shape_entities()[GROCER[2]][1] == "Fernhollow"
+
+    def test_Child_WhenTheParentWasRemoved_IsRefused(self, store):
+        parent = self.parent(store)
+        for shape in GROCER:
+            store.detach_shape(shape, now=NOW)
+
+        with pytest.raises(EntityRefused, match="no such entity"):
+            store.make_child_entity(parent, GROCER[2], "Express", now=NOW)
+
+    def test_Child_WhenTheNameIsNotUnderThatParent_IsRefused(self, store):
+        parent = self.parent(store)
+        store.create_entity("Other", ("other shape",), now=NOW)
+
+        with pytest.raises(EntityRefused, match="not under"):
+            store.make_child_entity(parent, "other shape", "Express", now=NOW)
+        with pytest.raises(EntityRefused, match="not under"):
+            store.make_child_entity(parent, "a shape nobody holds", "Express", now=NOW)
+
+    def test_Child_WhenItIsTheParentsOnlyName_IsRefusedSoTheParentIsNotLeftEmpty(self, store):
+        parent = store.create_entity("Fernhollow", GROCER[:1], now=NOW)
+
+        with pytest.raises(EntityRefused, match="only name"):
+            store.make_child_entity(parent, GROCER[0], "Express", now=NOW)
+
+        assert names_and_shapes(store) == {"Fernhollow": (GROCER[0],)}
+
+    @pytest.mark.parametrize("name", ["", "  "])
+    def test_Child_WhenNamedNothing_IsRefused(self, store, name):
+        parent = self.parent(store)
+
+        with pytest.raises(EntityRefused, match="needs a name"):
+            store.make_child_entity(parent, GROCER[2], name, now=NOW)
+
+    def test_Fold_WhenTheFoldedEntityHasChildren_TheyMoveUnderTheTarget(self, store):
+        parent = self.parent(store)
+        child = store.make_child_entity(parent, GROCER[2], "Express", now=NOW)
+        target = store.create_entity("Fernhollow Group", ("group shape",), now=NOW)
+
+        store.fold_entity(parent, "Fernhollow Group", now=NOW)
+
+        by_name = {e.name: e for e in store.entities_with_shapes()}
+        assert by_name["Express"].parent_id == target
+        assert by_name["Express"].id == child
+
+
 class TestAStoreFromBeforeTheEntityRole:
     def test_Store_StampedVersion23WithoutTheRoleColumn_GrowsItOnOpenAndTakesAnOwner(
         self, tmp_path

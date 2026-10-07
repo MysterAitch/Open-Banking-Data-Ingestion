@@ -48,6 +48,7 @@ SPLIT_ROUTE = "/entities-split"
 RENAME_ROUTE = "/entities-rename"
 FOLD_ROUTE = "/entities-fold"
 OWN_ROUTE = "/entities-own"
+CHILD_ROUTE = "/entities-child"
 
 #: How many proposed groups lead the page; the rest are behind one fold, so thirty names stay
 #: within three phone screens (`test_entities_phone_layout`).
@@ -225,14 +226,23 @@ def _entity(
     *,
     unmasked: bool,
     suggestion: Suggestion | None = None,
+    children: Sequence[Entity] = (),
+    nested: bool = False,
 ) -> str:
     total = sum(counts.get(shape, 0) for shape in entity.shapes)
     across = _across(len(entity.shapes), total)
     could = _could_belong(entity, suggestion, counts, unmasked=unmasked)
+    inside = "".join(
+        _entity(child, counts, unmasked=unmasked, nested=True) for child in children
+    )
+    if inside:
+        inside = f'<div class="ent-children">{inside}</div>'
+    kind = "ent-entity ent-child" if nested else "ent-entity"
     if not unmasked:
+        heading = "h4" if nested else "h3"
         return (
-            f'<section class="ent-entity"><h3>{_sealed(entity.name)}</h3>'
-            f'<p class="ent-why">{across}.</p>{could}</section>'
+            f'<section class="{kind}"><{heading}>{_sealed(entity.name)}</{heading}>'
+            f'<p class="ent-why">{across}.</p>{could}{inside}</section>'
         )
     lines = "".join(
         f'<li><span class="txt">{_esc(shape)}</span><span class="ent-count">'
@@ -242,16 +252,36 @@ def _entity(
         '<button class="tap" type="submit">Split apart</button></form></li>'
         for shape in entity.shapes
     )
+    heading = "h4" if nested else "h3"
     return (
-        f'<section class="ent-entity"><h3>{_esc(entity.name)}</h3>'
+        f'<section class="{kind}"><{heading}>{_esc(entity.name)}</{heading}>'
         f'<p class="ent-why">{across}.</p><ul class="ent-names">{lines}</ul>{could}'
-        '<details class="ent-fold"><summary>Rename, or fold into another entity</summary>'
+        '<details class="ent-fold"><summary>Rename, fold, or make a name its own entity'
+        "</summary>"
         f'<form method="post" action="{RENAME_ROUTE}">'
         f'<input type="hidden" name="entity" value="{entity.id}">'
         f"{_name_field(entity.name, 'Rename', label='Name')}</form>"
         f'<form method="post" action="{FOLD_ROUTE}">'
         f'<input type="hidden" name="entity" value="{entity.id}">'
-        f"{_name_field('', 'Fold into', label='Entity')}</form></details></section>"
+        f"{_name_field('', 'Fold into', label='Entity')}</form>"
+        f"{_child_form(entity, nested=nested)}</details>{inside}</section>"
+    )
+
+
+def _child_form(entity: Entity, *, nested: bool) -> str:
+    """Make one of the entity's names an entity of its own, under it: for a name that is a
+    different thing (a retailer's subscription service billed under a similar name). Only one
+    level is offered, and not for an entity with one name, which would be left with none."""
+    if nested or len(entity.shapes) < 2:
+        return ""
+    options = "".join(
+        f'<option value="{_esc(shape)}">{_esc(shape)}</option>' for shape in entity.shapes
+    )
+    return (
+        f'<form method="post" action="{CHILD_ROUTE}">'
+        f'<input type="hidden" name="entity" value="{entity.id}">'
+        f'<label>Name<select name="shape">{options}</select></label>'
+        f"{_name_field('', 'Make its own entity', label='Called')}</form>"
     )
 
 
@@ -259,9 +289,21 @@ def _entities(view: EntitiesView, *, unmasked: bool) -> str:
     if not view.entities:
         return ""
     offered = {s.entity.id: s for s in view.suggestions}
+    live = {e.id for e in view.entities}
+    children: dict[int, list[Entity]] = {}
+    for entity in view.entities:
+        if entity.parent_id in live:
+            children.setdefault(entity.parent_id or 0, []).append(entity)
     return "<h2>Entities</h2>" + "".join(
-        _entity(e, view.counts, unmasked=unmasked, suggestion=offered.get(e.id))
+        _entity(
+            e,
+            view.counts,
+            unmasked=unmasked,
+            suggestion=offered.get(e.id),
+            children=children.get(e.id, ()),
+        )
         for e in view.entities
+        if e.parent_id not in live
     )
 
 

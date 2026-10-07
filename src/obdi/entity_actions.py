@@ -21,7 +21,8 @@ SPLIT = "split"
 RENAME = "rename"
 FOLD = "fold"
 OWN = "own"
-ACTIONS = (MERGE, SPLIT, RENAME, FOLD, OWN)
+CHILD = "child"
+ACTIONS = (MERGE, SPLIT, RENAME, FOLD, OWN, CHILD)
 
 
 def _one(form: Mapping[str, Sequence[str]], field: str) -> str:
@@ -69,6 +70,13 @@ def apply_action(
             raise EntityRefused("There is no such entity; it may have been removed.")
         store.rename_entity(int(entity), _one(form, "name"))
         return f"Renamed to {' '.join(_one(form, 'name').split())}."
+    if action == CHILD:
+        entity = _one(form, "entity")
+        if not entity.isdigit():
+            raise EntityRefused("There is no such entity; it may have been removed.")
+        parent = next((e.name for e in store.entities_with_shapes() if e.id == int(entity)), "")
+        store.make_child_entity(int(entity), _one(form, "shape"), _one(form, "name"))
+        return f"Made {' '.join(_one(form, 'name').split())} its own entity under {parent}."
     if action == FOLD:
         entity = _one(form, "entity")
         if not entity.isdigit():

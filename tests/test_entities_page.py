@@ -531,6 +531,75 @@ class TestWhatAFirstMergeTeaches:
         assert self.could_forms(shown(base)) == []
 
 
+class TestMakingANameItsOwnEntity:
+    def parent(self, base: str, db) -> int:
+        merge_group(base)
+        with Store(db) as store:
+            return store.entities_with_shapes()[0].id
+
+    def test_Child_WhenPressed_ListsTheChildUnderItsParentAndSaysSo(self, world):
+        base, db = world
+        parent = self.parent(base, db)
+
+        response = press(
+            base, "/entities-child", entity=parent, shape=EXPRESS, name="Fernhollow Express"
+        )
+
+        assert outcome_of(response.text) == (
+            "Made Fernhollow Express its own entity under Fernhollow Grocers."
+        )
+        (family,) = [
+            s for s in elements(parse(response.text), "section")
+            if "ent-entity" in s.classes and "ent-child" not in s.classes
+        ]
+        assert [h.text() for h in elements(family, "h4")] == ["Fernhollow Express"]
+        assert "3 names gathered into 2 entities" in summary_of(response.text)
+
+    def test_Child_WhenFetchedMasked_SealsTheChildAndOffersNoPress(self, world):
+        base, db = world
+        parent = self.parent(base, db)
+        press(base, "/entities-child", entity=parent, shape=EXPRESS, name="Fernhollow Express")
+
+        page = httpx.get(f"{base}/entities", timeout=60).text
+
+        assert "express" not in page.casefold()
+        assert "/entities-child" not in page
+
+    def test_Child_WhenTheNameIsInUse_IsRefusedWithTheReason(self, world):
+        base, db = world
+        parent = self.parent(base, db)
+
+        response = press(
+            base, "/entities-child", entity=parent, shape=EXPRESS, name="fernhollow grocers"
+        )
+
+        assert response.status_code == 400
+        assert "already an entity" in refusal_of(response.text)
+
+    def test_Child_WhenTheParentIsRemoved_IsRefused(self, world):
+        base, db = world
+        parent = self.parent(base, db)
+        for shape in (LONDON, READING, EXPRESS):
+            press(base, "/entities-split", shape=shape)
+
+        response = press(base, "/entities-child", entity=parent, shape=EXPRESS, name="Other")
+
+        assert response.status_code == 400
+        assert "no such entity" in refusal_of(response.text)
+
+    @pytest.mark.parametrize("entity", ["", "abc"])
+    def test_Child_WhenTheEntityIsNotANumber_IsRefused(self, served, entity):
+        response = press(served, "/entities-child", entity=entity, shape=LONDON, name="X")
+
+        assert response.status_code == 400
+
+    def test_Child_WhenTheEntityHasOneName_OffersNoMakeItsOwnPress(self, world):
+        base, _db = world
+        merge_group(base, shapes=(LONDON,), name="Fernhollow")
+
+        assert "/entities-child" not in shown(base)
+
+
 class TestFoldingOneEntityIntoAnother:
     def two_merges(self, base: str) -> None:
         merge_group(base, shapes=(LONDON, READING), name="Fernhollow")

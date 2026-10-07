@@ -187,6 +187,61 @@ class TestFromTheEntitiesPageToTheRecurringPage:
         assert row.startswith(ENTITY)
         assert "9 times" in row
 
+    def test_RecurringPage_WhenOneNameBecomesAChildEntity_ShowsItAsItsOwnSeriesUnderItsOwnName(
+        self, world
+    ):
+        httpx.post(
+            f"{world}/entities-merge", data={"name": ENTITY, "shape": [FIRST, SECOND]}, timeout=60
+        )
+        (parent,) = [
+            e for e in elements(parse(httpx.post(f"{world}/entities", timeout=60).text), "input")
+            if e.attrs.get("name") == "entity"
+        ][:1]
+
+        made = httpx.post(
+            f"{world}/entities-child",
+            data={"entity": parent.attrs["value"], "shape": SECOND, "name": "Fernhollow Premium"},
+            timeout=60,
+        )
+
+        assert made.status_code == 200
+        rows = sorted(rows_on_recurring_page(world))
+        assert len(rows) == 2
+        assert rows[0].startswith(ENTITY) and "4 times" in rows[0]
+        assert rows[1].startswith("Fernhollow Premium") and "5 times" in rows[1]
+        listing = httpx.post(f"{world}/entities", timeout=60).text
+        sections = [s for s in elements(parse(listing), "section") if "ent-entity" in s.classes]
+        parents = [s for s in sections if "ent-child" not in s.classes]
+        (family,) = parents
+        assert [h.text() for h in elements(family, "h4")] == ["Fernhollow Premium"]
+
+    def test_RecurringPage_WhenTheChildsOnlyNameIsSplitApart_TheChildIsGoneAndTheNameFree(
+        self, world
+    ):
+        httpx.post(
+            f"{world}/entities-merge", data={"name": ENTITY, "shape": [FIRST, SECOND]}, timeout=60
+        )
+        parent = next(
+            e for e in elements(parse(httpx.post(f"{world}/entities", timeout=60).text), "input")
+            if e.attrs.get("name") == "entity"
+        ).attrs["value"]
+        httpx.post(
+            f"{world}/entities-child",
+            data={"entity": parent, "shape": SECOND, "name": "Fernhollow Premium"},
+            timeout=60,
+        )
+
+        httpx.post(f"{world}/entities-split", data={"shape": SECOND}, timeout=60)
+
+        listing = httpx.post(f"{world}/entities", timeout=60).text
+        assert "Fernhollow Premium" not in listing
+        again = httpx.post(
+            f"{world}/entities-merge",
+            data={"name": "Fernhollow Premium", "shape": [SECOND]},
+            timeout=60,
+        )
+        assert again.status_code == 200
+
     def test_RecurringPage_WhenTheOwnerSplitsOneNameApart_ShowsTwoRowsAgain(self, world):
         httpx.post(
             f"{world}/entities-merge", data={"name": ENTITY, "shape": [FIRST, SECOND]}, timeout=60

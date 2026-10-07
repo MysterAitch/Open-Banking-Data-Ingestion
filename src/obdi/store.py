@@ -4697,6 +4697,55 @@ class Store:
         self.connection.commit()
         return len(shapes), target[1]
 
+    def make_child_entity(
+        self, parent: int, shape: str, name: str, *, now: datetime | None = None
+    ) -> int:
+        """Make a new entity called `name` under `parent` and move `shape` to it, in one commit;
+        returns its id.
+
+        For a name that is a different thing from the others the parent holds (a retailer's
+        subscription service billed under a similar name): the detector then names its series by
+        the child. Refused, with nothing written, for a parent that is missing or removed, no name,
+        a name any entity has, a shape the parent does not hold now, and the parent's only name,
+        since the parent would be left holding nothing and be removed, and a child cannot sit
+        under a removed entity.
+        """
+        self._refuse_missing_entity(parent)
+        clean = _entity_name(name)
+        self._refuse_name_in_use(clean, except_id=None)
+        held = [
+            str(row["shape"])
+            for row in self.connection.execute(
+                "SELECT shape FROM entity_shapes WHERE of_entity = ? AND detached_at IS NULL",
+                (parent,),
+            )
+        ]
+        if shape not in held:
+            raise EntityRefused("That name is not under this entity; the page may have changed.")
+        if len(held) == 1:
+            raise EntityRefused(
+                "That is the only name under this entity, so it cannot become a child of it; "
+                "rename the entity instead."
+            )
+        stamp = (now or datetime.now(UTC)).isoformat()
+        try:
+            cursor = self.connection.execute(
+                "INSERT INTO entities (name, parent_id, created_at) VALUES (?, ?, ?)",
+                (clean, parent, stamp),
+            )
+            child = int(cursor.lastrowid or 0)
+            self.connection.execute(
+                "UPDATE entity_shapes SET detached_at = ? WHERE of_entity = ? AND shape = ? "
+                "AND detached_at IS NULL",
+                (stamp, parent, shape),
+            )
+            self._insert_shapes(child, [shape], stamp)
+        except BaseException:
+            self.connection.rollback()
+            raise
+        self.connection.commit()
+        return child
+
     def _live_entity_named(self, name: str) -> tuple[int, str] | None:
         for row in self.connection.execute(
             "SELECT id, name FROM entities WHERE removed_at IS NULL ORDER BY id"

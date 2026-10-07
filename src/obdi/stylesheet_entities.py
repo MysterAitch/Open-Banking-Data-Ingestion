@@ -23,4 +23,6 @@ ENTITIES_STYLES = """
  .ent-names form { margin: 0; }
  .ent-names li > span.txt { min-width: 0; overflow-wrap: anywhere; }
  .ent-more > summary, .ent-fold > summary { padding: var(--s2) 0; cursor: pointer; }
+ .ent-children { margin: var(--s2) 0 0 var(--s3); padding-left: var(--s3); border-left: 2px solid var(--rule); }
+ .ent-fold select { max-width: 100%; }
 """
