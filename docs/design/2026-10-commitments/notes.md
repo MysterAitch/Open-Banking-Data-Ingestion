@@ -300,6 +300,27 @@ real store). No row on these stores is named through a link: the constructed cas
 the join, and the real store is the first place it will show. Prediction for it: habit 1, stopped
 about 31, series about 63, names well under 1,297.
 
+## Which date a rhythm is measured on
+
+The owner, 2026-10-07: "The transaction vs posted vs other dates may be relevant to determining
+the periodicity of transactions, as part of determining which ones are recurring or habits."
+They are, and today the detector reads one field (`value_date`) that means different things by
+source: the card statement reader puts the TRANSACTION date there and keeps the entered date as
+`posted`; Starling puts `transactionTime` there; TrueLayer puts its `timestamp`, which on a
+real row was the POSTED date (feed 04-20 against the statement's transaction date 04-19). So a
+weekly habit on a feed-fed card is fitted on posting days (Mondays and Tuesdays for Sunday
+payments) and on a statement-fed month on the Sundays themselves, and the habit is the series
+with the least slack - the first to vanish in each of today's regressions.
+
+The rule to build: the derived row carries both dates consistently - the transaction date
+where a source states one (check TrueLayer's `meta` for a separate transaction time, as it
+carries a merchant name), else the posted date, marked as such - and the detector fits per
+kind: a habit's and a scheduled payment's rhythm on the transaction date (when the owner
+acted), a pulled payment's day on the posting date (when the collector took it, which is what
+"due on the 27th" means), the tolerance absorbing the drift, and the series saying which date
+it fitted on. Constructed test: a Sunday habit whose rows post on Mondays and Tuesdays is
+still "most Sundays".
+
 ## Rejected so far
 
 - **The withdrawn "bank names" proposal rule** (0.4.364, withdrawn with R2c): offered two names
