@@ -657,6 +657,17 @@ measurement, smallest first. The first three in detail.
 **Re-cut on 2026-10-07 around daily use** (section 6a): the order is what makes the owner open
 obdi each day, and the projection to Actual moves to the end as an export. The sequence:
 
+0. **R2 first: a "Manage entities" page** (the owner, 2026-10-07: "I would also prioritise an
+   early 'manage payees' (or entities) page to allow for aggregating transaction
+   counterparties. This will presumably help with streamlining the recurring transactions
+   work. Local AI integration might help with this too, but I expect we can get an 80/20 jump
+   start with simple text analysis and pattern matching."). The page lists counterparty
+   shapes by count across every account, proposes groupings by plain text analysis - shared
+   prefix, the tokens left after stripping store codes, references, and digits, case folded -
+   and merges a group into a named entity in one press, with the variants kept as printed and
+   a split-apart press for a wrong merge; rules first, the local model later and only for the
+   shapes the rules leave. The detector then groups by entity, so the series the owner counts
+   are the real things. Measured by shapes per press and the series count before and after.
 1. **R1** - confirm what recurs, so the month's obligations are known (the detector found 77
    series on the real store on 2026-10-07: 58 payments, 11 transfers, 8 incomes, 44 stopped,
    4 changed; the page took 0.54 s; the owner's precision count is pending). With it, the
