@@ -52,17 +52,24 @@ _PAN_INSTANT = re.compile(r"(until=)\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)
 #: it was made, so two runs a minute apart differ; the normaliser fixes only `HH:MM` after
 #: "finished". Cost: a fixed time of day written after "at" would be masked too; none is known.
 _CLOCK_AFTER_AT = re.compile(r"\bat \d{2}:\d{2}\b")
+#: How long a page's own computation took, printed to the hundredth ("computed: reports 0.00s,
+#: items+json 0.00s") or the tenth ("worked out in 0.0 s"). A loaded or cold machine turns 0.00
+#: into 0.01, and the account page of one invented account then differed from its baseline in
+#: about one run in ten.
+_DURATION = re.compile(r"\b\d+\.\d+ ?s\b")
 _FORMAT = 1
 
 
 def stabilised(body: str) -> str:
-    """The page as `page_equivalence.normalised` leaves it, with the two volatile shapes that
-    normaliser does not read fixed: the pan-link instant and a clock time after "at"."""
+    """The page as `page_equivalence.normalised` leaves it, with the three volatile shapes that
+    normaliser does not read fixed: the pan-link instant, a clock time after "at", and a
+    computation's duration."""
     # Imported here so that the command line, which only starts pytest, does not need `obdi`.
     from page_equivalence import normalised
 
     fixed = _PAN_INSTANT.sub(r"\1<instant>", normalised(body))
-    return _CLOCK_AFTER_AT.sub("at <clock>", fixed)
+    fixed = _CLOCK_AFTER_AT.sub("at <clock>", fixed)
+    return _DURATION.sub("<duration>", fixed)
 
 
 def digest(text: str) -> str:

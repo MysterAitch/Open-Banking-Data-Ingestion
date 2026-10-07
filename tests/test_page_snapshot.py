@@ -127,5 +127,15 @@ class TestStabilised:
     def test_Stabilised_OnAClockTimeAfterAt_FixesIt(self, volatile):
         assert "13:09" not in stabilised(volatile) and "07:45" not in stabilised(volatile)
 
+    def test_Compare_WhenOnlyHowLongAComputationTookChanged_ListsNothing(self):
+        line = "<p>computed: reports {}s, summarise {}s; worked out in {} s</p>"
+        before = {"main": {"/": line.format("0.00", "0.00", "0.0")}}
+        after = {"main": {"/": line.format("0.01", "0.12", "0.3")}}
+
+        assert differences(taken(before), taken(after)) == []
+
+    def test_Stabilised_OnAFigureThatIsNotADuration_LeavesItAlone(self):
+        assert stabilised("<p>2.50 pounds, 3.5 sources</p>") == "<p>2.50 pounds, 3.5 sources</p>"
+
     def test_Stabilised_OnATimeOfDayThatIsNotAfterAt_LeavesItAlone(self):
         assert stabilised("<p>opens 09:00</p>") == "<p>opens 09:00</p>"
