@@ -26,6 +26,36 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.371] - 2026-10-07
+
+### Changed
+- **A row carries both of its dates with one meaning each, and the detector
+  measures a rhythm on the right one.** The owner, 2026-10-07: "The
+  transaction vs posted vs other dates may be relevant to determining the
+  periodicity of transactions, as part of determining which ones are
+  recurring or habits." They are, and the detector read one field that
+  meant different things by source: the card statement reader put the
+  transaction date there and kept the entered date aside; Starling put the
+  transaction time; TrueLayer put its one timestamp, which is the posting
+  date. Now `value_date` is the transaction date where a source states one
+  and `booking_date` the posting date (Starling's settlement time; a card
+  statement's entered date; a pending sighting that states no posting day
+  yields to the settled one when they fold), and the detector decides the
+  kind first and then fits a pulled payment on the posting date ("on the day
+  it was taken" - which is what due on the 1st means) and a habit's or
+  scheduled payment's rhythm on the transaction date ("on the day the
+  payment was made"), each falling back to the other where its own keeps no
+  cadence, and the series says which. No content key or row id changes: the
+  key reads the date it always did. Pinned by constructed cases: a Sunday
+  habit whose rows post on Mondays and Tuesdays is "most Sundays"; a Direct
+  Debit with month-end transaction dates is "on the 1st"; six statement and
+  six feed rows stay one series. What this cannot do: TrueLayer states no
+  transaction time at all, so a habit seen only through that feed is still
+  fitted on posting days and says "on the posting date, the only date its
+  source states" - a known limit, pinned as such. The invented stores hold
+  no row with two different dates, so their counts did not move; the real
+  store's habit and stopped lines are the measurement.
+
 ## [0.4.370] - 2026-10-07
 
 ### Fixed
