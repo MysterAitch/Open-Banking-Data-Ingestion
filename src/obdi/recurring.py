@@ -7,7 +7,8 @@ in before anything is declared (`docs/design/2026-10-commitments/notes.md` says 
 and what cannot be told).
 
 A SERIES is the transactions, in any account, that share a payee shape and a direction, coming
-round on a regular cadence at least `MIN_OCCURRENCES` times. It belongs to a payee and not to an
+round on a regular cadence, at least `MIN_OCCURRENCES` times and spanning `MIN_SPAN_SLOTS`
+slots. It belongs to a payee and not to an
 account: a subscription normally paid from one account and, this month, from another is one
 series with an occurrence marked as paid from elsewhere (`Series.off_account`), never a missed
 month followed by a new series. The series reports the account it is usually paid from.
@@ -66,6 +67,12 @@ MIN_OCCURRENCES = 3
 #: Of the slots a series should have filled between its first and last occurrence, the share that
 #: must have been filled. Below it the gaps are the finding and "regular" is not.
 MIN_PRESENT_SHARE = 2 / 3
+
+#: Fewest slots of its cadence a series must span, first occurrence to last, counting the slots
+#: that were missed: three gaps, so four occurrences for an unbroken run and three seen over four
+#: slots with one missed. The first measurement on the real store found "weekly, Tuesdays - 3
+#: times over 2 weeks", which three occurrences in a fortnight made out to be a rhythm.
+MIN_SPAN_SLOTS = 4
 
 #: How far the latest amount may sit from the usual before the series is said to have changed,
 #: and how near two amounts must be to count as one usual amount.
@@ -181,6 +188,12 @@ def _on_day(index: int, day: int) -> date:
     return date(year, month + 1, min(day, calendar.monthrange(year, month + 1)[1]))
 
 
+def _spans_enough(seen: int, missed: int) -> bool:
+    """Whether `seen` occurrences and `missed` empty slots make a run worth calling regular."""
+    slots = seen + missed
+    return slots >= MIN_SPAN_SLOTS and seen / slots >= MIN_PRESENT_SHARE
+
+
 def _fit_days(days: Sequence[date], cadence: str, period: int) -> _Fit | None:
     steps = [(b - a).days for a, b in pairwise(days)]
     missed = 0
@@ -189,7 +202,7 @@ def _fit_days(days: Sequence[date], cadence: str, period: int) -> _Fit | None:
         if slots < 1 or abs(gap - slots * period) > 1:
             return None
         missed += slots - 1
-    if len(days) / (len(days) + missed) < MIN_PRESENT_SHARE:
+    if not _spans_enough(len(days), missed):
         return None
     weekdays = Counter(d.weekday() for d in days)
     weekday, on_it = weekdays.most_common(1)[0]
@@ -214,7 +227,7 @@ def _fit_months(days: Sequence[date], cadence: str, period: int, tolerance: int)
         if step < 1 or left:
             return None
         missed += step - 1
-    if len(days) / (len(days) + missed) < MIN_PRESENT_SHARE:
+    if not _spans_enough(len(days), missed):
         return None
     month = (slots[0] % 12) + 1 if cadence == "yearly" else 0
     return _Fit(cadence, usual, month, None, missed, _on_day(slots[-1] + period, usual))

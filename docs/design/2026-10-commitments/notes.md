@@ -14,7 +14,10 @@ with their usual amount and the date taken as targets." One line per recurring t
 ## What the detector decides, and how
 
 A series is the transactions, in any account, that share a payee shape and a direction (money
-in, money out) and a currency, coming round on a regular cadence at least three times.
+in, money out) and a currency, coming round on a regular cadence at least three times and
+spanning at least four slots of that cadence (`recurring.MIN_SPAN_SLOTS`). The span was added
+after the first measurement on the real store found "weekly, Tuesdays - 3 times over 2 weeks":
+three occurrences in a fortnight are a coincidence, not a rhythm.
 
 - **Payee shape.** `identity.normalise_description` (the normaliser the content key already
   uses: casefold, accents and punctuation removed, volatile fragments such as card tails and
@@ -37,7 +40,10 @@ in, money out) and a currency, coming round on a regular cadence at least three 
   that fits wins. A series of 28-day gaps is not monthly because the day of the month drifts out
   of tolerance within three occurrences.
 - **Missed slots.** At most a third of the slots between the first and last occurrence may be
-  empty. A missed month is counted (`missed`) and does not break the series.
+  empty, and there must be at least four slots (so four occurrences unbroken, or three seen
+  over four with one missed). A missed month is counted (`missed`) and does not break the
+  series. Rejected: counting a span of three slots as enough (three weekly occurrences over two
+  weeks), which is what the real store showed to be noise.
 - **Amounts.** Amounts within 3% of one another are one cluster; the largest cluster is the
   usual amount (of two as large, the one seen first). The series is steady when that cluster
   holds at least half the amounts. It has changed when it is steady and the latest amount is

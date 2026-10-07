@@ -11,6 +11,7 @@ A calendar fact the answers lean on: 2026-10-07 is a Wednesday; 2026-06-27 is a 
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import date, timedelta
 
@@ -122,14 +123,16 @@ class TestMonthlyDirectDebit:
 
 class TestOtherCadences:
     def test_YearlySubscription_IsYearlyInOctoberOnThe14th(self):
-        rows = [tx(A, date(y, 10, 14), -3800, "GITHUB SUBSCRIPTION") for y in (2023, 2024, 2025)]
+        rows = [
+            tx(A, date(y, 10, 14), -3800, "GITHUB SUBSCRIPTION") for y in (2022, 2023, 2024, 2025)
+        ]
         rows.append(tx(A, TODAY, -100, "NEWSAGENT"))
 
         series = find_one(find_recurring(rows, pairs=(), today=TODAY), "github")
 
         assert series.cadence == "yearly"
         assert (series.usual_month, series.usual_day) == (10, 14)
-        assert series.count == 3
+        assert series.count == 4
         assert series.next_expected == date(2026, 10, 14)
         assert not series.stopped
 
@@ -407,8 +410,61 @@ class TestWhatMustNotJoinOrForm:
 
         assert find_recurring(rows, pairs=(), today=TODAY) == []
 
-    @pytest.mark.parametrize("count", [3, 4])
-    def test_ThreeOrMoreRegularOccurrences_FormASeries(self, count):
-        rows = monthly(A, [(2026, m) for m in range(6, 6 + count)], 3, -500, "NEW GADGET CLUB")
+    @pytest.mark.parametrize("count", [4, 5])
+    def test_FourOrMoreRegularOccurrences_FormASeries(self, count):
+        rows = monthly(A, [(2026, m) for m in range(5, 5 + count)], 3, -500, "NEW GADGET CLUB")
 
         assert [s.count for s in find_recurring(rows, pairs=(), today=TODAY)] == [count]
+
+
+class TestHowLongARunMustSpan:
+    """A series spans at least four slots of its cadence: three gaps from first to last.
+
+    Three occurrences in a fortnight are a coincidence of a payee and a gap, not a rhythm. A slot
+    that was missed still counts towards the span, so three seen over four slots qualifies
+    (a third of four is one missing, and two thirds of four is three present).
+    """
+
+    TUESDAYS = tuple(date(2026, 9, d) for d in (1, 8, 15, 22, 29))
+
+    def weekly(self, days: Sequence[date]) -> list[Transaction]:
+        return [tx(A, d, -450, "CORNER CAFE CLUB") for d in days]
+
+    def test_ThreeWeeklyOccurrencesOverTwoWeeks_AreNotASeries(self):
+        found = find_recurring(self.weekly(self.TUESDAYS[2:]), pairs=(), today=TODAY)
+
+        assert found == []
+
+    def test_FourWeeklyOccurrencesOverThreeWeeks_AreAWeeklySeries(self):
+        (series,) = find_recurring(self.weekly(self.TUESDAYS[1:]), pairs=(), today=TODAY)
+
+        assert (series.cadence, series.weekday, series.count, series.missed) == ("weekly", 1, 4, 0)
+
+    def test_ThreeWeeklyOccurrencesOverThreeWeeksWithOneMissed_AreAWeeklySeries(self):
+        days = [self.TUESDAYS[1], self.TUESDAYS[3], self.TUESDAYS[4]]
+
+        (series,) = find_recurring(self.weekly(days), pairs=(), today=TODAY)
+
+        assert (series.cadence, series.count, series.missed) == ("weekly", 3, 1)
+
+    def test_ThreeMonthlyOccurrencesOverTwoMonths_AreNotASeries(self):
+        rows = monthly(A, [(2026, m) for m in (7, 8, 9)], 12, -5000, "BRIGHT ENERGY")
+
+        assert find_recurring(rows, pairs=(), today=TODAY) == []
+
+    def test_FourMonthsWithOneMissed_AreAMonthlySeriesOfThreeSeen(self):
+        rows = monthly(A, [(2026, m) for m in (6, 7, 9)], 12, -5000, "BRIGHT ENERGY")
+
+        (series,) = find_recurring(rows, pairs=(), today=TODAY)
+
+        assert (series.cadence, series.count, series.missed) == ("monthly", 3, 1)
+
+    def test_FiveMonthsWithTwoMissed_AreNotASeries(self):
+        rows = monthly(A, [(2026, m) for m in (5, 6, 9)], 12, -5000, "BRIGHT ENERGY")
+
+        assert find_recurring(rows, pairs=(), today=TODAY) == []
+
+    def test_ThreeYearlyOccurrencesOverTwoYears_AreNotASeries(self):
+        rows = [tx(A, date(y, 3, 2), -3800, "ANNUAL LICENCE") for y in (2024, 2025, 2026)]
+
+        assert find_recurring(rows, pairs=(), today=TODAY) == []

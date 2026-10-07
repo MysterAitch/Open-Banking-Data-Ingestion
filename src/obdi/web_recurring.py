@@ -170,8 +170,8 @@ def render_recurring(findings: RecurringFindings, names: AccountsShown, *, unmas
     found = findings.series
     if not found:
         listing = (
-            "<p>Nothing recurring was found. A recurring thing needs three regular "
-            "occurrences with the same payee.</p>"
+            "<p>Nothing recurring was found. A recurring thing needs the same payee at a "
+            "regular interval, over at least four of those intervals.</p>"
         )
         lead = ""
     else:
