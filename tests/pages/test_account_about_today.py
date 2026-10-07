@@ -54,7 +54,13 @@ def flags(base: str) -> dict[str, list[str]]:
             continue
         ref = re.search(r"ref=([^&]+)", link.attrs["href"])
         assert ref is not None
-        found[ref.group(1)] = [s.text() for s in elements(row, "span") if "a-flag" in s.classes]
+        # This file is about the terms note. The party note shares the slot when nothing else
+        # fills it (`test_party_stated_pages`), and these statement-only accounts earn one.
+        found[ref.group(1)] = [
+            s.text()
+            for s in elements(row, "span")
+            if "a-flag" in s.classes and "named by the description only" not in s.text()
+        ]
     return found
 
 

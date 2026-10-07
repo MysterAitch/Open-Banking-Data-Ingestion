@@ -159,5 +159,8 @@ class TestAStatementThatIsOverdue:
 
         said = words(bring_in_page(base))
 
-        assert "Wanted: 1 statement for 1 account" in said
+        # The export is the one wanted to state the party of the feed-less statement months
+        # (`party_coverage`); the statement is the one this scene is about.
+        assert "Wanted: 1 statement and 1 export for 1 account" in said
+        assert "named by the description only" in said
         assert "Next statement: Due card" not in said

@@ -70,6 +70,7 @@ from ..read.coverage_timeline import (
     seam_anchor,
     span_words,
 )
+from ..read.party_coverage import stretch_words
 from .callback import render_page
 from .web_balance_chart import (
     EDGE,
@@ -1505,6 +1506,10 @@ def account_notes(view: AccountTimeline) -> str:
         )
     if view.made_by_obdi and not view.lanes:
         notes.append(MADE_BY_OBDI_WORDS)
+    if view.party is not None:
+        notes.extend(
+            stretch_words(stretch, askable=view.party.askable) for stretch in view.party.stretches
+        )
     return "".join(f'<p class="muted">{_esc(note)}</p>' for note in notes)
 
 

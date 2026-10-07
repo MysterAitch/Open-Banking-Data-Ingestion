@@ -36,6 +36,7 @@ from ..read.coverage_timeline import (
 from ..read.fetch_gaps import FetchReport
 from ..read.ledger import Ledger
 from ..read.overview import HOUSEKEEPING, AccountOverview, Overview
+from ..read.party_coverage import PartyStated, stretch_words
 from ..read.todo import Todo, account_page, build_todos, grouped, wanted_days
 from ..verify.protection import ProtectionView
 from ..verify.standing_data import (
@@ -46,7 +47,7 @@ from ..verify.standing_data import (
 )
 from ..verify.trust import Trust, month_marks, trust_of
 from .navigation import account_address
-from .trust_bar import bar_html, ends_html, own_life, source_lane_html
+from .trust_bar import bar_html, ends_html, own_life, party_lane_html, source_lane_html
 from .web_accounts import submit_button
 from .web_overview import OPEN_TODO_LIMIT, _whole_dates, todo_row_html
 
@@ -57,6 +58,9 @@ LOCKING_ANCHOR = "locking"
 
 #: Short names for the lanes of the strip, which share a narrow label column.
 _LANE_NAMES = {**KIND_NAMES, "feed": "Feed", "statement": "Statements", "typed": "Typed"}
+
+#: The strip's last lane, after the sources: where the transactions state their other party.
+PARTY_LANE = "Party stated"
 
 #: The to-dos that are the account's own answer to "what stops it adding up", so the hold the
 #: standing names is not said a second time beside them.
@@ -341,6 +345,12 @@ def strip_html(
                 f'<span class="lane">{_esc(name)}</span>'
                 f"{source_lane_html(by_kind[kind], wanted, today, span)}"
             )
+        party = timeline.party
+        if party is not None and party.drawn:
+            rows += (
+                f'<span class="lane">{PARTY_LANE}</span>'
+                f"{party_lane_html(party.stated_runs, party.described_runs, today, span)}"
+            )
     href = account_address("timeline", ref)
     ends = said = ""
     if span is not None:
@@ -352,6 +362,17 @@ def strip_html(
         f'<a class="tap strip" href="{href}">'
         '<span class="visually-hidden">The full timeline, source by source</span>'
         f"{rows}{ends}</a>{said}"
+    )
+
+
+def party_notes_html(party: PartyStated | None) -> str:
+    """The sentence for each stretch of months named by the description only, in the fold that
+    says what the bars show; nothing for an account whose transactions state their party."""
+    if party is None:
+        return ""
+    return "".join(
+        f'<p class="muted party-note">{_esc(stretch_words(stretch, askable=party.askable))}</p>'
+        for stretch in party.stretches
     )
 
 

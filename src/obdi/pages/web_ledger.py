@@ -74,6 +74,7 @@ from .account_page import (
     head_html,
     hold_is_said,
     lock_offer_html,
+    party_notes_html,
     read_account,
     strip_html,
     todos_html,
@@ -2892,12 +2893,15 @@ def _window_html(
     )
 
 
-def _bars_html(view: Any) -> str:
+def _bars_html(view: Any, reading: AccountReading) -> str:
     """The fold that says what the bars show, with the way to the full timeline, which stays on
-    its own page and opens beside this one."""
+    its own page and opens beside this one. The sentences for the months a party is not stated
+    in are here and not under the strip: they are a fact about the sources, and the page's
+    furniture is held to two phone screens (`tests/pages/test_account_page_scale.py`)."""
     return _disclosure(
         "What the bars show, and the full timeline",
         key_html()
+        + party_notes_html(reading.timeline.party if reading.timeline is not None else None)
         + f'<p><a class="tap" href="{_esc(account_address("timeline", view.ref))}" '
         f'target="_blank" rel="noopener">{_esc(page_name("/coverage-timeline"))}, in a new '
         "tab</a></p>",
@@ -3232,7 +3236,7 @@ def render_ledger(
     offering = bool(view.protection is not None and view.protection.offer)
     pressing = bool(reading.todos) or hold is not None or offering
     more = (
-        _bars_html(view)
+        _bars_html(view, reading)
         + _opening_html(
             view,
             unmasked,

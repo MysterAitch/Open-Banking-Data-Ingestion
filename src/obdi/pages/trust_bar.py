@@ -109,6 +109,24 @@ def source_lane_html(
     return f'<span class="bar" aria-hidden="true">{"".join(cells)}</span>'
 
 
+def party_lane_html(
+    stated: Sequence[tuple[date, date]],
+    described: Sequence[tuple[date, date]],
+    today: date,
+    span: tuple[date, date] | None = None,
+) -> str:
+    """The "Party stated" lane on the shared scale (or the `span` given): solid (`b-src`) over the
+    days every transaction states its party, hollow and dashed (`b-desc`) over the days any is
+    named by its printed description only, and nothing where there are no transactions."""
+    cells = [
+        _cell(css, placed.left, placed.width)
+        for css, runs in (("b-src", stated), ("b-desc", described))
+        for start, end in runs
+        if (placed := place(start, end, today, span)) is not None
+    ]
+    return f'<span class="bar" aria-hidden="true">{"".join(cells)}</span>'
+
+
 def axis_html(today: date) -> str:
     """The month names, printed once above a list of bars."""
     names = "".join(
@@ -143,6 +161,12 @@ def key_html() -> str:
         ),
         ("b-want", "A dashed block", "A file is wanted for these days."),
         ("b-edge", "An arrow at the left edge", "History from before these twelve months is held."),
+        (
+            "b-desc",
+            "Party stated",
+            "Solid where every transaction carries the other party's name from its source; "
+            "dashed where any is named by its printed description only.",
+        ),
     )
     items = "".join(
         f'<li><span class="key {css}"></span><b>{html.escape(name)}</b>: {html.escape(means)}</li>'

@@ -83,6 +83,9 @@ HOME_STYLES = """
  .b-held { background: repeating-linear-gradient(135deg, var(--edge) 0 1.5px, var(--paper) 1.5px 5px); }
  .b-bad { background: var(--bad); min-width: 5px; }
  .b-want { background: var(--paper); border: 1.5px dashed var(--warn); min-width: 5px; }
+ /* A party named by the printed description alone: the dashed outline of "not yet known" in the
+    muted ink, since it is a fact about the source and not a thing gone wrong. */
+ .b-desc { background: var(--paper); border: 1.5px dashed var(--ink-2); min-width: 3px; }
  /* The edge is an arrow, not a slice: a slice at the edge reads as a very narrow stretch of
     some rung, where what it means is that history lies beyond the edge. A square showing two
     of its sides, turned so the corner points out of the bar. */

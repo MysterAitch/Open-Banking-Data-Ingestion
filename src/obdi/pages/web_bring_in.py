@@ -373,12 +373,18 @@ def _file_html(item: WantedFile, today: date) -> str:
             why += f" &middot;{aged}"
     href = mark_query(item.account, item.source, item.first, item.last)
     css = "bi-file guess" if item.guess else "bi-file"
+    # A file wanted for the party it states tests nothing, and setting aside is a decision about
+    # what a file would test.
+    aside = (
+        ""
+        if item.tests_nothing
+        else f'<a class="tap bi-aside" href="{_esc(href)}">Set aside&hellip;</a>'
+    )
     return (
         f'<li class="{css}"><p class="bi-what"><b>{what}</b> '
         f'<span class="mono">{_whole_dates(_esc(days))}</span> '
         f"{span_phrase(item.first, item.last)}</p>"
-        f'<p class="bi-why">{_whole_dates(why)}</p>'
-        f'<a class="tap bi-aside" href="{_esc(href)}">Set aside&hellip;</a></li>'
+        f'<p class="bi-why">{_whole_dates(why)}</p>{aside}</li>'
     )
 
 

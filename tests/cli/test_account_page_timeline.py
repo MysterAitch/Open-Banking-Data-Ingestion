@@ -112,7 +112,7 @@ class TestTheLanes:
     def test_Main_HasTheTrustLaneOverOneLanePerWayInAndNoLaneForANoWayThatHoldsNothing(self, base):
         lanes = lanes_of(strip_of(page(base, MAIN)))
 
-        assert list(lanes) == ["Trust", "Feed", "Aggregator", "Export file"]
+        assert list(lanes) == ["Trust", "Feed", "Aggregator", "Export file", "Party stated"]
 
     def test_Main_DrawsEachWayInOverTheDaysItHolds(self, base):
         lanes = lanes_of(strip_of(page(base, MAIN)))
@@ -133,7 +133,7 @@ class TestTheLanes:
     def test_Card_DrawsItsStatementsAndDashesTheOneThatIsWanted(self, base):
         lanes = lanes_of(strip_of(page(base, CARD)))
 
-        assert list(lanes) == ["Trust", "Statements"]
+        assert list(lanes) == ["Trust", "Statements", "Party stated"]
         assert lanes["Statements"] == [
             ("b-src", *where(date(2026, 5, 15), date(2026, 7, 11))),
             ("b-src", *where(date(2026, 8, 12), date(2026, 9, 11))),
@@ -256,7 +256,7 @@ def test_AccountWithOneWayInAndNothingWanted_DrawsOneLaneBesideTheTrustLane(tmp_
         text = httpx.get(f"{address}/ledger", params={"ref": LONG}, timeout=120).text
 
     lanes = lanes_of(strip_of(text))
-    assert list(lanes) == ["Trust", "Export file"]
+    assert list(lanes) == ["Trust", "Export file", "Party stated"]
     assert not any(cell[0] == "b-want" for cells in lanes.values() for cell in cells)
 
 
