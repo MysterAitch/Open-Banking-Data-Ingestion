@@ -710,6 +710,23 @@ obdi each day, and the projection to Actual moves to the end as an export. The s
    Recurring page leads with live series and folds those stopped over a year ago, and a
    series must span at least four periods, not merely three occurrences.
 2. **R2** - the entity and the display name, because every page that follows names things.
+   **R2b (the owner, 2026-10-07, after the first live reading of the Entities page): an entity
+   has its own page.** "Once an entity is created, I suggest it warrants its own page and
+   metadata etc. ... That's where the rule can be viewed and modified and tweaked and
+   experimentation via a dry run can happen and maybe creation of multiple rules and the rules
+   can have multiple side effects e.g. adding a label. I also suggest that perhaps we should be
+   able to create an entity that is not yet linked to any payee or transaction." So: an entity
+   page holding its name, role, parent and children, the names gathered under it each opening
+   to its transactions, and its RULES - kept from the merge that made it ("begins with these
+   words", "contains these words in any order") and addable by hand - with a dry run that
+   lists the names a rule would attach before it is saved (the Bring in dry run's pattern: a
+   POST that computes and writes nothing), and exclusions for a rule-matched name the owner
+   detaches. An entity is names + rules - exclusions, so a new variant tomorrow attaches by
+   rule on sight, shown "by rule" and detachable. An entity may be made with no name attached
+   (a "New entity" form with name and optional parent) - an organisation the owner deals with
+   but never pays, such as one he expects reimbursement from (worked example E). A rule's
+   further side effects (applying a label, a category) wait for R6a and R6, when those exist;
+   the rule table is built so a side effect is a column added, not a rule kind.
 3. **Position, honestly** (new, before R3) - one page: what is held, what is owed, what is
    committed before the next income, and what is free, per account and in total, each figure
    with its basis beside it. The "available to spend" of a budgeting tool collapsed to one
