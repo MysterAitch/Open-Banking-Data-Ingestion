@@ -217,6 +217,18 @@ Target / accrual (what a category must hold by when; what a prepaid period costs
   a month of it costs and what must be set aside each month for the next renewal; for a shared
   cost, my share only; for a flow through a space, what the space must hold by the first leg's
   day. These are what the projection pushes as Actual's targets.
+- **Goal** (declared). The owner's position, as things to fund rather than things that recur
+  (the owner, 2026-10-07: "I currently have credit cards etc. to repay and rainy day funds to
+  build and planned renovation activities/holidays to save for"): a debt to clear (a card, an
+  overdraft - the account itself, with a date), a fund to build (rainy day), a saving for a
+  thing (a renovation, a holiday). Each has a TARGET TYPE in the vocabulary he knows from YNAB:
+  fund to an amount by a date; top up by an amount each month even if that over-provisions;
+  keep a minimum at a point in the month. A goal and a commitment's prepaid period share the
+  target and accrual derivation, so there is one engine; the household's default funding
+  stance comes from whether any debt goal is open; and Position can say "N months of
+  commitments covered" and "debts cleared by D" from goals alone. Whether a goal is explicit
+  or folded into a category he left open ("something I don't have a strong view on"): the
+  recommendation is explicit, because a category is a projection and a goal is a fact.
 - **Funding stance** (declared, on a commitment or on each of its prepaid periods). The owner:
   "the ideal scenario is that the payment is fully funded with money accrued beforehand. In
   practice it could be a payment made which is then recouped and recovered. It's nuanced
@@ -495,6 +507,21 @@ The same projection as a YNAB import file, or a CSV, is the same code with a dif
     moment to add (b), not before. The household default is set once from the position the
     owner states (a rainy-day fund held; cards or an overdraft to repay) and changes when it
     does.
+
+### Answered so far (2026-10-07, by the owner, in conversation)
+
+- **The category tree starts from nothing in obdi**: "actual contains only the default
+  budget/categories, I have not touched it at all." One category per product, created by the
+  push; nothing seeded from Actual.
+- **The existing Categorise page**: "I've not seen or used it yet, no view held." R6 absorbs it.
+- **The position is declared**, as goals (section 3): cards to repay, rainy-day funds to build,
+  renovations and holidays to save for, with target types in YNAB's vocabulary. Explicit goal
+  or folded into a category: no strong view; the recommendation is explicit.
+- **Entities are one kind with roles as relations**, with an optional parent and the
+  child-versus-variant rule (section 3) - his framing, adopted.
+- **A receivable** is an incoming leg (section 3) - his case, adopted.
+- Still open with the defaults standing: 1 (product), 2 (one list), 4 (fixed amount), 5
+  (declared), 6 (the card's), 8 (the thresholds), 9, 10, 11, 12, 13 (gated), 14.
 
 ## 7. Pushing the boundaries
 
