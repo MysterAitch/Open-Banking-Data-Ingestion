@@ -47,6 +47,17 @@ reaches the derived row today is one field, `Transaction.counterparty`, holding 
 | **The printed description** | Every source: a feed's `description`, a statement's narrative, a CSV's "Reference" | A line meant for a human reader, holding some mixture of the party's name, a location, a store number, a reference the payer typed, a date, a card tail | The only universal field, and the least reliable as identity: for a Starling transfer it IS the reference the owner typed (`jan rent`), so it names the purpose and not the party; for a card payment it is the merchant plus a location; for a statement it is whatever the bank printed. |
 | **Amount, cadence, account** | Every source | Nothing about the party; a pattern the detector reads | Supporting evidence for "this is the same thing recurring", never for "this is the same party". |
 
+**A PDF reader may state a party where its layout separates one.** The owner, 2026-10-07,
+reading his statements: "some pdf statements include payee details, but it does seem to be the
+exception rather than the norm." A FlexAccount statement prints each transaction on two lines -
+the first `<method> <party>` ("Direct debit TESCO MOBILE", "Payment to <name>", "Bank credit
+<name>"), the second the reference, an effective date, or a card note - so that reader can
+state the party as confidently as a CSV column, with the reader as the source, and keep the
+second line as the description. A reader whose layout prints one undifferentiated narrative
+(most of them) states none. This is a capability of a reader, declared by that reader, never a
+guess made over its text afterwards; the first to declare it is the Nationwide reader.
+"Effective Date …" and "Statement no …" lines are furniture, not references.
+
 So the data runs from strong to weak in that order, and the strongest fields are present on
 exactly the payments where the description is weakest (a transfer to a person carries the
 person's account number and a reference that says nothing about them), while the description
@@ -119,6 +130,10 @@ series).
    nullable columns, filled from raw on rebuild; schema bump; the sighting fold already shows
    the raw fields). The name function reads them first. Proof: two transfers to one person with
    twelve different references and two different stated spellings are one name by account.
+   In the same build, a PDF reader whose layout separates the party states it as the row's
+   counterparty (the Nationwide two-line layout first), tested by a constructed statement
+   whose first line is `<method> <party>` and second line a reference: the row's name is the
+   party and the reference stays the description.
 3. **An entity holds identifiers with kinds**: `entity_shapes` becomes `entity_identifiers`
    (kind, value, source, declared-or-learned, support); a merge attaches the identifiers the
    ticked rows carry, strongest first; the page says by which kind each row is linked; a
