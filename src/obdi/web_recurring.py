@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import calendar
 import html
-from datetime import date
+from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
 from . import values_sitting
@@ -68,21 +68,34 @@ def _needs_a_look(series: Series) -> bool:
     return series.stopped or series.changed
 
 
+#: How long after its last occurrence a stopped series moves from the main list to the fold at the
+#: foot of its account. The store holds years and subscriptions end, so most stopped series are
+#: old news; one stopped within the year is still worth a look and stays in the list.
+_LONG_STOPPED = timedelta(days=365)
+
+
+def long_stopped(series: Series, today: date) -> bool:
+    """Whether the series stopped more than a year before `today`: the ones the page folds away."""
+    return series.stopped and today - series.last_seen > _LONG_STOPPED
+
+
 def summary_line(findings: RecurringFindings) -> str:
     """The page's count line: things and accounts, then payments, transfers, incomes, and marks.
 
     Stopped and changed are marks a series carries beside its kind, so they overlap the first
-    three and the line does not add up to N.
+    three and the line does not add up to N. Of those stopped, the ones folded away are counted.
     """
     found = findings.series
     transfers = sum(s.is_transfer for s in found)
     incomes = sum(s.is_income for s in found)
     payments = len(found) - transfers - incomes
+    old = sum(long_stopped(s, findings.today) for s in found)
+    of_them = f", {old} of them over a year ago" if old else ""
     return (
         f"{plural(len(found), 'recurring thing')} across "
         f"{plural(len({s.account for s in found}), 'account')}: "
         f"{plural(payments, 'payment')}, {plural(transfers, 'transfer')}, "
-        f"{plural(incomes, 'income')}, {sum(s.stopped for s in found)} stopped, "
+        f"{plural(incomes, 'income')}, {sum(s.stopped for s in found)} stopped{of_them}, "
         f"{sum(s.changed for s in found)} changed"
     )
 
@@ -150,6 +163,13 @@ def _row(series: Series, names: AccountsShown, today: date, *, unmasked: bool) -
     )
 
 
+def _list(rows: list[Series], names: AccountsShown, today: date, *, unmasked: bool) -> str:
+    if not rows:
+        return ""
+    items = "".join(_row(s, names, today, unmasked=unmasked) for s in rows)
+    return f'<ul class="recur-list">{items}</ul>'
+
+
 def _mode(*, unmasked: bool) -> str:
     if unmasked:
         return values_sitting.unless_sitting(
@@ -190,10 +210,16 @@ def render_recurring(findings: RecurringFindings, names: AccountsShown, *, unmas
                     s.shape,
                 ),
             )
-            items = "".join(_row(s, names, findings.today, unmasked=unmasked) for s in rows)
+            old = [s for s in rows if long_stopped(s, findings.today)]
+            live = [s for s in rows if not long_stopped(s, findings.today)]
+            body = _list(live, names, findings.today, unmasked=unmasked)
+            if old:
+                body += (
+                    f'<details class="recur-old"><summary>{len(old)} stopped over a year ago'
+                    f"</summary>{_list(old, names, findings.today, unmasked=unmasked)}</details>"
+                )
             sections.append(
-                f'<section class="recur-account"><h2>{names.of(ref).as_name()}</h2>'
-                f'<ul class="recur-list">{items}</ul></section>'
+                f'<section class="recur-account"><h2>{names.of(ref).as_name()}</h2>{body}</section>'
             )
         listing = "".join(sections)
     body = (

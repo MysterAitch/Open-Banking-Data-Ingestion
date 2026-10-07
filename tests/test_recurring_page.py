@@ -10,16 +10,19 @@ The payee and both amounts are distinctive tokens that no other text on the page
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
 
 from obdi import values_sitting
+from obdi.account_names import AccountsShown
 from obdi.cli import build_web_config
 from obdi.ingest import import_file
+from obdi.recurring import RecurringFindings, Series
 from obdi.store import Store
-from page_dom import elements, parse
+from obdi.web_recurring import render_recurring
+from page_dom import Node, elements, parse
 from section_harness import environment, serve_config
 
 ACCOUNT = "current-main"
@@ -109,6 +112,153 @@ class TestTheMaskedPage:
 
         assert "Nothing recurring was found" in text
         assert "recur-summary" not in text.split("</style>")[-1]
+
+
+TODAY = date(2026, 10, 7)
+
+
+def _stopped_series(account: str, name: str, last: date, *, stopped: bool = True) -> Series:
+    """A monthly series on the 10th last seen on `last`, with an invented payee and amount."""
+    return Series(
+        account=account,
+        off_account=0,
+        other_account="",
+        shape=name,
+        label=name.upper(),
+        currency="GBP",
+        direction="out",
+        cadence="monthly",
+        usual_day=10,
+        usual_month=0,
+        weekday=None,
+        usual_minor=1500,
+        min_minor=1500,
+        max_minor=1500,
+        latest_minor=1500,
+        drift_percent=0.0,
+        steady=True,
+        count=6,
+        missed=0,
+        first_seen=last.replace(year=last.year - 1),
+        last_seen=last,
+        next_expected=last + timedelta(days=31),
+        is_transfer=False,
+        is_income=False,
+        stopped=stopped,
+        changed=False,
+    )
+
+
+def _rendered(series: list[Series]) -> Node:
+    """The page with values shown, so a row's payee can be told apart in the tests."""
+    page = render_recurring(RecurringFindings(series, TODAY), AccountsShown(), unmasked=True)
+    return parse(page.decode("utf-8"))
+
+
+def _list_names(root: Node) -> list[list[str]]:
+    """The payee text of each row, one list per `ul`, in page order."""
+    return [
+        [
+            name.text()
+            for li in elements(ul, "li")
+            for name in elements(li, "span")
+            if "recur-name" in name.classes
+        ]
+        for ul in elements(root, "ul")
+        if "recur-list" in ul.classes
+    ]
+
+
+class TestStoppedLongAgoFold:
+    """Series stopped more than a year before today sit in a closed fold at the foot of the account.
+
+    KNOWN ANSWER, decided first. Today is 2026-10-07; one account holds a live series (last seen
+    2026-09-10), one stopped recently (2026-03-10), and two stopped long ago (2023-05-10 and
+    2022-01-10). So the main list holds two rows, the fold holds two, its summary reads
+    "2 stopped over a year ago" and is closed, and the page's count line says 3 stopped, 2 of them
+    over a year ago.
+    """
+
+    def four(self) -> list[Series]:
+        return [
+            _stopped_series("acct-x", "alpha live", date(2026, 9, 10), stopped=False),
+            _stopped_series("acct-x", "beta recent", date(2026, 3, 10)),
+            _stopped_series("acct-x", "gamma long", date(2023, 5, 10)),
+            _stopped_series("acct-x", "delta older", date(2022, 1, 10)),
+        ]
+
+    def test_RecurringPage_WithSeriesStoppedLongAgo_FoldsThemClosedAtTheFootOfTheAccount(self):
+        root = _rendered(self.four())
+
+        (fold,) = elements(root, "details")
+        assert "open" not in fold.attrs
+        (summary,) = elements(fold, "summary")
+        assert summary.text().strip() == "2 stopped over a year ago"
+        lists = _list_names(root)
+        assert [len(names) for names in lists] == [2, 2]
+        assert "alpha" not in " ".join(lists[1]) and "beta" not in " ".join(lists[1])
+        # The fold is the last thing in its account's section, after the main list.
+        (section,) = [s for s in elements(root, "section") if "recur-account" in s.classes]
+        assert [c.tag for c in section.children if isinstance(c, Node)][-1] == "details"
+
+    def test_RecurringPage_WithSeriesStoppedLongAgo_KeepsRecentlyStoppedInTheMainList(self):
+        main, folded = _list_names(_rendered(self.four()))
+
+        assert any("beta" in name for name in main)
+        assert all("beta" not in name for name in folded)
+
+    def test_RecurringPage_WithSeriesStoppedLongAgo_CountLineSaysHowManyOfThemAreOld(self):
+        root = _rendered(self.four())
+
+        (line,) = [p for p in elements(root, "p") if "recur-summary" in p.classes]
+        assert line.text() == (
+            "4 recurring things across 1 account: 4 payments, 0 transfers, 0 incomes, "
+            "3 stopped, 2 of them over a year ago, 0 changed"
+        )
+
+    def test_RecurringPage_WithNothingStoppedLongAgo_HasNoFoldAndNoExtraWords(self):
+        series = self.four()[:2]
+        root = _rendered(series)
+
+        assert list(elements(root, "details")) == []
+        (line,) = [p for p in elements(root, "p") if "recur-summary" in p.classes]
+        assert line.text().endswith("1 stopped, 0 changed")
+
+    def test_RecurringPage_WithExactlyAYearSinceTheLastOccurrence_KeepsItInTheMainList(self):
+        series = [_stopped_series("acct-x", "epsilon edge", TODAY - timedelta(days=365))]
+
+        root = _rendered(series)
+
+        assert list(elements(root, "details")) == []
+
+    def test_RecurringPage_WithADayMoreThanAYearSinceTheLastOccurrence_FoldsIt(self):
+        series = [_stopped_series("acct-x", "zeta edge", TODAY - timedelta(days=366))]
+
+        root = _rendered(series)
+
+        (summary,) = elements(root, "summary")
+        assert summary.text().strip() == "1 stopped over a year ago"
+        assert _list_names(root) == [["zeta edge"]]
+
+    def test_RecurringPage_WithAnAccountWhoseSeriesAllStoppedLongAgo_ShowsOnlyTheFold(self):
+        series = [
+            _stopped_series("acct-x", "eta live", date(2026, 9, 10), stopped=False),
+            _stopped_series("acct-y", "theta old", date(2021, 6, 10)),
+        ]
+
+        root = _rendered(series)
+
+        sections = [s for s in elements(root, "section") if "recur-account" in s.classes]
+        assert [len(list(elements(s, "details"))) for s in sections] == [0, 1]
+        assert [len(list(elements(s, "ul"))) for s in sections] == [1, 1]
+
+    def test_RecurringPage_WithAFoldedSeries_StillSealsItsPayeeAndAmount(self):
+        page = render_recurring(
+            RecurringFindings(self.four(), TODAY), AccountsShown(), unmasked=False
+        ).decode("utf-8")
+
+        assert "gamma" not in page.casefold().split("</style>")[-1]
+        assert "15.00" not in page
 
 
 class TestShowingValues:

@@ -4,7 +4,8 @@ THE BUDGET: at 390 px by 844 px, thirty series in five accounts, with a third of
 (stopped, changed, from another account, a transfer, income, a varying amount) and the longest
 payee names a bank prints, the page is at most three screens tall. Measured with the values
 masked and with them shown, which is the taller. The allowance is recorded beside the
-measurement in `MEASURED_HEIGHT`. Twelve of the thirty are marked, which is more than a real
+measurements in `MEASURED_CLOSED` (folds closed, held to three screens) and `MEASURED_OPEN`
+(every fold opened). Twelve of the thirty are marked, which is more than a real
 store is likely to hold: a mark that wraps costs a line. Marking twenty-four of the thirty
 (measured 2026-10-07) made the masked page 2,733 px, which is over three screens.
 
@@ -35,7 +36,14 @@ PHONE_HEIGHT = 844
 SCREENS = 3
 
 #: The tallest rendering of the thirty, in pixels, as last measured; the budget is SCREENS tall.
-MEASURED_HEIGHT = 2530  # values shown; masked is about 110 px shorter. Three screens is 2532.
+#: Measured 2026-10-07 with four of the thirty folded as stopped over a year ago (two at the foot
+#: of each of two accounts): closed, masked 2,328 and shown 2,437; every fold opened, masked
+#: 2,618 and shown 2,726. Three screens is 2,532, which the closed page is held to. Opened,
+#: the page is a reader's choice and is held to the measurement (four screens would be 3,376),
+#: because the folded rows carry the stopped mark and a date with its age, a line each.
+MEASURED_CLOSED = 2440
+MEASURED_OPEN = 2730
+SCREENS_OPEN = 4
 
 TODAY = date(2026, 10, 7)
 
@@ -99,6 +107,15 @@ def _series(index: int) -> Series:
             return replace(base, cadence="yearly", usual_month=10, usual_day=14)
         case 8:
             return replace(base, cadence="weekly", weekday=4, usual_day=0)
+        case 9 | 10:
+            # Stopped years ago: the page folds these at the foot of their account.
+            return replace(
+                base,
+                stopped=True,
+                first_seen=date(2022, 1, 5),
+                last_seen=date(2024, 3, 5),
+                next_expected=date(2024, 4, 5),
+            )
         case _:
             return base
 
@@ -131,7 +148,9 @@ def browser() -> Iterator[object]:
         launched.close()
 
 
-def _measure(browser, served, *, shown: bool, label: str) -> tuple[int, int]:
+def _measure(
+    browser, served, *, shown: bool, label: str, folds_open: bool = False
+) -> tuple[int, int]:
     context = browser.new_context(viewport={"width": PHONE_WIDTH, "height": PHONE_HEIGHT})
     page = context.new_page()
     # A deployment says what it is; without that every page carries a warning banner that a
@@ -143,6 +162,8 @@ def _measure(browser, served, *, shown: bool, label: str) -> tuple[int, int]:
         if shown:
             with page.expect_navigation():
                 page.click("form[action='/recurring'] button")
+    if folds_open:
+        page.evaluate("document.querySelectorAll('details.recur-old').forEach(d => d.open = true)")
     height = page.evaluate("document.documentElement.scrollHeight")
     overflow = page.evaluate("document.documentElement.scrollWidth - window.innerWidth")
     shots = os.environ.get("RECURRING_SHOTS_DIR")
@@ -154,14 +175,16 @@ def _measure(browser, served, *, shown: bool, label: str) -> tuple[int, int]:
 
 
 class TestThirtySeriesOnAPhone:
+    @pytest.mark.parametrize("folds_open", [False, True])
     @pytest.mark.parametrize("shown", [False, True])
     def test_RecurringPage_WithThirtySeries_FitsThreeScreensAndNeverScrollsSideways(
-        self, browser, served, shown
+        self, browser, served, shown, folds_open
     ):
+        label = f"{'shown' if shown else 'masked'}-{'open' if folds_open else 'closed'}"
         height, overflow = _measure(
-            browser, served, shown=shown, label="shown" if shown else "masked"
+            browser, served, shown=shown, label=label, folds_open=folds_open
         )
 
         assert overflow <= 0, "the page scrolls sideways"
-        assert height <= SCREENS * PHONE_HEIGHT, height
-        assert height <= MEASURED_HEIGHT, height
+        assert height <= (SCREENS_OPEN if folds_open else SCREENS) * PHONE_HEIGHT, height
+        assert height <= (MEASURED_OPEN if folds_open else MEASURED_CLOSED), height
