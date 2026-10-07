@@ -459,7 +459,7 @@ class TestThePatternFeaturesAgainstKnownAnswers:
         second is the one that keeps a report worth reading: a corpus imported
         whole must produce NO gaps at all.
         """
-        from obdi.coverage import gaps
+        from obdi.verify.coverage import gaps
 
         directory, world, _ = corpus
         statement = directory / "synthetic-current.csv"
@@ -997,7 +997,7 @@ class TestTheAdversarialDeliveries:
         comment records a road charge paid on 01-04 AND 04-01 flooding it with
         six lines of coincidence on first firing.
         """
-        from obdi.coverage import transpositions
+        from obdi.verify.coverage import transpositions
 
         directory, _world, manifest = corpus
         planted = next(
@@ -1113,7 +1113,7 @@ class TestTheAdversarialDeliveries:
         attribution carries the sibling account and the matched date precisely
         so a nonsense match announces itself.
         """
-        from obdi.coverage import agreements
+        from obdi.verify.coverage import agreements
 
         directory, _world, manifest = corpus
         misfile = next(
@@ -1198,7 +1198,7 @@ class TestTheReportAPersonActuallyReads:
         asserting about a page the command never produces - which is what this
         first did, and two of these tests passed that way.
         """
-        from obdi.coverage import agreements, coverage, gaps, report, transpositions
+        from obdi.verify.coverage import agreements, coverage, gaps, report, transpositions
 
         with Store(store_path) as store:
             held = store.transactions_by_sighting()
@@ -1327,9 +1327,9 @@ class TestTheReportAPersonActuallyReads:
         empty" into "go and fetch this file". The distinction is the whole
         point: a month every source agrees is empty is most likely the truth.
         """
-        from obdi.coverage import gaps
         from obdi.ingest.parsers.uk_banks import detect
         from obdi.ingest.pipeline import reconcile_batch
+        from obdi.verify.coverage import gaps
 
         directory, _world, manifest = corpus
         second = next(

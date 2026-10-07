@@ -27,7 +27,6 @@ from pathlib import Path
 import httpx
 import pytest
 
-from obdi.balance_anchors import record_stated_anchor, remove_stated_anchor
 from obdi.cli import build_web_config
 from obdi.core.models import RawArtefact
 from obdi.ingest.identity import artefact_digest
@@ -37,6 +36,7 @@ from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
 from obdi.ingest.typed_transactions import record_typed_transaction
+from obdi.verify.balance_anchors import record_stated_anchor, remove_stated_anchor
 from obdi.web import ConnectionHandler
 from section_harness import environment, serve_config
 

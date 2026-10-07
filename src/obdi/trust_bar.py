@@ -17,8 +17,8 @@ import html
 from collections.abc import Sequence
 from datetime import date, timedelta
 
-from .standing_data import ADDS_UP
-from .trust import WINDOW_DAYS, MarkKind, Rung, Trust, month_marks, place, window_start
+from .verify.standing_data import ADDS_UP
+from .verify.trust import WINDOW_DAYS, MarkKind, Rung, Trust, month_marks, place, window_start
 
 _STRETCH_CLASS = {Rung.HELD: "b-held", Rung.ADDS_UP: "b-adds", Rung.LOCKED: "b-lock"}
 _MARK_CLASS = {

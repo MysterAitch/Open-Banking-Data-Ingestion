@@ -1,0 +1,1349 @@
+"""Does the data we hold actually agree with itself?
+
+The store is deliberately fed the same account by several routes - an
+aggregator, the bank's own API, a CSV export - because two independent sources
+agreeing is real evidence, and where they disagree the disagreement IS the
+finding. None of that is worth anything unless something checks.
+
+The comparison is windowed to the OVERLAP on purpose. A CSV covering three
+months and an API feed covering two years will always differ in total, and
+reporting that as a discrepancy would bury the real ones under arithmetic that
+was never going to match.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, date, datetime
+from typing import ClassVar
+
+import pytest
+
+from obdi.core.models import SourceTier, Transaction
+from obdi.verify.coverage import (
+    Agreement,
+    agreements,
+    coverage,
+    destination_doubt,
+    export_drift,
+    gaps,
+    silent_feeds,
+    stale_feeds,
+    transpositions,
+)
+
+
+def txn(source, day, amount, *, account="current", source_id=None, month=1, desc=None,
+        tier=SourceTier.SYNTHETIC, confirmed=False, claimed=False):
+    return Transaction(
+        account_id=account,
+        amount_minor=amount,
+        currency="GBP",
+        value_date=date(2026, month, day),
+        booking_date=date(2026, month, day),
+        description=desc or f"txn {day}",
+        source=source,
+        source_id=source_id,
+        tier=tier,
+        content_key=f"k{month}{day}{amount}",
+        is_internal_transfer=claimed,
+        transfer_confirmed=confirmed,
+    )
+
+
+class TestWhatWeHold:
+    def test_Coverage_WhenSeveralSourcesFeedOneAccount_ReportsEachSeparately(self):
+        rows = coverage(
+            [txn("truelayer", 1, -500), txn("truelayer", 5, 2000), txn("halifax-qif", 1, -500)]
+        )
+
+        by_source = {row.source: row for row in rows}
+        assert set(by_source) == {"truelayer", "halifax-qif"}
+        assert by_source["truelayer"].count == 2
+        assert by_source["truelayer"].earliest == date(2026, 1, 1)
+        assert by_source["truelayer"].latest == date(2026, 1, 5)
+
+    def test_Coverage_SeparatesMoneyInFromMoneyOut_NotJustTheNet(self):
+        rows = coverage([txn("truelayer", 1, -500), txn("truelayer", 2, 2000)])
+
+        row = rows[0]
+        # A net figure hides the case where both sides are wrong by the same
+        # amount, which is exactly what a sign-convention bug looks like.
+        assert row.outflow_minor == 500
+        assert row.inflow_minor == 2000
+        assert row.net_minor == 1500
+
+    def test_Coverage_ReportsHowMuchOfItCarriesADurableId(self):
+        rows = coverage(
+            [
+                txn("truelayer", 1, -500, source_id="stable-1", tier=SourceTier.AUTHORITATIVE),
+                txn("truelayer", 2, -600),
+            ]
+        )
+
+        # Tells you how much of the store rests on the provider's own identity
+        # versus on content matching - which is what determines how much a
+        # matching change could disturb.
+        assert rows[0].with_durable_id == 1
+        assert rows[0].count == 2
+
+
+class TestWhetherSourcesAgree:
+    def test_Agreement_WhenTwoSourcesSeeTheSamePeriodIdentically_ReportsAgreement(self):
+        found = agreements(
+            [
+                txn("truelayer", 1, -500),
+                txn("truelayer", 2, 2000),
+                txn("halifax-qif", 1, -500),
+                txn("halifax-qif", 2, 2000),
+            ]
+        )
+
+        assert len(found) == 1
+        assert found[0].agrees
+        assert found[0].left_count == found[0].right_count == 2
+
+    def test_Agreement_WhenOneSourceIsMissingATransaction_SaysSo(self):
+        found = agreements(
+            [
+                txn("truelayer", 1, -500),
+                txn("truelayer", 2, 2000),
+                txn("halifax-qif", 1, -500),
+                txn("halifax-qif", 2, 2000),
+                txn("halifax-qif", 2, -750),
+            ]
+        )
+
+        assert not found[0].agrees
+
+    def test_Agreement_WhenTheSourcesCoverDifferentPeriods_ComparesOnlyTheOverlap(self):
+        # The CSV covers days 1-2; the feed covers 1-9. Comparing wholesale would
+        # always "disagree" and teach the reader to ignore the report.
+        found = agreements(
+            [
+                txn("truelayer", 1, -500),
+                txn("truelayer", 2, 2000),
+                txn("truelayer", 9, -9999),
+                txn("halifax-qif", 1, -500),
+                txn("halifax-qif", 2, 2000),
+            ]
+        )
+
+        assert found[0].overlap_from == date(2026, 1, 1)
+        assert found[0].overlap_to == date(2026, 1, 2)
+        assert found[0].agrees, "the day-9 transaction is outside the overlap and irrelevant"
+
+    def test_Agreement_WhenSourcesNeverOverlap_IsNotReportedAsADisagreement(self):
+        found = agreements([txn("truelayer", 1, -500), txn("halifax-qif", 20, -500)])
+
+        # Nothing to compare is not the same as comparing and differing.
+        assert found == []
+
+    def test_Agreement_OnlyComparesWithinOneAccount(self):
+        found = agreements(
+            [txn("truelayer", 1, -500, account="a"), txn("halifax-qif", 1, -500, account="b")]
+        )
+
+        assert found == []
+
+
+class TestHolesInWhatWeHold:
+    """A missing month usually means a missing file, not a quiet month.
+
+    Only months ENCLOSED by data count. An account that stopped being used has
+    empty months at the end, and flagging those would produce a permanent
+    complaint about something that is simply true - the fastest way to make a
+    report ignored.
+    """
+
+    def test_Gaps_WhenAMonthIsMissingBetweenTwoWithData_IsReportedAsAGap(self):
+        found = gaps(
+            [
+                txn("halifax-qif", 1, -500),
+                txn("halifax-qif", 1, -500, month=3),
+            ]
+        )
+
+        assert [(g.source, g.month) for g in found] == [("halifax-qif", "2026-02")]
+
+    def test_Gaps_WhenTheAccountSimplyStopsBeingUsed_ReportsNothing(self):
+        # Two consecutive months then silence: nothing encloses the silence, so
+        # there is no evidence anything is missing.
+        found = gaps([txn("halifax-qif", 1, -500), txn("halifax-qif", 2, -500)])
+
+        assert found == []
+
+    def test_Gaps_AreReportedPerSource_SoTheMissingFileCanBeIdentified(self):
+        found = gaps(
+            [
+                txn("halifax-qif", 1, -500),
+                txn("halifax-qif", 1, -500, month=3),
+                txn("truelayer", 1, -500),
+                txn("truelayer", 1, -500, month=2),
+                txn("truelayer", 1, -500, month=3),
+            ]
+        )
+
+        # The feed is complete; only the file import has a hole, and that is
+        # the one you can actually go and download.
+        assert [g.source for g in found] == ["halifax-qif"]
+
+    def test_Gaps_WhenEverySourceAgreesTheMonthIsEmpty_IsNotTreatedAsMissingData(self):
+        found = gaps(
+            [
+                txn("halifax-qif", 1, -500),
+                txn("halifax-qif", 1, -500, month=3),
+                txn("truelayer", 1, -500),
+                txn("truelayer", 1, -500, month=3),
+            ]
+        )
+
+        # Both routes say February was quiet. Corroborated absence is evidence
+        # the account was idle, not evidence that a file is missing.
+        assert all(not g.contradicted for g in found)
+
+    def test_Gaps_WhenAnotherSourceHasTheMonth_TheAbsenceIsContradictedAndNamed(self):
+        found = gaps(
+            [
+                txn("halifax-qif", 1, -500),
+                txn("halifax-qif", 1, -500, month=3),
+                txn("truelayer", 1, -500),
+                txn("truelayer", 1, -500, month=2),
+                txn("truelayer", 1, -500, month=3),
+            ]
+        )
+
+        missing = [g for g in found if g.contradicted]
+        assert [(g.source, g.month, g.seen_in) for g in missing] == [
+            ("halifax-qif", "2026-02", ("truelayer",))
+        ]
+
+
+class TestDatesReadTheWrongWayRound:
+    """A transposed date is the quietest corruption available.
+
+    Nothing looks wrong: the amount is right, the payee is right, the date is a
+    real date. It only shows when a second source disagrees about WHICH day -
+    and count-and-total checks are blind to it, because moving a transaction
+    between months changes neither.
+
+    Only days 1-12 can transpose; 13 upwards is unambiguous. So the classic
+    signature is a file where some rows moved and others did not.
+    """
+
+    def test_Transposition_WhenTwoSourcesSwapDayAndMonth_IsDetected(self):
+        found = transpositions(
+            [
+                txn("truelayer", 3, -2500, month=5, desc="RENT"),
+                txn("halifax-qif", 5, -2500, month=3, desc="RENT"),
+            ]
+        )
+
+        assert len(found) == 1
+        assert {found[0].left_date, found[0].right_date} == {date(2026, 5, 3), date(2026, 3, 5)}
+
+    def test_Transposition_WhenTheSameSourceHasBothDates_IsNotFlagged(self):
+        # Two genuine payments of equal value within one source. Suspicious
+        # only across sources, where the same payment cannot be in two places.
+        found = transpositions(
+            [
+                txn("halifax-qif", 3, -2500, month=5, desc="RENT"),
+                txn("halifax-qif", 5, -2500, month=3, desc="RENT"),
+            ]
+        )
+
+        assert found == []
+
+    def test_Transposition_WhenAmountsDiffer_IsNotFlagged(self):
+        found = transpositions(
+            [
+                txn("truelayer", 3, -2500, month=5, desc="RENT"),
+                txn("halifax-qif", 5, -9900, month=3, desc="RENT"),
+            ]
+        )
+
+        assert found == []
+
+    def test_Transposition_WhenDatesAreSimplyTheSame_IsNotFlagged(self):
+        found = transpositions(
+            [
+                txn("truelayer", 5, -2500, month=5, desc="RENT"),
+                txn("halifax-qif", 5, -2500, month=5, desc="RENT"),
+            ]
+        )
+
+        # Day equals month here, so a swap is undetectable AND harmless.
+        assert found == []
+
+    def test_Transposition_ARecurringPaymentAtMirrorDates_IsNotASwap(self):
+        # Observed live on first firing: the Clean Air Zone charge paid on
+        # BOTH 01-04 and 04-01, witnessed by every source at both dates -
+        # two real payments whose dates happen to mirror, not a parser
+        # swapping day and month. When both sources hold BOTH dates, each
+        # source corroborates the other's reading and there is nothing to
+        # suspect.
+        found = transpositions(
+            [
+                txn("truelayer", 1, -800, month=4, desc="BCC CLEAN AIR ZONE"),
+                txn("truelayer", 4, -800, month=1, desc="BCC CLEAN AIR ZONE"),
+                txn("halifax-qif", 1, -800, month=4, desc="BCC CLEAN AIR ZONE"),
+                txn("halifax-qif", 4, -800, month=1, desc="BCC CLEAN AIR ZONE"),
+            ]
+        )
+
+        assert found == []
+
+    def test_Transposition_CatchesTheMixedCase_WhereOnlyAmbiguousRowsMoved(self):
+        found = transpositions(
+            [
+                # Day 20 cannot transpose, and agrees.
+                txn("truelayer", 20, -100, month=3, desc="BILL"),
+                txn("halifax-qif", 20, -100, month=3, desc="BILL"),
+                # Day 4 can, and does not agree.
+                txn("truelayer", 4, -700, month=9, desc="GYM"),
+                txn("halifax-qif", 9, -700, month=4, desc="GYM"),
+            ]
+        )
+
+        assert len(found) == 1, "the unambiguous row is fine; the ambiguous one moved"
+        assert found[0].amount_minor == -700
+
+
+class TestAgainstTheRealStore:
+    """The reports must be right against a store fed through the real pipeline.
+
+    Every earlier test here hand-builds Transaction lists, which encodes the
+    pre-merge model: one row per source. The store does not work like that -
+    supersession leaves ONE row whose source is the last writer - and the
+    coverage reports were wrong against it while 356 hand-model tests passed.
+    This class exists so that mistake cannot come back.
+    """
+
+    def test_Coverage_AfterACrossSourceMerge_CreditsBothSources(self, tmp_path):
+        from obdi.ingest.pipeline import reconcile_batch
+        from obdi.ingest.store import Store
+
+        def real(source, source_id=None):
+            return Transaction(
+                account_id="current",
+                amount_minor=-2500,
+                currency="GBP",
+                value_date=date(2026, 3, 5),
+                booking_date=date(2026, 3, 5),
+                description="RENT",
+                source=source,
+                source_id=source_id,
+                tier=SourceTier.AUTHORITATIVE if source_id else SourceTier.SYNTHETIC,
+                content_key="shared-key",
+            )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            reconcile_batch(store, [real("halifax-qif")], digest="d-csv")
+            reconcile_batch(store, [real("truelayer", "tl-1")], digest="d-api")
+
+            held = store.transactions_by_sighting()
+            rows = coverage(held)
+
+            by_source = {row.source: row for row in rows}
+            # One payment, two witnesses: each source is credited with it. The
+            # stored row alone would say only the last writer ever saw it.
+            assert by_source["halifax-qif"].count == 1
+            assert by_source["truelayer"].count == 1
+
+    def test_Agreement_AfterACrossSourceMerge_ReportsAgreementNotDisagreement(self, tmp_path):
+        from obdi.ingest.pipeline import reconcile_batch
+        from obdi.ingest.store import Store
+
+        def real(source, day, amount, source_id=None):
+            return Transaction(
+                account_id="current",
+                amount_minor=amount,
+                currency="GBP",
+                value_date=date(2026, 3, day),
+                booking_date=date(2026, 3, day),
+                description=f"PAYEE {day}",
+                source=source,
+                source_id=source_id,
+                tier=SourceTier.AUTHORITATIVE if source_id else SourceTier.SYNTHETIC,
+                content_key=f"key-{day}-{amount}",
+            )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            reconcile_batch(
+                store, [real("halifax-qif", 5, -2500), real("halifax-qif", 9, 1000)], digest="d1"
+            )
+            reconcile_batch(
+                store,
+                [real("truelayer", 5, -2500, "t1"), real("truelayer", 9, 1000, "t2")],
+                digest="d2",
+            )
+
+            found = agreements(store.transactions_by_sighting())
+
+            assert len(found) == 1
+            assert found[0].agrees, (
+                "two sources that corroborated every payment must be reported as "
+                "agreeing - describing agreement as disagreement is the failure "
+                "this view exists to prevent"
+            )
+
+    def test_Gaps_AfterACrossSourceMerge_DoesNotInventMissingMonths(self, tmp_path):
+        from obdi.ingest.pipeline import reconcile_batch
+        from obdi.ingest.store import Store
+
+        def real(source, month, source_id=None):
+            return Transaction(
+                account_id="current",
+                amount_minor=-100 * month,
+                currency="GBP",
+                value_date=date(2026, month, 5),
+                booking_date=date(2026, month, 5),
+                description=f"BILL {month}",
+                source=source,
+                source_id=source_id,
+                tier=SourceTier.AUTHORITATIVE if source_id else SourceTier.SYNTHETIC,
+                content_key=f"key-{month}",
+            )
+
+        with Store(tmp_path / "s.sqlite3") as store:
+            for month in (1, 2, 3):
+                reconcile_batch(store, [real("halifax-qif", month)], digest=f"csv-{month}")
+                reconcile_batch(
+                    store, [real("truelayer", month, f"t{month}")], digest=f"api-{month}"
+                )
+
+            found = gaps(store.transactions_by_sighting())
+
+            assert found == [], (
+                "every month is covered by both sources; a MISSING report here "
+                "would be the stored-source undercount, not a real gap"
+            )
+
+
+class TestSiblingAttribution:
+    """A statement shows the MAIN account's view of the world: a bill paid
+    directly from a savings space appears on the statement while the API files
+    it under the space, and a space top-up appears as the main account's leg
+    while the API holds the space's opposite leg. Both are one movement seen
+    through two doors that disagree about WHERE it belongs.
+
+    So a disagreement those rows cause can be EXPLAINED - by matching them to
+    the other source's rows in SIBLING accounts - but never silently: every
+    attribution names the sibling it matched (a nonsense match must be visible
+    on sight), and whatever stays unmatched is shown, because the residue is
+    the finding.
+    """
+
+    SIBLINGS: ClassVar[dict[str, list[str]]] = {
+        "starling": [
+            "starling-personal",
+            "starling-space-bills",
+            "starling-space-savings",
+        ]
+    }
+
+    @staticmethod
+    def _bracket() -> list[Transaction]:
+        # Rows both sources agree on, spanning days 1..6, so the overlap
+        # window encloses the interesting day and the comparison is about
+        # the case rows rather than about coverage.
+        return [
+            txn("starling", 1, -500, account="starling-personal"),
+            txn("starling", 6, 2000, account="starling-personal"),
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 6, 2000, account="starling-personal"),
+        ]
+
+    @staticmethod
+    def _personal(found) -> Agreement:
+        return next(a for a in found if a.account_id == "starling-personal")
+
+    def test_Agreement_BillPaidFromASpace_IsAttributedToTheSiblingNotLost(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                # The statement shows the council tax leaving the account...
+                txn(
+                    "starling-csv", 2, -7000,
+                    account="starling-personal", desc="COUNCIL TAX",
+                ),
+                # ...the API filed the same payment under the Bills space.
+                txn(
+                    "starling", 2, -7000,
+                    account="starling-space-bills", desc="COUNCIL TAX",
+                ),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert not agreement.agrees
+        assert len(agreement.attributed) == 1
+        match = agreement.attributed[0]
+        assert match.sibling_account == "starling-space-bills"
+        assert match.opposite_sign is False
+        assert agreement.unexplained == ()
+        text = agreement.describe()
+        assert "agree once sibling attribution is counted" in text
+        assert "starling-space-bills" in text
+
+    def test_Agreement_WhenLimitedToOneAccount_ReportsThatAccountExactlyAsWithoutTheLimit(self):
+        """The limit saves comparing accounts nobody asked about, and must not
+        change what is found for the one asked about: the sibling Space's rows
+        still explain the bill, and the other accounts are simply absent."""
+        rows = [
+            *self._bracket(),
+            txn(
+                "starling-csv", 2, -7000,
+                account="starling-personal", desc="COUNCIL TAX",
+            ),
+            txn(
+                "starling", 2, -7000,
+                account="starling-space-bills", desc="COUNCIL TAX",
+            ),
+            txn("starling", 1, -100, account="starling-space-savings"),
+            txn("starling-csv", 1, -100, account="starling-space-savings"),
+        ]
+
+        everything = agreements(rows, sibling_accounts=self.SIBLINGS)
+        limited = agreements(
+            rows, sibling_accounts=self.SIBLINGS, only_accounts={"starling-personal"}
+        )
+
+        assert [a.account_id for a in limited] == ["starling-personal"]
+        assert limited == [self._personal(everything)]
+        assert any(a.account_id == "starling-space-savings" for a in everything)
+
+    def test_Agreement_SpaceTopUp_TheOppositeSpaceLegAccountsForTheMainLeg(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling-csv", 2, -5000,
+                    account="starling-personal", desc="TO SAVINGS SPACE",
+                ),
+                txn(
+                    "starling", 2, 5000,
+                    account="starling-space-savings", desc="FROM PERSONAL",
+                ),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert len(agreement.attributed) == 1
+        assert agreement.attributed[0].opposite_sign is True
+        assert agreement.attributed[0].sibling_account == "starling-space-savings"
+        assert agreement.unexplained == ()
+
+    def test_Agreement_WhenNoSiblingHoldsAMatch_TheRowIsShownUnexplained(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling-csv", 2, -450,
+                    account="starling-personal", desc="NETFLIX",
+                )
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert agreement.attributed == ()
+        assert len(agreement.unexplained) == 1
+        assert agreement.unexplained[0].description == "NETFLIX"
+        text = agreement.describe()
+        assert "DISAGREE" in text
+        assert "unexplained" in text
+        assert "NETFLIX" in text
+        # Amounts render as currency, never as raw minor units - a
+        # four-figure integer that means a few pounds misleads on sight.
+        assert "-£4.50" in text
+        assert "-450" not in text
+
+    def test_Agreement_EachSiblingRowExplainsOnlyOneRow(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling-csv", 2, -7000,
+                    account="starling-personal", desc="COUNCIL TAX A",
+                ),
+                txn(
+                    "starling-csv", 3, -7000,
+                    account="starling-personal", desc="COUNCIL TAX B",
+                ),
+                txn("starling", 2, -7000, account="starling-space-bills"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert len(agreement.attributed) == 1
+        assert len(agreement.unexplained) == 1
+
+    def test_Agreement_SameSignSiblingMatch_RespectsTheTwoDayWindow(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling-csv", 2, -7000,
+                    account="starling-personal", desc="COUNCIL TAX",
+                ),
+                # Three days away: outside the same-sign window.
+                txn("starling", 5, -7000, account="starling-space-bills"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert agreement.attributed == ()
+        assert len(agreement.unexplained) == 1
+
+    def test_Agreement_OppositeSignSiblingMatch_RespectsTheTighterOneDayWindow(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling-csv", 2, -5000,
+                    account="starling-personal", desc="TO SAVINGS SPACE",
+                ),
+                # Two days away: inside the same-sign window but outside the
+                # opposite-sign one - an internal move lands same-day, so a
+                # distant opposite row is NOT evidence of the same movement.
+                txn("starling", 4, 5000, account="starling-space-savings"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert agreement.attributed == ()
+        assert len(agreement.unexplained) == 1
+
+    def test_Agreement_WithoutSiblingScope_TheReportIsUnchanged(self):
+        rows = [
+            *self._bracket(),
+            txn(
+                "starling-csv", 2, -7000,
+                account="starling-personal", desc="COUNCIL TAX",
+            ),
+            txn("starling", 2, -7000, account="starling-space-bills"),
+        ]
+
+        agreement = self._personal(agreements(rows))
+
+        assert agreement.reconciled is False
+        text = agreement.describe()
+        assert "DISAGREE" in text
+        assert "sibling" not in text
+        assert "unexplained" not in text
+
+
+class TestConfirmedTransferLegs:
+    """The live 6-month statement taught this: the statement is close to a
+    CONSOLIDATED whole-account view, so the monthly space top-up legs the
+    feed witnesses in the main account simply do not exist in the file -
+    they are internal to the consolidated picture. Those legs are already
+    proven internal by the pairing pass (their opposite legs sit in the
+    spaces, both sides held), so the comparison consults that proof: a
+    leftover row whose transfer is CONFIRMED is explained by its pairing.
+    A provider's bare claim is not proof and does not qualify.
+    """
+
+    SIBLINGS: ClassVar[dict[str, list[str]]] = {
+        "starling": [
+            "starling-personal",
+            "starling-space-bills",
+        ]
+    }
+
+    @staticmethod
+    def _bracket() -> list[Transaction]:
+        return [
+            txn("starling", 1, -500, account="starling-personal"),
+            txn("starling", 6, 2000, account="starling-personal"),
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 6, 2000, account="starling-personal"),
+        ]
+
+    @staticmethod
+    def _personal(found) -> Agreement:
+        return next(a for a in found if a.account_id == "starling-personal")
+
+    def test_Agreement_AConfirmedTransferLeg_IsExplainedByItsPairing(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                # The feed's monthly top-up leg: confirmed paired with the
+                # space's opposite leg, invisible to a consolidated statement.
+                txn(
+                    "starling", 2, -150000,
+                    account="starling-personal", desc="Bills", confirmed=True,
+                ),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert not agreement.agrees
+        assert len(agreement.confirmed_transfer_legs) == 1
+        assert agreement.unexplained == ()
+        text = agreement.describe()
+        assert "agree once sibling attribution is counted" in text
+        assert "confirmed internal-transfer" in text
+
+    def test_Agreement_AProviderClaimAlone_IsNotProof_TheRowStaysUnexplained(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling", 2, -150000,
+                    account="starling-personal", desc="Bills", claimed=True,
+                ),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert agreement.confirmed_transfer_legs == ()
+        assert len(agreement.unexplained) == 1
+        assert "DISAGREE" in agreement.describe()
+
+    def test_Agreement_ConfirmedLegsAndRealResidue_AreReportedApart(self):
+        found = agreements(
+            [
+                *self._bracket(),
+                txn(
+                    "starling", 2, -150000,
+                    account="starling-personal", desc="Bills", confirmed=True,
+                ),
+                txn(
+                    "starling-csv", 3, -450,
+                    account="starling-personal", desc="NETFLIX",
+                ),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = self._personal(found)
+        assert len(agreement.confirmed_transfer_legs) == 1
+        assert len(agreement.unexplained) == 1
+        text = agreement.describe()
+        assert "DISAGREE" in text
+        assert "confirmed internal-transfer" in text
+        assert "NETFLIX" in text
+
+
+class TestAgreementOutline:
+    """The one-line describe() proved unreadable in live use, and a first
+    structured cut still made the reader do forensic reconstruction: counts
+    with no denominator, "unexplained" with no direction. The outline is a
+    per-source ledger: every row of each side lands in exactly one bucket,
+    and the buckets sum to that side's own total - so the arithmetic is
+    checkable on sight and every line says WHICH side holds the rows.
+    """
+
+    SIBLINGS: ClassVar[dict[str, list[str]]] = {
+        "starling": ["starling-personal", "starling-space-bills"]
+    }
+
+    @staticmethod
+    def _found(extra) -> Agreement:
+        rows = [
+            txn("starling", 1, -500, account="starling-personal"),
+            txn("starling", 6, 2000, account="starling-personal"),
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 6, 2000, account="starling-personal"),
+            *extra,
+        ]
+        found = agreements(rows, sibling_accounts=TestAgreementOutline.SIBLINGS)
+        return next(a for a in found if a.account_id == "starling-personal")
+
+    def test_Outline_EachSide_IsALedgerThatSumsToItsOwnTotal(self):
+        agreement = self._found(
+            [
+                # The statement's bill paid from the Bills space...
+                txn(
+                    "starling-csv", 2, -7000,
+                    account="starling-personal", desc="COUNCIL TAX",
+                ),
+                # ...which the feed filed under the space itself.
+                txn(
+                    "starling", 2, -7000,
+                    account="starling-space-bills", desc="COUNCIL TAX",
+                ),
+                # A feed-side top-up leg, proven internal by pairing.
+                txn(
+                    "starling", 3, -150000,
+                    account="starling-personal", desc="Bills", confirmed=True,
+                ),
+                # A feed-side row nothing accounts for.
+                txn(
+                    "starling", 4, -450,
+                    account="starling-personal", desc="NETFLIX",
+                ),
+            ]
+        )
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "the sources do not match: 1 unexplained row needs a look"
+        assert outline["warn"] is True
+        sides = outline["sides"]
+        assert [side["heading"] for side in sides] == [
+            "starling: 4 rows in the window",
+            "starling-csv: 3 rows in the window",
+        ]
+        # starling's ledger: 4 = 2 matched + 1 confirmed leg + 1 unexplained.
+        starling_labels = [bucket["label"] for bucket in sides[0]["buckets"]]
+        assert starling_labels[0] == "2 matched with starling-csv"
+        assert any("1 confirmed internal-transfer leg" in label for label in starling_labels)
+        assert any("in starling only" in label for label in starling_labels)
+        # The direction is explicit: the unexplained row names its rows.
+        unexplained = next(
+            bucket for bucket in sides[0]["buckets"] if " only" in bucket["label"]
+        )
+        assert unexplained["items"] == [
+            {"date": "2026-01-04", "amount": "-£4.50", "description": "NETFLIX"}
+        ]
+        # starling-csv's ledger: 3 = 2 matched + 1 attributed to a sibling.
+        csv_labels = [bucket["label"] for bucket in sides[1]["buckets"]]
+        assert csv_labels[0] == "2 matched with starling"
+        attributed = next(
+            bucket for bucket in sides[1]["buckets"] if "sibling" in bucket["label"]
+        )
+        assert "1 matched to rows starling filed under sibling accounts" in attributed["label"]
+        assert attributed["items"] == ["starling-space-bills: 1"]
+
+    def test_Outline_AFullyReconciledDisagreement_SaysSoInTheVerdict(self):
+        agreement = self._found(
+            [
+                txn(
+                    "starling-csv", 2, -7000,
+                    account="starling-personal", desc="COUNCIL TAX",
+                ),
+                txn(
+                    "starling", 2, -7000,
+                    account="starling-space-bills", desc="COUNCIL TAX",
+                ),
+            ]
+        )
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "differs as expected"
+        assert outline["warn"] is False
+        assert "transactions" in outline["figures"]
+
+    def test_Outline_OnlyAProvenTransferLeg_ReadsAsExpectedNotAsAgreement(self):
+        agreement = self._found(
+            [
+                txn(
+                    "starling", 3, -150000,
+                    account="starling-personal", desc="Bills", confirmed=True,
+                ),
+            ]
+        )
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "differs as expected"
+        assert outline["warn"] is False
+
+    def test_Outline_SeveralUnexplainedRows_CountsThemAmongExplainedOnes(self):
+        agreement = self._found(
+            [
+                txn("starling-csv", 2, -7000, account="starling-personal", desc="COUNCIL TAX"),
+                txn("starling", 2, -7000, account="starling-space-bills", desc="COUNCIL TAX"),
+                txn("starling", 4, -450, account="starling-personal", desc="NETFLIX"),
+                txn("starling-csv", 5, -990, account="starling-personal", desc="SPOTIFY"),
+            ]
+        )
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "the sources do not match: 2 unexplained rows need a look"
+        assert outline["warn"] is True
+
+    def test_Outline_WithoutSiblingScope_KeepsTheVerdictAndSaysWhatToCompare(self):
+        rows = [
+            txn("starling", 1, -500, account="starling-personal"),
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling", 6, 2000, account="starling-personal"),
+            txn("starling-csv", 6, 2000, account="starling-personal"),
+            txn("starling", 4, -450, account="starling-personal", desc="NETFLIX"),
+        ]
+        (agreement,) = agreements(rows)
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "the sources do not match - nothing here says why"
+        assert outline["warn"] is True
+        note = str(outline["note"])
+        assert "cannot tell expected differences from real ones" in note
+        assert "Compare the two sources' rows" in note
+        assert "DISAGREE" not in repr(outline)
+
+    def test_Outline_WhenAgreeing_CarriesNoNote(self):
+        outline = self._found([]).outline()
+
+        assert outline["verdict"] == "the sources match"
+        assert outline.get("note", "") == ""
+
+    def test_Outline_PlainAgreement_CarriesNoSides(self):
+        agreement = self._found([])
+
+        outline = agreement.outline()
+
+        assert outline["verdict"] == "the sources match"
+        assert outline["warn"] is False
+        assert outline["sides"] == []
+
+
+class TestExportDrift:
+    """A file compared against EARLIER IMPORTS OF ITS OWN SOURCE, with
+    asymmetric semantics. Self-agreement is not corroboration - a file
+    cannot witness itself, which is why the cross-source comparison
+    excludes own-source rows. But self-DISAGREEMENT is real signal: the
+    same bank exporting the same account and period differently means the
+    export itself changed - the silent drift that corrupts parsers
+    quietly. The sides are relabelled so the verdict names what it
+    compared instead of a source appearing to agree with itself.
+    """
+
+    def test_ExportDrift_AnIdenticalReUpload_AgreesUnderSelfLabels(self):
+        held = [
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 2, 2000, account="starling-personal"),
+        ]
+        incoming = [
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 2, 2000, account="starling-personal"),
+        ]
+
+        found = export_drift(held, incoming, "starling-csv")
+
+        assert len(found) == 1
+        assert found[0].agrees
+        assert found[0].left == "starling-csv (imported earlier)"
+        assert found[0].right == "starling-csv (this file)"
+
+    def test_ExportDrift_AChangedExport_DisagreesWithDirectionalLedger(self):
+        held = [
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 2, 2000, account="starling-personal"),
+        ]
+        # The bank's fresh export of the same period renders one amount
+        # differently - the drift class worth catching before import.
+        incoming = [
+            txn("starling-csv", 1, -500, account="starling-personal"),
+            txn("starling-csv", 2, 2050, account="starling-personal"),
+        ]
+
+        found = export_drift(held, incoming, "starling-csv")
+
+        assert len(found) == 1
+        agreement = found[0]
+        assert not agreement.agrees
+        outline = agreement.outline()
+        assert outline["warn"] is True
+        headings = [side["heading"] for side in outline["sides"]]
+        assert headings == [
+            "starling-csv (imported earlier): 2 rows in the window",
+            "starling-csv (this file): 2 rows in the window",
+        ]
+        labels = [
+            bucket["label"]
+            for side in outline["sides"]
+            for bucket in side["buckets"]
+        ]
+        assert any("in starling-csv (this file) only" in label for label in labels)
+        assert any("in starling-csv (imported earlier) only" in label for label in labels)
+
+    def test_ExportDrift_WithNoEarlierImports_ReportsNothing(self):
+        incoming = [txn("starling-csv", 1, -500, account="starling-personal")]
+
+        assert export_drift([], incoming, "starling-csv") == []
+
+
+class TestSettlementSkewMatching:
+    """The 2019 statement taught this: 2019-era card rows land in the two
+    witnesses ~3 days apart (transaction time vs settlement), just outside
+    the +/-2 day amount-only window - so the same WATERSTONES purchase fell
+    into BOTH sides' ONLY buckets. The identity layer already matches
+    cross-source at the 7-day fuzzy window, so the display matcher was
+    disagreeing with its own import layer. The second pass closes that gap
+    conservatively: the fuzzy window applies only when the descriptions are
+    identical - amount-only matching at 7 days would false-match habitual
+    same-price purchases.
+    """
+
+    SIBLINGS: ClassVar[dict[str, list[str]]] = {"starling": ["starling-personal"]}
+
+    def test_Agreement_SameMerchantSameAmountThreeDaysApart_Matches(self):
+        found = agreements(
+            [
+                txn("starling", 1, -500, account="starling-personal"),
+                txn("starling", 30, 2000, account="starling-personal"),
+                txn("starling-csv", 1, -500, account="starling-personal"),
+                txn("starling-csv", 30, 2000, account="starling-personal"),
+                txn("starling", 25, -950, account="starling-personal",
+                    desc="WATERSTONES BIRMINGHAM GBR"),
+                txn("starling-csv", 28, -950, account="starling-personal",
+                    desc="WATERSTONES BIRMINGHAM GBR"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = next(a for a in found if a.account_id == "starling-personal")
+        # Counts and nets agree, so the pair never reaches the ledger - the
+        # aggregate view is unchanged. The skew case that matters is below.
+        assert agreement.agrees
+
+    def test_Agreement_SkewedPairPlusARealResidue_OnlyTheRealResidueRemains(self):
+        found = agreements(
+            [
+                txn("starling", 1, -500, account="starling-personal"),
+                txn("starling", 30, 2000, account="starling-personal"),
+                txn("starling-csv", 1, -500, account="starling-personal"),
+                txn("starling-csv", 30, 2000, account="starling-personal"),
+                # The skewed pair: same merchant, same amount, 3 days apart.
+                txn("starling", 25, -950, account="starling-personal",
+                    desc="WATERSTONES BIRMINGHAM GBR"),
+                txn("starling-csv", 28, -950, account="starling-personal",
+                    desc="WATERSTONES BIRMINGHAM GBR"),
+                # A genuine feed-only row that must stay visible.
+                txn("starling", 26, -450, account="starling-personal",
+                    desc="NETFLIX"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = next(a for a in found if a.account_id == "starling-personal")
+        assert not agreement.agrees
+        assert agreement.matched_count == 3
+        assert len(agreement.unexplained) == 1
+        assert agreement.unexplained[0].description == "NETFLIX"
+
+    def test_Agreement_SameAmountDifferentMerchantsThreeDaysApart_StaysApart(self):
+        found = agreements(
+            [
+                txn("starling", 1, -500, account="starling-personal"),
+                txn("starling", 30, 2000, account="starling-personal"),
+                txn("starling-csv", 1, -500, account="starling-personal"),
+                txn("starling-csv", 30, 2000, account="starling-personal"),
+                # Habitual same-price purchases at different merchants: the
+                # fuzzy window must NOT collapse these into one.
+                txn("starling", 25, -320, account="starling-personal",
+                    desc="TESCO STORES 5223 BIRMINGHAM GBR"),
+                txn("starling-csv", 28, -320, account="starling-personal",
+                    desc="WEST MIDLANDS METRO UNITED KING GBR"),
+                # An extra one-sided row so the aggregate disagrees and the
+                # ledger actually runs (equal counts and nets never reach it).
+                txn("starling", 26, -450, account="starling-personal",
+                    desc="NETFLIX"),
+            ],
+            sibling_accounts=self.SIBLINGS,
+        )
+
+        agreement = next(a for a in found if a.account_id == "starling-personal")
+        assert agreement.matched_count == 2
+        descriptions = {row.description for row in agreement.unexplained}
+        assert descriptions == {
+            "TESCO STORES 5223 BIRMINGHAM GBR",
+            "WEST MIDLANDS METRO UNITED KING GBR",
+            "NETFLIX",
+        }
+
+
+class TestStaleFeeds:
+    """A scheduled feed that stops delivering looks exactly like a quiet
+    account - unless another witness proves the account is active. The
+    detector is deliberately cross-witness: a source whose newest row sits
+    days behind ANOTHER source's newest row for the same account is stuck
+    WITH EVIDENCE, and the warning names both dates and both sources. A
+    quiet feed on a genuinely quiet account never fires. Only sources with
+    a scheduled pull are watched - a manually-uploaded CSV lagging the
+    feeds is the normal state of files, not a fault.
+
+    The acceptance case is live: starling-api silent since 08-05 while
+    truelayer delivered to 08-09 went unnoticed for four days because
+    nothing watched for exactly this.
+    """
+
+    def test_StaleFeeds_AWatchedFeedDaysBehindALiveWitness_IsFlaggedWithEvidence(self):
+        rows = coverage(
+            [
+                txn("starling", 1, -500, account="starling-personal"),
+                txn("starling", 5, -700, account="starling-personal"),
+                txn("truelayer", 1, -500, account="starling-personal"),
+                txn("truelayer", 9, -900, account="starling-personal"),
+            ]
+        )
+
+        found = stale_feeds(rows, watched={"starling", "truelayer"})
+
+        assert len(found) == 1
+        stale = found[0]
+        assert stale.source == "starling"
+        assert stale.latest == date(2026, 1, 5)
+        assert stale.fresher_source == "truelayer"
+        assert stale.fresher_latest == date(2026, 1, 9)
+        assert stale.lag_days == 4
+        text = stale.describe()
+        assert "starling" in text
+        assert "truelayer" in text
+        assert "2026-01-05" in text
+        assert "2026-01-09" in text
+
+    def test_StaleFeeds_WithinTheSettlementTolerance_DoesNotFire(self):
+        rows = coverage(
+            [
+                txn("starling", 6, -500, account="starling-personal"),
+                txn("truelayer", 9, -900, account="starling-personal"),
+            ]
+        )
+
+        assert stale_feeds(rows, watched={"starling", "truelayer"}) == []
+
+    def test_StaleFeeds_AnUnwatchedFileSourceLagging_IsNotAFault(self):
+        rows = coverage(
+            [
+                txn("starling-csv", 1, -500, account="starling-personal"),
+                txn("truelayer", 9, -900, account="starling-personal"),
+            ]
+        )
+
+        assert stale_feeds(rows, watched={"starling", "truelayer"}) == []
+
+    def test_StaleFeeds_AQuietAccountWithOneWitness_NeverFires(self):
+        rows = coverage([txn("starling", 1, -500, account="starling-personal")])
+
+        assert stale_feeds(rows, watched={"starling"}) == []
+
+
+def landed(ref, when, *, source="truelayer-card-booked", trigger="scheduled",
+           outcome="landed"):
+    """One fetch-ledger row in the shape Store.attempts() returns."""
+    return {
+        "attempted_at": when,
+        "source": source,
+        "account_ref": ref,
+        "outcome": outcome,
+        "request_meta": json.dumps({"trigger": trigger}),
+    }
+
+
+class TestSilentFeeds:
+    """A single-source account going quiet at the FETCH level.
+
+    stale_feeds needs a second witness, and a credit card has exactly one, so
+    a dead card feed was invisible for sixty days. This detector reads the
+    fetch ledger instead: "the card had no transactions" is a normal quiet
+    account, "nobody has successfully asked the provider about it for days" is
+    a fault, and only the second is reported.
+
+    Known answers, decided before the first run, with now = 2026-01-20 and a
+    three-day threshold:
+      card-1  rows to 01-01, landed ask 01-19       quiet card, healthy feed
+      card-2  rows to 01-01, landed ask 01-05,
+              refusals since                         silent 15 days
+      card-3  rows to 01-01, never asked             silent 19 days, no ask
+    """
+
+    NOW = datetime(2026, 1, 20, 12, 0, tzinfo=UTC)
+    WATCHED: ClassVar[frozenset[str]] = frozenset({"starling", "truelayer"})
+
+    def _cards(self):
+        return coverage(
+            [
+                txn("truelayer", 1, -500, account="truelayer:card-1"),
+                txn("truelayer", 1, -500, account="truelayer:card-2"),
+                txn("truelayer", 1, -500, account="truelayer:card-3"),
+            ]
+        )
+
+    def _attempts(self):
+        return [
+            landed("truelayer:card-2", "2026-01-19T06:00:00+00:00", outcome="refused"),
+            landed("truelayer:card-2", "2026-01-18T06:00:00+00:00", outcome="refused"),
+            landed("truelayer:card-1", "2026-01-19T06:00:00+00:00"),
+            landed("truelayer:card-2", "2026-01-05T06:00:00+00:00"),
+        ]
+
+    def test_SilentFeeds_AQuietCardWithHealthyAsks_IsNotAFault(self):
+        found = silent_feeds(
+            self._cards(), self._attempts(), watched=self.WATCHED, now=self.NOW
+        )
+
+        assert "truelayer:card-1" not in {feed.account_id for feed in found}
+
+    def test_SilentFeeds_ACardRefusedForWeeks_IsNamedWithItsLastSuccessfulAsk(self):
+        found = silent_feeds(
+            self._cards(), self._attempts(), watched=self.WATCHED, now=self.NOW
+        )
+
+        silent = next(feed for feed in found if feed.account_id == "truelayer:card-2")
+        assert silent.last_landed == datetime(2026, 1, 5, 6, tzinfo=UTC)
+        assert silent.silent_days == 15
+        assert "2026-01-05" in silent.describe()
+        assert "truelayer:card-2" in silent.describe()
+
+    def test_SilentFeeds_ACardNeverAsked_IsNamedWithNoSuccessfulAskOnRecord(self):
+        found = silent_feeds(
+            self._cards(), self._attempts(), watched=self.WATCHED, now=self.NOW
+        )
+
+        silent = next(feed for feed in found if feed.account_id == "truelayer:card-3")
+        assert silent.last_landed is None
+        assert silent.silent_days == 19
+        assert "no successful ask" in silent.describe()
+
+    def test_SilentFeeds_ExactlyTheKnownAnswers_AreReported(self):
+        found = silent_feeds(
+            self._cards(), self._attempts(), watched=self.WATCHED, now=self.NOW
+        )
+
+        assert sorted(feed.account_id for feed in found) == [
+            "truelayer:card-2",
+            "truelayer:card-3",
+        ]
+
+    def test_SilentFeeds_ARecentRowWithNoLedgerEntries_IsNotAFault(self):
+        rows = coverage([txn("truelayer", 19, -500, account="truelayer:card-9")])
+
+        assert silent_feeds(rows, [], watched=self.WATCHED, now=self.NOW) == []
+
+    def test_SilentFeeds_AnAttendedSuccess_CountsAsSomebodyAsking(self):
+        rows = coverage([txn("truelayer", 1, -500, account="truelayer:card-1")])
+        attempts = [landed("truelayer:card-1", "2026-01-19T06:00:00+00:00", trigger="attended")]
+
+        assert silent_feeds(rows, attempts, watched=self.WATCHED, now=self.NOW) == []
+
+    def test_SilentFeeds_AnotherAccountsSuccess_DoesNotRescueThisOne(self):
+        rows = coverage([txn("truelayer", 1, -500, account="truelayer:card-1")])
+        attempts = [landed("truelayer:card-2", "2026-01-19T06:00:00+00:00")]
+
+        found = silent_feeds(rows, attempts, watched=self.WATCHED, now=self.NOW)
+
+        assert [feed.account_id for feed in found] == ["truelayer:card-1"]
+
+    def test_SilentFeeds_AnAccountWithTwoSources_IsLeftToStaleFeeds(self):
+        rows = coverage(
+            [
+                txn("truelayer", 1, -500, account="halifax-current"),
+                txn("halifax-qif", 1, -500, account="halifax-current"),
+            ]
+        )
+
+        assert silent_feeds(rows, [], watched=self.WATCHED, now=self.NOW) == []
+
+    def test_SilentFeeds_AFileOnlyAccount_IsNeverWatched(self):
+        rows = coverage([txn("halifax-qif", 1, -500, account="halifax-savings")])
+
+        assert silent_feeds(rows, [], watched=self.WATCHED, now=self.NOW) == []
+
+    def test_SilentFeeds_ABoundAccount_IsMatchedThroughItsProviderRef(self):
+        rows = coverage([txn("truelayer", 1, -500, account="halifax-card")])
+        attempts = [landed("truelayer:card-1", "2026-01-19T06:00:00+00:00")]
+
+        unmapped = silent_feeds(rows, attempts, watched=self.WATCHED, now=self.NOW)
+        mapped = silent_feeds(
+            rows,
+            attempts,
+            watched=self.WATCHED,
+            now=self.NOW,
+            account_for_ref={"truelayer:card-1": "halifax-card"},
+        )
+
+        assert [feed.account_id for feed in unmapped] == ["halifax-card"]
+        assert mapped == []
+
+    def test_SilentFeeds_TheThresholdIsStrict_ThreeDaysIsFineAndFourIsNot(self):
+        rows = coverage([txn("truelayer", 1, -500, account="truelayer:card-1")])
+        three = [landed("truelayer:card-1", "2026-01-17T12:00:00+00:00")]
+        four = [landed("truelayer:card-1", "2026-01-16T12:00:00+00:00")]
+
+        assert silent_feeds(rows, three, watched=self.WATCHED, now=self.NOW) == []
+        assert len(silent_feeds(rows, four, watched=self.WATCHED, now=self.NOW)) == 1
+
+    def test_SilentFeeds_AMalformedLedgerTimestamp_FailsLoudly(self):
+        rows = coverage([txn("truelayer", 1, -500, account="truelayer:card-1")])
+        attempts = [landed("truelayer:card-1", "not a timestamp")]
+
+        with pytest.raises(ValueError):
+            silent_feeds(rows, attempts, watched=self.WATCHED, now=self.NOW)
+
+
+class TestDestinationDoubt:
+    """Most of a file's rows matching rows another witness filed under
+    OTHER accounts is the strongest wrong-destination signal there is -
+    observed at 97% (1,517 of 1,571) on statement chunks mis-tapped into
+    a Space, which then took a refile-and-rebuild to undo. The doubt is
+    computed from the same reconciliation the preview already runs, and
+    carries its evidence: which witness, what share, which sibling looks
+    like the intended destination."""
+
+    SIBLINGS: ClassVar[dict[str, list[str]]] = {
+        "starling": ["starling-personal", "starling-space-money"]
+    }
+
+    def _found(self, extra):
+        rows = [
+            txn("starling", 1, -100, account="starling-space-money"),
+            txn("starling", 28, -110, account="starling-space-money"),
+            *extra,
+        ]
+        return agreements(rows, sibling_accounts=self.SIBLINGS)
+
+    def test_AFileWhoseRowsLiveElsewhere_RaisesDoubt_NamingTheSibling(self):
+        found = self._found(
+            [
+                # The file, imported into the SPACE by mistake: its rows
+                # match what the feed filed under the personal account.
+                txn("starling-csv", 5, -500, account="starling-space-money", desc="TESCO"),
+                txn("starling-csv", 9, -725, account="starling-space-money", desc="RENT"),
+                txn("starling-csv", 12, -300, account="starling-space-money", desc="COOP"),
+                txn("starling", 5, -500, account="starling-personal", desc="TESCO"),
+                txn("starling", 9, -725, account="starling-personal", desc="RENT"),
+                txn("starling", 12, -300, account="starling-personal", desc="COOP"),
+            ]
+        )
+
+        doubt = destination_doubt(
+            found, source="starling-csv", account="starling-space-money"
+        )
+
+        assert doubt is not None
+        assert doubt.witness == "starling"
+        assert doubt.matched_elsewhere == 3
+        assert doubt.file_rows == 3
+        assert doubt.by_sibling[0] == ("starling-personal", 3)
+        text = doubt.describe()
+        assert "3 of 3" in text
+        assert "starling-personal" in text
+
+    def test_AFileMostlyMatchingInPlace_RaisesNoDoubt(self):
+        found = self._found(
+            [
+                txn("starling-csv", 1, -100, account="starling-space-money"),
+                txn("starling-csv", 28, -110, account="starling-space-money"),
+                # One stray sibling match must not condemn the file.
+                txn("starling-csv", 5, -500, account="starling-space-money", desc="TESCO"),
+                txn("starling", 5, -500, account="starling-personal", desc="TESCO"),
+            ]
+        )
+
+        doubt = destination_doubt(
+            found, source="starling-csv", account="starling-space-money"
+        )
+
+        assert doubt is None
+
+    def test_DoubtIsScopedToTheChosenAccountAndSource(self):
+        found = self._found([])
+
+        assert (
+            destination_doubt(found, source="starling-csv", account="starling-personal")
+            is None
+        )

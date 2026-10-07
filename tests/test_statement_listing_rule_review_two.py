@@ -78,13 +78,6 @@ from pathlib import Path
 import pytest
 
 from listing_rule_reading import app_reading
-from obdi.agreement import HELD_CONFLICT
-from obdi.balance_anchors import (
-    STATEMENT,
-    disregard_balance,
-    effective_opening,
-    record_stated_anchor,
-)
 from obdi.core.models import SourceTier, Transaction
 from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.family_anchors import Families, families_of
@@ -93,15 +86,22 @@ from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.space_attribution import fold_space_copies
 from obdi.ingest.store import Store
 from obdi.ledger import running_balance
-from obdi.protection import press
-from obdi.protection import tested_days as days_offered
-from obdi.standing_data import (
+from obdi.verify.agreement import HELD_CONFLICT
+from obdi.verify.balance_anchors import (
+    STATEMENT,
+    disregard_balance,
+    effective_opening,
+    record_stated_anchor,
+)
+from obdi.verify.protection import press
+from obdi.verify.protection import tested_days as days_offered
+from obdi.verify.standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,
     NOTHING_TO_CHECK_AGAINST,
     statement_checks_for,
 )
-from obdi.statement_listing_measure import statement_checks_all
+from obdi.verify.statement_listing_measure import statement_checks_all
 from statement_span_world import Spend, feed, statement
 from test_statement_listing_measure import FAMILIES, OPENING, starling_statement
 

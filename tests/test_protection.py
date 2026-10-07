@@ -19,8 +19,6 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from obdi.agreement import standing_of
-from obdi.balance_anchors import effective_opening, record_stated_anchor
 from obdi.cli import collect_alert_findings
 from obdi.core.models import TransactionStatus
 from obdi.ingest.pipeline import import_file, pair_transfers_across_store
@@ -28,10 +26,12 @@ from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import SCHEMA_VERSION, Store
 from obdi.ingest.typed_transactions import record_typed_transaction, withdraw_typed_transaction
 from obdi.ledger import build_ledger
-from obdi.movement_completeness import MovementCompleteness
 from obdi.overview import NOW as NOW_BAND
 from obdi.overview import build_overview
-from obdi.protection import (
+from obdi.verify.agreement import standing_of
+from obdi.verify.balance_anchors import effective_opening, record_stated_anchor
+from obdi.verify.movement_completeness import MovementCompleteness
+from obdi.verify.protection import (
     ProtectionRefused,
     accept,
     broken_protections,
@@ -488,9 +488,9 @@ class TestNoViewCarriesAFigure:
     def test_Views_HaveNoFieldThatCouldHoldAFigure(self):
         from dataclasses import fields
 
-        from obdi.agreement import Agreement, Conflict, HeldBack, Standing
-        from obdi.clearing import ClearedMonth, ClearingView
-        from obdi.protection import ProtectionView
+        from obdi.verify.agreement import Agreement, Conflict, HeldBack, Standing
+        from obdi.verify.clearing import ClearedMonth, ClearingView
+        from obdi.verify.protection import ProtectionView
 
         for view in (ProtectionView, Agreement, HeldBack, Conflict, Standing, ClearingView,
                      ClearedMonth):

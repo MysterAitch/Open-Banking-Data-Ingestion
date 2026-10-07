@@ -9,12 +9,12 @@ store-level test of the rule reads through here.
 
 from __future__ import annotations
 
-from obdi.agreement import Standing, standing_of
-from obdi.balance_anchors import effective_opening
 from obdi.ingest.family_anchors import Families
 from obdi.ingest.store import Store
-from obdi.movement_completeness import MovementCompleteness, movement_completeness
-from obdi.standing_data import AccountStanding, statement_checks_for, verification_of
+from obdi.verify.agreement import Standing, standing_of
+from obdi.verify.balance_anchors import effective_opening
+from obdi.verify.movement_completeness import MovementCompleteness, movement_completeness
+from obdi.verify.standing_data import AccountStanding, statement_checks_for, verification_of
 
 _REPORTS: dict[int, tuple[Store, MovementCompleteness]] = {}
 
@@ -43,9 +43,9 @@ def shown_balances_are_stated_or_named(
     quantities, which the owner's own correction accepts ("a closing balance is not the balance at
     the end of a calendar day") and the page must therefore say rather than leave "adds up"
     beside a different figure."""
-    from obdi.balance_anchors import STATEMENT, effective_opening
     from obdi.ledger import running_balance
-    from obdi.standing_data import statement_checks_for
+    from obdi.verify.balance_anchors import STATEMENT, effective_opening
+    from obdi.verify.standing_data import statement_checks_for
 
     if standing.own.through is None or standing.own.held is not None:
         return 0

@@ -34,7 +34,7 @@ from flag_balance_world import (
 )
 from obdi.cli import build_web_config
 from obdi.ingest.store import Store
-from obdi.review_flags import VERDICT_SETTLE, build_queue
+from obdi.verify.review_flags import VERDICT_SETTLE, build_queue
 from section_harness import environment, serve_config
 
 BEFORE = "No known balance before 2026-09-14: a statement covering it would settle this."

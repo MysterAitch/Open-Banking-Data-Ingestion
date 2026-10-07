@@ -35,14 +35,12 @@ from urllib.parse import quote
 
 from .account_about import Window, windows_in_order
 from .account_names import AccountShown, AccountsShown, code_html
-from .agreement import held_sentence
 from .callback import render_page
 from .core.errors import DataError
 from .core.logs import say
 from .core.money import AmountParseError, parse_amount
 from .core.namespaces import validate_canonical_name
 from .core.plural import agree, plural
-from .coverage import DoubtReport
 from .ingest.accounts import (
     BALANCE_ONLY_KIND,
     CASH_ACCOUNT_KIND,
@@ -59,7 +57,9 @@ from .ingest.spaces import FINAL_MOVEMENTS_MEANING
 from .known_accounts import KnownAccount, KnownAccounts, ParentPlan
 from .navigation import NEEDS_A_LOOK
 from .overview import ARCHIVED
-from .standing_data import (
+from .verify.agreement import held_sentence
+from .verify.coverage import DoubtReport
+from .verify.standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,
     NOTHING_TO_CHECK_AGAINST,

@@ -18,7 +18,12 @@ from typing import ClassVar
 
 import pytest
 
-from obdi.agreement import (
+from obdi.core.models import Transaction, TransactionStatus
+from obdi.core.namespaces import CLEARING_SOURCES, SOURCES
+from obdi.core.page_times import marks_removed
+from obdi.ingest.store import Store
+from obdi.ledger import build_ledger
+from obdi.verify.agreement import (
     AGREES,
     DEFINES,
     HELD_CONFLICT,
@@ -35,14 +40,15 @@ from obdi.agreement import (
     standing_line,
     standing_of,
 )
-from obdi.balance_anchors import STATED, STATEMENT, Anchor, derive_opening, record_stated_anchor
-from obdi.clearing import cleared_by, cleared_entity_ids
-from obdi.core.models import Transaction, TransactionStatus
-from obdi.core.namespaces import CLEARING_SOURCES, SOURCES
-from obdi.core.page_times import marks_removed
-from obdi.ingest.store import Store
-from obdi.ledger import build_ledger
-from obdi.movement_completeness import MISSING, MovementCompleteness, RowCountFault
+from obdi.verify.balance_anchors import (
+    STATED,
+    STATEMENT,
+    Anchor,
+    derive_opening,
+    record_stated_anchor,
+)
+from obdi.verify.clearing import cleared_by, cleared_entity_ids
+from obdi.verify.movement_completeness import MISSING, MovementCompleteness, RowCountFault
 from round_up_corpus import rows_the_provider_makes
 from test_balance_anchors import ACCOUNT, everyday
 from test_ledger import land, txn

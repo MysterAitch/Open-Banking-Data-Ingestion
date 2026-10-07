@@ -34,11 +34,11 @@ from types import MappingProxyType
 import httpx
 import pytest
 
-from obdi.balance_anchors import STATED, Anchor, record_stated_anchor, stated_anchors
 from obdi.cli import build_web_config
 from obdi.core.masking import MASKED_TOTAL
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.store import Store
+from obdi.verify.balance_anchors import STATED, Anchor, record_stated_anchor, stated_anchors
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_account_pages import assert_tap_targets_are_thumb_sized
 from test_balance_anchors import ACCOUNT, everyday

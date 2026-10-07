@@ -36,9 +36,6 @@ import pytest
 
 from late_settlement_corpus import ORDERS, export_text, household
 from obdi.actual_push import build_envelope
-from obdi.agreement import standing_of
-from obdi.balance_anchors import effective_opening, record_stated_anchor
-from obdi.cash_withdrawal_measure import cash_withdrawal_report
 from obdi.core.models import TransactionStatus
 from obdi.core.namespaces import CASH_LEG_SOURCE
 from obdi.ingest.accounts import AccountRef
@@ -50,11 +47,14 @@ from obdi.ingest.pipeline import import_file, pair_transfers_across_store
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.ledger import build_ledger
-from obdi.movement_completeness import MovementCompleteness, movement_completeness
 from obdi.overview import held_by_account
 from obdi.position import read_position
-from obdi.protection import ProtectionRefused, check_span, press
 from obdi.replay import ActualAccountBinding
+from obdi.verify.agreement import standing_of
+from obdi.verify.balance_anchors import effective_opening, record_stated_anchor
+from obdi.verify.cash_withdrawal_measure import cash_withdrawal_report
+from obdi.verify.movement_completeness import MovementCompleteness, movement_completeness
+from obdi.verify.protection import ProtectionRefused, check_span, press
 from obdi.web_ledger import render_ledger
 from round_up_corpus import card_payment, deposit_item
 from test_absorbed_rows import arrive

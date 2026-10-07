@@ -24,8 +24,13 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.agreement import HELD_CONFLICT, derive_agreement, known_of_opening
-from obdi.balance_anchors import (
+from obdi.cli import build_web_config
+from obdi.core.errors import DataError
+from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.statement_terms import keep_statement_readings
+from obdi.ingest.store import SCHEMA_VERSION, Store
+from obdi.verify.agreement import HELD_CONFLICT, derive_agreement, known_of_opening
+from obdi.verify.balance_anchors import (
     STATEMENT,
     AnchorRefused,
     disregard_balance,
@@ -33,11 +38,6 @@ from obdi.balance_anchors import (
     record_stated_anchor,
     use_balance_again,
 )
-from obdi.cli import build_web_config
-from obdi.core.errors import DataError
-from obdi.ingest.rebuild import rebuild_from_raw
-from obdi.ingest.statement_terms import keep_statement_readings
-from obdi.ingest.store import SCHEMA_VERSION, Store
 from obdi.web import AuthorisationSession, ConnectionHandler
 from statement_span_world import Spend, statement
 

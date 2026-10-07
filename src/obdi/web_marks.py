@@ -571,7 +571,7 @@ def gap_actions_html(account: str, gap_source: str, gap_first: date, gap_last: d
 
 
 def _statement_sources() -> frozenset[str]:
-    from .statement_span import STATEMENT_SOURCES
+    from .verify.statement_span import STATEMENT_SOURCES
 
     return STATEMENT_SOURCES
 

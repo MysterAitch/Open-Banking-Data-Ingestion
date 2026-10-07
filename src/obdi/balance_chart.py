@@ -24,7 +24,10 @@ from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING
 
-from .balance_anchors import (
+from .core.masking import Structural
+from .core.models import Transaction
+from .ingest.accounts import AccountRef
+from .verify.balance_anchors import (
     CURRENCY,
     FAMILY,
     STATEMENT,
@@ -35,10 +38,7 @@ from .balance_anchors import (
     effective_opening,
     known_account,
 )
-from .core.masking import Structural
-from .core.models import Transaction
-from .fault_structure import StructureReport, account_report, walk_report
-from .ingest.accounts import AccountRef
+from .verify.fault_structure import StructureReport, account_report, walk_report
 
 if TYPE_CHECKING:
     from .ingest.family_anchors import Families

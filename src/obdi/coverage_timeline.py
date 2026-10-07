@@ -62,16 +62,16 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Protocol
 
-from .agreement import Agreement
-from .balance_anchors import EffectiveOpening
 from .core.london_clock import london
 from .core.namespaces import CASH_LEG_SOURCE, UNITEMISED_SOURCE
 from .core.plural import plural
 from .ingest.asked_coverage import asked_days, coverage_of
 from .ingest.store import FOLDED_SIGHTING_PREFIX, Store
-from .statement_span import AccountSpans, Span, add_months, statement_spans
-from .statement_span import Known as SpanKnown
 from .timeline import parse_window
+from .verify.agreement import Agreement
+from .verify.balance_anchors import EffectiveOpening
+from .verify.statement_span import AccountSpans, Span, add_months, statement_spans
+from .verify.statement_span import Known as SpanKnown
 
 #: How an edge is known (see the module docstring).
 STATED = "stated"

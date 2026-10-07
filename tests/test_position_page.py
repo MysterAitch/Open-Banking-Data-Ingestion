@@ -21,13 +21,13 @@ from types import MappingProxyType
 import httpx
 import pytest
 
-from obdi.balance_anchors import record_stated_anchor
 from obdi.cli import build_web_config
 from obdi.core.masking import MASKED_TOTAL
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.store import Store
 from obdi.ingest.valuations import Asset, AssetKind, record_observation
 from obdi.position import AccountInput, AssetInput, Observation, build_position
+from obdi.verify.balance_anchors import record_stated_anchor
 from obdi.web import AuthorisationSession, ConnectionHandler
 from obdi.web_position import render_position
 from page_dom import elements, parse
@@ -661,7 +661,7 @@ class TestTheChartsProvisionalEdgeCases:
     TODAY = date(2026, 10, 2)
 
     def rendered(self, *rows_sets: list[tuple[date, int]]) -> str:
-        from obdi.balance_anchors import derive_opening
+        from obdi.verify.balance_anchors import derive_opening
         from test_ledger import txn
 
         inputs = []

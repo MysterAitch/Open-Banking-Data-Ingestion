@@ -16,12 +16,12 @@ from pathlib import Path
 
 import pytest
 
-from obdi.agreement import standing_of
-from obdi.balance_anchors import effective_opening, record_stated_anchor
 from obdi.cli import build_web_config
 from obdi.ingest.store import Store
-from obdi.movement_completeness import MovementCompleteness
-from obdi.protection import press
+from obdi.verify.agreement import standing_of
+from obdi.verify.balance_anchors import effective_opening, record_stated_anchor
+from obdi.verify.movement_completeness import MovementCompleteness
+from obdi.verify.protection import press
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_balance_anchors import everyday
 from test_ledger import land, txn

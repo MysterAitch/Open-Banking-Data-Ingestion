@@ -18,10 +18,10 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from .account_names import AccountsShown
-from .agreement import NONE
+from .verify.agreement import NONE
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
-    from .standing_data import AccountStanding
+    from .verify.standing_data import AccountStanding
     from .web import WebConfig
 
 #: What an account's verification was said to be: "unread" where no standing could be read,

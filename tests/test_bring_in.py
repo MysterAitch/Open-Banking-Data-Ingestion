@@ -26,7 +26,7 @@ from obdi.bring_in import (
     wanted_heading,
 )
 from obdi.fetch_gaps import AccountOutlook, Basis, FetchGap, FetchReport, GapKind
-from obdi.standing_data import AccountStanding
+from obdi.verify.standing_data import AccountStanding
 
 D = date
 

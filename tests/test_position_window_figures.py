@@ -19,7 +19,6 @@ from datetime import date, timedelta
 
 import pytest
 
-from obdi.balance_anchors import EffectiveOpening
 from obdi.core.date_window import Resolution, sample_days
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.ingest.store import Store
@@ -35,6 +34,7 @@ from obdi.position import (
     series_at,
     window_points,
 )
+from obdi.verify.balance_anchors import EffectiveOpening
 from position_window_household import (
     CARD,
     EVERYDAY,

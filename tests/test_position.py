@@ -80,7 +80,6 @@ from datetime import date
 
 import pytest
 
-from obdi.balance_anchors import STATED, Anchor, derive_opening, record_stated_anchor
 from obdi.core.models import TransactionStatus
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.store import Store
@@ -94,6 +93,7 @@ from obdi.position import (
     build_position,
     read_position,
 )
+from obdi.verify.balance_anchors import STATED, Anchor, derive_opening, record_stated_anchor
 from test_ledger import land, txn
 
 D = date

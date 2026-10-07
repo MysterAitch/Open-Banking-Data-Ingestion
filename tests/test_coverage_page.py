@@ -386,7 +386,7 @@ class TestBindings:
 
 
 def _row(account, source, first, last, count=3):
-    from obdi.coverage import SourceCoverage
+    from obdi.verify.coverage import SourceCoverage
 
     return SourceCoverage(
         account_id=account, source=source, count=count, earliest=first, latest=last,

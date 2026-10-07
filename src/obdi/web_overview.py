@@ -29,7 +29,6 @@ from datetime import UTC, date, datetime
 from urllib.parse import quote
 
 from .account_names import AccountShown
-from .agreement import Standing
 from .core.logs import say
 from .core.page_times import (
     clock_text,
@@ -58,16 +57,17 @@ from .overview import (
     AccountOverview,
     Overview,
 )
-from .standing_data import (
+from .todo import Todo, build_todos, grouped, lockable, wanted_days
+from .trust_bar import axis_html, bar_html, ends_html, key_html, own_life
+from .verify.agreement import Standing
+from .verify.standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,
     NOTHING_TO_CHECK_AGAINST,
     not_adding_up_sentence,
     verification_of,
 )
-from .todo import Todo, build_todos, grouped, lockable, wanted_days
-from .trust import Trust, trust_of, window_start
-from .trust_bar import axis_html, bar_html, ends_html, key_html, own_life
+from .verify.trust import Trust, trust_of, window_start
 
 _esc = html.escape
 
@@ -442,7 +442,7 @@ class RowReading:
 
 def row_reading(account: AccountOverview) -> RowReading:
     """The state chip and the one short clause, from the standing the page already holds."""
-    from .agreement import AGREES, NONE, UNTESTED
+    from .verify.agreement import AGREES, NONE, UNTESTED
 
     if account.state == ARCHIVED:
         since = f"archived since {account.closed.isoformat()}" if account.closed else "archived"

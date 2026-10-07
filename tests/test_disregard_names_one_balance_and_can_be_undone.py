@@ -43,8 +43,12 @@ from datetime import date
 import pytest
 
 from bank_balance_corpus import EXPORT_ROWS, at, balance_body, household
-from obdi.agreement import HELD_CONFLICT, derive_agreement, known_of_opening
-from obdi.balance_anchors import (
+from obdi.ingest.family_anchors import OPENED, families_of
+from obdi.ingest.statement_terms import keep_statement_readings
+from obdi.ingest.store import Store
+from obdi.ledger import opening_view
+from obdi.verify.agreement import HELD_CONFLICT, derive_agreement, known_of_opening
+from obdi.verify.balance_anchors import (
     BANK,
     FAMILY,
     STATED,
@@ -56,11 +60,7 @@ from obdi.balance_anchors import (
     record_stated_anchor,
     remove_stated_anchor,
 )
-from obdi.bank_balances import BANK_SOURCE
-from obdi.ingest.family_anchors import OPENED, families_of
-from obdi.ingest.statement_terms import keep_statement_readings
-from obdi.ingest.store import Store
-from obdi.ledger import opening_view
+from obdi.verify.bank_balances import BANK_SOURCE
 from statement_span_world import Spend, statement
 from test_space_attribution import MAIN, MAP
 

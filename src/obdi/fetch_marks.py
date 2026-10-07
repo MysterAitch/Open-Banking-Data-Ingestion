@@ -49,7 +49,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from .ingest.store import Store
-from .statement_span import STATEMENT_SOURCES, RowEvidence
+from .verify.statement_span import STATEMENT_SOURCES, RowEvidence
 
 if TYPE_CHECKING:  # pragma: no cover - typing only; fetch_gaps imports this module
     from .fetch_gaps import FetchGap

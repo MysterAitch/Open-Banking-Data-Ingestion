@@ -42,7 +42,7 @@ from obdi.ingest.restore import restore_backup
 from obdi.ingest.statement_terms import statement_balances
 from obdi.ingest.store import SCHEMA_VERSION, Store
 from obdi.position import read_position
-from obdi.statement_sections import assign_section, section_token
+from obdi.verify.statement_sections import assign_section, section_token
 from section_harness import (
     UNASSIGNED,
     config,
@@ -469,7 +469,7 @@ class TestALoanAccount:
         assert {b.account_ref for b in balances} == {SAVER}
 
     def test_TheLoansOpening_IsDerivedFromItsOwnClosingAnchor(self, nine):
-        from obdi.balance_anchors import effective_opening
+        from obdi.verify.balance_anchors import effective_opening
 
         db, artefact = nine
         config(db).assign_statement_section(artefact, LOAN_KEY, LOAN)

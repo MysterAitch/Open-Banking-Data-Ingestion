@@ -36,18 +36,6 @@ from .core.outbound import install_if_requested as install_outbound_refusal_if_r
 from .core.page_times import instant_of
 from .core.plural import agree, plural
 from .core.secrets import SecretError, read_secret, truelayer_readiness
-from .coverage import (
-    DoubtReport,
-    SourceCoverage,
-    agreements,
-    coverage,
-    destination_doubt,
-    export_drift,
-    gaps,
-    stale_feeds,
-    transpositions,
-)
-from .coverage import report as coverage_report
 from .coverage_timeline import AccountTimeline
 from .entities import EntitiesView
 from .fetch_gaps import FetchEvidence, FetchGap, FetchReport, fetch_report, gather_evidence
@@ -111,7 +99,6 @@ from .known_accounts import (
 from .ledger import Ledger, LedgerWindow
 from .overview import Overview, OverviewCache, build_overview
 from .position import Position
-from .protection import recheck as recheck_protections
 from .recurring import RecurringFindings
 from .replay import (
     ActualAccountBinding,
@@ -120,10 +107,23 @@ from .replay import (
     build_transfer_pairs,
     unbound_accounts,
 )
-from .review_flags import FlagQueue, Outcome
-from .review_settlement import settle_review_flags
 from .scheduler_status import StepHandle, run_step
-from .standing_data import (
+from .verify.coverage import (
+    DoubtReport,
+    SourceCoverage,
+    agreements,
+    coverage,
+    destination_doubt,
+    export_drift,
+    gaps,
+    stale_feeds,
+    transpositions,
+)
+from .verify.coverage import report as coverage_report
+from .verify.protection import recheck as recheck_protections
+from .verify.review_flags import FlagQueue, Outcome
+from .verify.review_settlement import settle_review_flags
+from .verify.standing_data import (
     AccountStanding,
     KeyedMemo,
     movement_key,
@@ -131,9 +131,9 @@ from .standing_data import (
     standings_for,
     statement_checks_for,
 )
-from .statement_listing_measure import StatementListingReport
-from .statement_opening_measure import StatementOpeningReport, statement_opening_report
-from .statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
+from .verify.statement_listing_measure import StatementListingReport
+from .verify.statement_opening_measure import StatementOpeningReport, statement_opening_report
+from .verify.statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
 from .web import ExtendableAccount, WebConfig
 from .web import serve as serve_web
 
@@ -652,15 +652,15 @@ def rebuild_in_progress_note(db_path: Path) -> str | None:
 
 
 if TYPE_CHECKING:
-    from .balance_anchors import EffectiveOpening
     from .core.models import Transaction
     from .ingest.parsers.base import StatementParser
     from .ingest.parsers.pdf_statements import SectionReading
     from .ingest.rebuild import RebuildReport
-    from .movement_completeness import MovementCompleteness
-    from .period_reconciliation import PeriodReport
-    from .reader_findings import Findings
-    from .statement_sections import AssignmentCheck
+    from .verify.balance_anchors import EffectiveOpening
+    from .verify.movement_completeness import MovementCompleteness
+    from .verify.period_reconciliation import PeriodReport
+    from .verify.reader_findings import Findings
+    from .verify.statement_sections import AssignmentCheck
 
 
 def _record_run(
@@ -859,7 +859,7 @@ def _refile(db_path: Path, artefact_id: int, account: str) -> str | None:
 
 
 def _move_section(db_path: Path, artefact_id: int, section: str, account: str) -> str:
-    from .statement_sections import move_section
+    from .verify.statement_sections import move_section
 
     with Store(db_path) as store:
         return move_section(
@@ -908,7 +908,7 @@ def _silent_feed_findings(
     still in the future excuses nothing.
     """
     from .alerts import silent_feed_finding
-    from .coverage import silent_feeds
+    from .verify.coverage import silent_feeds
 
     if not watched:
         return []
@@ -1088,7 +1088,7 @@ def collect_alert_findings(db_path: Path, *, now: datetime | None = None) -> lis
 
 def _protection_findings(store: Store) -> list[Finding]:
     """One finding per broken protection, read live from the span so it never lags a rebuild."""
-    from .protection import broken_protections, broken_sentence
+    from .verify.protection import broken_protections, broken_sentence
 
     return [
         Finding(f"protection-broken:{check.account}", broken_sentence(check))
@@ -1634,7 +1634,7 @@ def _replay(db_path: Path, out: Path | None) -> int:
         return 2
 
     from .actual_push import opening_balances, transactions_to_push
-    from .clearing import cleared_entity_ids
+    from .verify.clearing import cleared_entity_ids
 
     with Store(db_path) as store:
         transactions = transactions_to_push(store)
@@ -2520,8 +2520,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             for r in rows[:5]
         ]
         ambiguous = dates_cannot_confirm_format([r.value_date for r in rows])
-        from .coverage import agreements
         from .ingest.verification import verify_export
+        from .verify.coverage import agreements
 
         # This file versus every OTHER source of the same account - held
         # rows of the file's own source in THIS account are excluded, or a
@@ -2609,7 +2609,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 # source of the same account over the period they share?
                 # This is the ONLY sign/completeness check available to
                 # a file with no balance column.
-                from .coverage import agreements
+                from .verify.coverage import agreements
 
                 held = store.transactions_by_sighting()
                 outlines: list[object] = [
@@ -2958,7 +2958,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         return None if hold is None else hold.sentence()
 
     def review_report_text(masked: bool) -> str:
-        from .review_report import review_report
+        from .verify.review_report import review_report
 
         if (paused := paused_text()) is not None:
             return paused
@@ -2969,13 +2969,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
     def _flags_held() -> None:
         """Refuses while a rebuild holds the derived layer, which a half-built queue misreads."""
-        from .review_flags import FlagRefused
+        from .verify.review_flags import FlagRefused
 
         if (paused := paused_text()) is not None:
             raise FlagRefused(paused)
 
     def review_flags_data() -> FlagQueue:
-        from .review_flags import build_queue
+        from .verify.review_flags import build_queue
 
         _flags_held()
         with Store(db_path) as store:
@@ -2983,7 +2983,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return build_queue(store, lambda ref: names.of(ref).name)
 
     def review_flags_answer(answer: str, flag: str, neighbour: str, fingerprint: str) -> Outcome:
-        from .review_flags import answer_one_payment, answer_two_payments
+        from .verify.review_flags import answer_one_payment, answer_two_payments
 
         _flags_held()
         with Store(db_path) as store:
@@ -2992,7 +2992,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return answer_two_payments(store, flag, fingerprint)
 
     def review_flags_undo(answer: str, flag: str, other: str) -> Outcome:
-        from .review_flags import undo
+        from .verify.review_flags import undo
 
         _flags_held()
         with Store(db_path) as store:
@@ -3013,7 +3013,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return movement_report(store).describe()
 
     def exact_rules_text() -> str:
-        from .exact_rule_measure import exact_rule_report
+        from .verify.exact_rule_measure import exact_rule_report
 
         # Read from the stored rows, which a rebuild holding the layer has half built.
         if (paused := paused_text()) is not None:
@@ -3028,7 +3028,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def statement_listing_report() -> StatementListingReport:
-        from .statement_listing_measure import statement_listing_report as measure
+        from .verify.statement_listing_measure import statement_listing_report as measure
 
         if paused_text() is not None:
             return StatementListingReport()
@@ -3047,7 +3047,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def balance_reconciliation_text(masked: bool) -> str:
-        from .balance_reconciliation import balance_reconciliation
+        from .verify.balance_reconciliation import balance_reconciliation
 
         if (paused := paused_text()) is not None:
             return paused
@@ -3057,7 +3057,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def period_reconciliation_text(masked: bool, ref: str) -> str:
-        from .period_reconciliation import period_reconciliation
+        from .verify.period_reconciliation import period_reconciliation
 
         if (paused := paused_text()) is not None:
             return paused
@@ -3069,7 +3069,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             ).describe(masked=masked, unmask_hint="press the Show values button on this page")
 
     def period_report(ref: str) -> PeriodReport | str:
-        from .period_reconciliation import period_reconciliation
+        from .verify.period_reconciliation import period_reconciliation
 
         if (paused := paused_text()) is not None:
             return paused
@@ -3140,7 +3140,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         Raises `RebuildInProgress` while a rebuild holds the layer: the report is a verdict
         read from it, and every reader of this one function says the same sentence.
         """
-        from .movement_completeness import movement_completeness
+        from .verify.movement_completeness import movement_completeness
 
         require_idle(db_path)
         account_map = _account_map(store)
@@ -3308,7 +3308,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         families: Families | None = None,
         explain_after: date | None = None,
     ) -> EffectiveOpening:
-        from .balance_anchors import effective_opening
+        from .verify.balance_anchors import effective_opening
 
         held = openings_memo.get(store, dict)
         key = (ref, explain_after)
@@ -3401,9 +3401,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """One account's timeline. With `balances` it reads the known balances themselves, for
         the tick on each; without, the standing the memo holds is all it reads of verification,
         which is what an account's own page can afford beside its rows."""
-        from .agreement import standing_of
-        from .balance_anchors import effective_opening, known_account
         from .coverage_timeline import build_account_timeline
+        from .verify.agreement import standing_of
+        from .verify.balance_anchors import effective_opening, known_account
 
         with Store(db_path) as store:
             held = timeline_memo.get(store, dict)
@@ -3511,19 +3511,19 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             return position_memo.get(store, position_data)
 
     def anchor_save(ref: str, day: str, amount: str, currency: str) -> None:
-        from .balance_anchors import record_stated_anchor
+        from .verify.balance_anchors import record_stated_anchor
 
         with Store(db_path) as store:
             record_stated_anchor(store, ref, day, amount, currency=currency)
 
     def anchor_remove(ref: str, day: str) -> bool:
-        from .balance_anchors import remove_stated_anchor
+        from .verify.balance_anchors import remove_stated_anchor
 
         with Store(db_path) as store:
             return remove_stated_anchor(store, ref, day)
 
     def balance_disregard(ref: str, day: str, source: str, basis: str, which: int) -> bool:
-        from .balance_anchors import disregard_balance
+        from .verify.balance_anchors import disregard_balance
 
         with Store(db_path) as store:
             return disregard_balance(
@@ -3549,7 +3549,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             set_default_key(store, key)
 
     def balance_use_again(ref: str, day: str, source: str, basis: str, which: int) -> bool:
-        from .balance_anchors import use_balance_again
+        from .verify.balance_anchors import use_balance_again
 
         with Store(db_path) as store:
             return use_balance_again(
@@ -3577,9 +3577,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def protect(ref: str, through: str) -> None:
-        from .agreement import standing_of
-        from .balance_anchors import effective_opening
-        from .protection import ProtectionRefused, press
+        from .verify.agreement import standing_of
+        from .verify.balance_anchors import effective_opening
+        from .verify.protection import ProtectionRefused, press
 
         busy = rebuild_in_progress_note(db_path)
         if busy:
@@ -3597,13 +3597,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             press(store, ref, through, opening=opening, standing=standing)
 
     def protect_withdraw(ref: str) -> None:
-        from .protection import withdraw
+        from .verify.protection import withdraw
 
         with Store(db_path) as store:
             withdraw(store, ref)
 
     def protect_accept(ref: str) -> None:
-        from .protection import accept
+        from .verify.protection import accept
 
         with Store(db_path) as store:
             accept(store, ref)
@@ -3815,7 +3815,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         """A kept statement read and checked against `destination`, or the sentence
         that answers without reading it."""
         from .ingest.parsers.uk_banks import detect
-        from .statement_sections import check_assignment
+        from .verify.statement_sections import check_assignment
 
         row = store.connection.execute(
             "SELECT digest, origin, payload, account_ref FROM raw_artefacts "
@@ -3979,7 +3979,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         artefact_id: int, section_key: str, account_id: str
     ) -> DoubtReport | None:
         """The doubt assigning one section would raise, writing nothing."""
-        from .statement_sections import review_section
+        from .verify.statement_sections import review_section
 
         with Store(db_path) as store:
             return review_section(
@@ -4062,7 +4062,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         unassigned as a whole, the choice is recorded as declared state, and
         the section's rows go through the same reconcile path as any other.
         """
-        from .statement_sections import assign_section
+        from .verify.statement_sections import assign_section
 
         with Store(db_path) as store:
             return assign_section(
@@ -4104,7 +4104,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .ingest.statement_extraction import serving
         from .ingest.statement_extraction import stored as stored_extraction
         from .ingest.statement_shape import shape_of_extraction
-        from .reader_findings import findings_of
+        from .verify.reader_findings import findings_of
 
         with Store(db_path) as store, serving(store, strict=True):
             row = store.connection.execute(
@@ -4190,7 +4190,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .ingest.parsers.uk_banks import detect
         from .ingest.statement_extraction import Extracted, serving
         from .ingest.statement_extraction import stored as stored_extraction
-        from .statement_sections import masked, section_token
+        from .verify.statement_sections import masked, section_token
 
         def divided_by(
             parser: StatementParser, extraction: Extracted
@@ -6020,7 +6020,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "alert":
         return run_step(db_path, "alert", lambda _step: _alert(db_path))
     if args.command == "review-report":
-        from .review_report import review_report
+        from .verify.review_report import review_report
 
         with Store(db_path) as store:
             print(
@@ -6039,7 +6039,7 @@ def main(argv: list[str] | None = None) -> int:
             print(identity_health(store).describe())
         return 0
     if args.command == "period-reconciliation":
-        from .period_reconciliation import period_reconciliation
+        from .verify.period_reconciliation import period_reconciliation
 
         # Measures only: the exit code never carries the verdict.
         with Store(db_path) as store:
@@ -6055,7 +6055,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
     if args.command == "balance-reconciliation":
-        from .balance_reconciliation import balance_reconciliation
+        from .verify.balance_reconciliation import balance_reconciliation
 
         # Measures only, like identity-health: the exit code never carries
         # the verdict.
@@ -6269,7 +6269,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if any(not r.ok for r in results) else 0
 
     if args.command == "duplication":
-        from .duplication import analyse
+        from .verify.duplication import analyse
 
         # Read-only, so it runs safely alongside a scheduled pull rather
         # than needing the store to itself.

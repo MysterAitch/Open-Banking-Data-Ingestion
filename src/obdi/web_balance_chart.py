@@ -89,7 +89,7 @@ from .core.masking import Disclosed
 from .core.page_times import percent_text
 from .core.plural import agree
 from .core.plural import plural as _plural
-from .fault_structure import (
+from .verify.fault_structure import (
     EXPLAINED,
     GAP_BUCKETS,
     IRREGULAR,

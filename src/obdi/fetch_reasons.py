@@ -13,7 +13,7 @@ from datetime import date, timedelta
 
 from .core.plural import agree, plural
 from .fetch_gaps import Basis, FetchGap, GapKind
-from .statement_span import HoleReason
+from .verify.statement_span import HoleReason
 
 
 def _closings(days: tuple[date, ...]) -> str:

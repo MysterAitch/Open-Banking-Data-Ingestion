@@ -44,8 +44,8 @@ from obdi.bring_in import BALANCE_KINDS
 from obdi.fetch_gaps import GapKind, gaps_for_account
 from obdi.fetch_reasons import gap_lines
 from obdi.ingest.store import Store
-from obdi.statement_span import Known as SpanKnown
-from obdi.statement_span import Span
+from obdi.verify.statement_span import Known as SpanKnown
+from obdi.verify.statement_span import Span
 from obdi.web_bring_in import BringInData, render_bring_in
 from obdi.web_coverage_timeline import render_account_timeline
 

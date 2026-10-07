@@ -18,9 +18,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import date
 
-from .balance_anchors import Anchor, counted_by_day
 from .balance_chart import running_balance
 from .core.models import Transaction
+from .verify.balance_anchors import Anchor, counted_by_day
 
 
 def balances_after(

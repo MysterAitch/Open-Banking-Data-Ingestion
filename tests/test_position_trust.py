@@ -149,7 +149,7 @@ class TestTheCountedAccountsAreListedWithTheirTrust:
         assert set(names[2:]) == {"Everyday", "Card"}
 
     def test_Position_ADoesNotAddUpAccount_IsSaidSoInItsRowAndStillCounted(self, position):
-        from obdi.agreement import HELD_UNMET, HeldBack
+        from obdi.verify.agreement import HELD_UNMET, HeldBack
 
         broken = trusts()
         broken[0] = account(

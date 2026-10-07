@@ -28,7 +28,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from .fault_structure import TRANSIENT, FaultStructure
+from .verify.fault_structure import TRANSIENT, FaultStructure
 
 DAY, WEEK, MONTH, QUARTER, YEAR = "day", "week", "month", "quarter", "year"
 

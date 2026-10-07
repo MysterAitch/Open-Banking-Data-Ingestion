@@ -31,24 +31,24 @@ from urllib.parse import quote
 
 from . import scheduler_status
 from .account_names import AccountsShown, accounts_shown
-from .agreement import held_sentence
 from .alerts import Finding
 from .core.models import TransactionStatus
 from .core.namespaces import CASH_LEG_SOURCE
 from .core.plural import plural as _plural
-from .coverage import SILENT_FEED_DAYS
 from .fetch_marks import awaited_set_aside_for
 from .ingest.accounts import is_balance_only
 from .ingest.asked_coverage import coverage_by_account, describe_spans
 from .ingest.rebuild_hold import RebuildInProgress
 from .ingest.store import Store
 from .scheduler_status import STEPS
+from .verify.agreement import held_sentence
+from .verify.coverage import SILENT_FEED_DAYS
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
     from .ingest.identity_health import IdentityHealth
     from .ingest.rebuild_hold import RebuildHold
-    from .movement_completeness import MovementCompleteness
-    from .standing_data import AccountStanding
+    from .verify.movement_completeness import MovementCompleteness
+    from .verify.standing_data import AccountStanding
 
 #: Where a person goes to act on each kind of attention item. Declared once,
 #: here, because the navigation strip and the items below must agree about them.
@@ -583,7 +583,7 @@ def identity_items_from(health: IdentityHealth) -> list[AttentionItem]:
 def _movement_items(
     store: Store, canonical_for_ref: Callable[[str], str]
 ) -> list[AttentionItem]:
-    from .movement_completeness import movement_completeness
+    from .verify.movement_completeness import movement_completeness
 
     return movement_items_from(movement_completeness(store, canonical_for_ref))
 
@@ -801,7 +801,7 @@ def standing_items_from(
 
 def _balance_items(store: Store, label_of: Callable[[str], str]) -> list[AttentionItem]:
     """Per account, counts only: the report object also holds real balances."""
-    from .balance_reconciliation import balance_reconciliation
+    from .verify.balance_reconciliation import balance_reconciliation
 
     items = []
     for account in balance_reconciliation(store).accounts:
@@ -1071,7 +1071,7 @@ def build_overview(
         if standings is not None:
             standing_by_account.update(standings())
         else:
-            from .standing_data import standings_for
+            from .verify.standing_data import standings_for
 
             standing_by_account.update(
                 standings_for(store, sorted(held), families=None, movement=None)

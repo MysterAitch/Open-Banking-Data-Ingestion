@@ -32,7 +32,13 @@ import pytest
 
 from credit_union_documents import Move, document, pdf, section
 from obdi.core.models import SourceTier, Transaction
-from obdi.coverage import (
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.identity import content_key
+from obdi.ingest.parsers.credit_union_pdf import section_key
+from obdi.ingest.parsers.uk_banks import detect
+from obdi.ingest.pipeline import ImportSummary, preview_reconcile, reconcile_batch
+from obdi.ingest.store import Store
+from obdi.verify.coverage import (
     LOW_OVERLAP_MIN_ROWS,
     LOW_OVERLAP_THRESHOLD,
     MATCHER_AGREES_THRESHOLD,
@@ -41,13 +47,7 @@ from obdi.coverage import (
     assignment_corroboration,
     assignment_doubt,
 )
-from obdi.ingest.connections import ConnectionStore
-from obdi.ingest.identity import content_key
-from obdi.ingest.parsers.credit_union_pdf import section_key
-from obdi.ingest.parsers.uk_banks import detect
-from obdi.ingest.pipeline import ImportSummary, preview_reconcile, reconcile_batch
-from obdi.ingest.store import Store
-from obdi.statement_sections import read_sections
+from obdi.verify.statement_sections import read_sections
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from section_harness import (
     UNASSIGNED,

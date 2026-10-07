@@ -48,10 +48,10 @@ from __future__ import annotations
 
 from datetime import date
 
-from obdi.balance_anchors import record_stated_anchor
 from obdi.ingest.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
 from obdi.ingest.store import Store
 from obdi.ingest.valuations import Asset, AssetKind, record_observation
+from obdi.verify.balance_anchors import record_stated_anchor
 from test_ledger import land, txn
 
 D = date

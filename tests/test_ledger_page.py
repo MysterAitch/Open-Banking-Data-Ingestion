@@ -730,7 +730,7 @@ class TestWiring:
             httpd.shutdown()
 
     def test_CoveragePage_LinksEachHeldAccountToItsOwnPage_WhichIsItsLedger(self, tmp_path):
-        from obdi.coverage import SourceCoverage
+        from obdi.verify.coverage import SourceCoverage
         from obdi.web_sections import render_coverage
 
         holdings = [

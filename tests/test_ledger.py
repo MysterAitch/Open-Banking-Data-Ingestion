@@ -616,7 +616,7 @@ class TestStructureIsDeclaredNotAssumed:
         assert values == set()
 
     def test_Opening_MaskedThroughTheLedgersView_ShowsNoDigitOfAnyFigure(self, tmp_path):
-        from obdi.balance_anchors import record_stated_anchor
+        from obdi.verify.balance_anchors import record_stated_anchor
 
         path = tmp_path / "masked-opening.sqlite3"
         with Store(path) as store:

@@ -29,10 +29,6 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.balance_reconciliation import (
-    _chain_ends,
-    balance_reconciliation,
-)
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.identity import content_key
@@ -40,6 +36,10 @@ from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import starling, truelayer
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
+from obdi.verify.balance_reconciliation import (
+    _chain_ends,
+    balance_reconciliation,
+)
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 
 ACCOUNT = "truelayer:tl-1"

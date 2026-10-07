@@ -29,7 +29,7 @@ from ..core.jsontypes import JsonObject, text
 from ..core.jsontypes import rows as json_rows
 from ..core.models import Transaction
 from ..core.plural import plural
-from ..review_settlement import settle_review_flags
+from ..verify.review_settlement import settle_review_flags
 from . import cursor, tiers
 from .accounts import AccountMap
 from .asked_coverage import (

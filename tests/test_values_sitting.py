@@ -21,10 +21,10 @@ import httpx
 import pytest
 
 from obdi import values_sitting
-from obdi.balance_anchors import record_stated_anchor
 from obdi.cli import build_web_config
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
+from obdi.verify.balance_anchors import record_stated_anchor
 from page_dom import elements, parse
 from section_harness import environment, serve_config
 

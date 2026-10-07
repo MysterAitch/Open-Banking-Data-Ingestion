@@ -26,8 +26,8 @@ from typing import TYPE_CHECKING
 from .core.plural import plural
 
 if TYPE_CHECKING:
-    from .coverage import SilentFeed
     from .ingest.identity_health import SharedIdentity
+    from .verify.coverage import SilentFeed
 
 #: Below this many consecutive refusals, a streak is weather, not a trend.
 REFUSAL_TREND_MIN_CONSECUTIVE = 3

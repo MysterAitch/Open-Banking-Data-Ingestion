@@ -22,7 +22,7 @@ from .callback import render_page
 from .core.logs import say
 from .core.masking import Disclosed
 from .core.plural import agree, plural
-from .review_flags import FlagQueue, FlagRefused, Outcome
+from .verify.review_flags import FlagQueue, FlagRefused, Outcome
 from .web_accounts import submit_button
 from .web_answers import AnswerPages
 from .web_ledger import _disclosure, _seal

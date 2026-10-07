@@ -23,10 +23,10 @@ from feed_morning_corpus import (
     morning,
     top_up,
 )
-from obdi.balance_anchors import effective_opening
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ledger import build_ledger
+from obdi.verify.balance_anchors import effective_opening
 from obdi.web_ledger import render_ledger
 from round_up_corpus import card_payment, household_store, main_feed, space_feed
 from test_export_cuts import Row

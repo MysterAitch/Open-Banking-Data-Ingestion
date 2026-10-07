@@ -31,10 +31,10 @@ from pathlib import Path
 
 import pytest
 
-from obdi.balance_anchors import record_stated_anchor
 from obdi.ingest.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
 from obdi.ingest.providers import starling
 from obdi.ingest.store import Store
+from obdi.verify.balance_anchors import record_stated_anchor
 from section_harness import environment, serve_config
 from test_ledger import land, txn
 

@@ -75,8 +75,8 @@ from datetime import UTC, date, datetime, timedelta
 from itertools import accumulate, pairwise
 from urllib.parse import parse_qs, urlparse
 
-from ..balance_reconciliation import _chain_ends
 from ..core.models import Transaction
+from ..verify.balance_reconciliation import _chain_ends
 from .accounts import AccountMap
 from .parsers.uk_banks import StarlingCsvParser
 from .providers.starling import round_up_of

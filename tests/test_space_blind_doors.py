@@ -40,12 +40,12 @@ import pytest
 import obdi.cli as cli
 import obdi.ingest.pipeline as ingest
 import obdi.ingest.pull as pull_module
-import obdi.statement_sections as sections
+import obdi.verify.statement_sections as sections
 from obdi.core.models import Transaction
 from obdi.ingest.providers import truelayer
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
-from obdi.statement_sections import assign_section, check_assignment
+from obdi.verify.statement_sections import assign_section, check_assignment
 from round_up_corpus import card_payment, land_feed, main_feed
 from section_harness import UNASSIGNED, config, environment, keep
 from test_assignment_doubt import SANTANDER_AS_WRITTEN

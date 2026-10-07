@@ -40,7 +40,6 @@ from obdi.cli import build_web_config, collect_alert_findings, main
 from obdi.ingest.rebuild import RebuildReport
 from obdi.ingest.rebuild_hold import RebuildEpoch, abandoned_for, epoch_for, hold_for
 from obdi.ingest.store import Store
-from obdi.movement_completeness import movement_completeness
 from obdi.overview import (
     DERIVED_ALERT_CONDITIONS,
     DERIVED_OVERVIEW_CHECKS,
@@ -49,8 +48,9 @@ from obdi.overview import (
     OverviewCache,
     build_overview,
 )
-from obdi.protection import recheck
-from obdi.standing_data import KeyedMemo
+from obdi.verify.movement_completeness import movement_completeness
+from obdi.verify.protection import recheck
+from obdi.verify.standing_data import KeyedMemo
 from round_up_corpus import main_feed, space_feed
 from section_harness import environment, serve_config
 from test_alert_wiring import NOW as ALERT_NOW

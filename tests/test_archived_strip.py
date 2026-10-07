@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import date
 
 from obdi.account_page import AccountReading, strip_html
-from obdi.trust import trust_of
+from obdi.verify.trust import trust_of
 from page_dom import elements, parse
 
 TODAY = date(2026, 10, 6)

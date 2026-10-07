@@ -41,11 +41,11 @@ import httpx
 import pytest
 
 from late_settlement_corpus import Payment, aggregator_item, household
-from obdi.exact_rule_measure import exact_rule_report
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.providers import starling, truelayer
 from obdi.ingest.rebuild import parse_artefact_transactions
 from obdi.ingest.store import Store
+from obdi.verify.exact_rule_measure import exact_rule_report
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from test_family_anchors import FEED_ORIGIN, land_evidence
 from test_space_attribution import MAIN, MAP

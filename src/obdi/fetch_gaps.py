@@ -37,18 +37,18 @@ from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from enum import StrEnum
 
-from .agreement import AGREES, NONE, UNTESTED, Agreement
 from .core.namespaces import FILE_SOURCES
-from .coverage import coverage, gaps
 from .fetch_marks import MarkSet, OutOfScope, SetAside, partition
 from .ingest.accounts import is_balance_only
 from .ingest.statement_terms import StatementPeriod, statement_periods
 from .ingest.store import Store
 from .overview import first_row_dates, held_by_account, statement_awaited
-from .review_flags import settle_evidence
-from .review_report import BalanceGap, assess_flags
-from .standing_data import AccountStanding
-from .statement_span import (
+from .verify.agreement import AGREES, NONE, UNTESTED, Agreement
+from .verify.coverage import coverage, gaps
+from .verify.review_flags import settle_evidence
+from .verify.review_report import BalanceGap, assess_flags
+from .verify.standing_data import AccountStanding
+from .verify.statement_span import (
     STATEMENT_SOURCES,
     Hole,
     HoleReason,
@@ -618,7 +618,7 @@ def gaps_for_account(
     `standings` the account's is read from its balances alone, the rule the Overview uses when
     it is given none. Without `evidence` the store is walked.
     """
-    from .standing_data import standings_for
+    from .verify.standing_data import standings_for
 
     held = evidence if evidence is not None else gather_evidence(store)
     known = (

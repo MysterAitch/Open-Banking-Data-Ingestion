@@ -43,13 +43,19 @@ from bank_balance_corpus import (
     bills_items,
     household,
 )
-from obdi import bank_balances
 from obdi.actual_push import opening_balances
-from obdi.balance_anchors import ASSUMED_NIL, BANK, STATED, effective_opening, record_stated_anchor
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.providers import starling
 from obdi.ingest.store import Store
 from obdi.replay import ActualAccountBinding
+from obdi.verify import bank_balances
+from obdi.verify.balance_anchors import (
+    ASSUMED_NIL,
+    BANK,
+    STATED,
+    effective_opening,
+    record_stated_anchor,
+)
 from test_space_attribution import BILLS, HOLIDAY, MAIN, MAP
 
 BILLS_AT_15 = 35000

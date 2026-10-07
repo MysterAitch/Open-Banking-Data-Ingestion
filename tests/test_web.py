@@ -373,7 +373,7 @@ class TestTheHomepageShowsWhatIsHeld:
     """
 
     def test_Index_WhenHoldingsAreProvided_ShowsCountAndRangePerAccount(self, tmp_path):
-        from obdi.coverage import SourceCoverage
+        from obdi.verify.coverage import SourceCoverage
 
         holdings = [
             SourceCoverage(
@@ -400,7 +400,7 @@ class TestTheHomepageShowsWhatIsHeld:
         assert "Held so far" not in page
 
     def test_Index_AStaleFeedWarning_RendersAboveTheHoldings(self, tmp_path):
-        from obdi.coverage import SourceCoverage
+        from obdi.verify.coverage import SourceCoverage
 
         holdings = [
             SourceCoverage(
@@ -997,7 +997,7 @@ class TestEmptyKnownRefsStayBindable:
         fix. The bind moves nothing; the next rebuild applies the edge."""
         from datetime import date
 
-        from obdi.coverage import SourceCoverage
+        from obdi.verify.coverage import SourceCoverage
         from obdi.web_sections import render_coverage
 
         rendered = render_coverage(
@@ -1050,7 +1050,7 @@ class TestAccountFeeders:
     def test_ThreeStarlingRefsOnOneSpace_RenderAWarningBesideTheSpaceNamingEachId(self):
         from datetime import date
 
-        from obdi.coverage import SourceCoverage
+        from obdi.verify.coverage import SourceCoverage
         from obdi.web_sections import render_coverage
 
         ids = ["343fa965-8bb7", "b2cec056-b0d8", "bceb25f1-1fad"]
@@ -2210,7 +2210,7 @@ class TestNamesLeadAndDormancySpeaks:
     def test_Holdings_ShowNamesWithIdsDemoted_AndQuietAccountsSaySo(self, tmp_path):
         from datetime import UTC, datetime, timedelta
 
-        from obdi.coverage import SourceCoverage
+        from obdi.verify.coverage import SourceCoverage
 
         today = datetime.now(UTC).date()
         rows = [

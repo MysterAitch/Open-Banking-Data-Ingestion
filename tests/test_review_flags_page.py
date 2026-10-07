@@ -27,13 +27,13 @@ from flag_world import (
     add_unsettled_pair,
     build_flag_world,
 )
-from obdi.agreement import standing_of
-from obdi.balance_anchors import effective_opening, record_stated_anchor
 from obdi.cli import build_web_config
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
-from obdi.movement_completeness import MovementCompleteness
-from obdi.protection import press
+from obdi.verify.agreement import standing_of
+from obdi.verify.balance_anchors import effective_opening, record_stated_anchor
+from obdi.verify.movement_completeness import MovementCompleteness
+from obdi.verify.protection import press
 from section_harness import environment, serve_config
 
 TOKENS = [*PAYEES.values(), *FIGURES.values(), *(f.replace(".", "") for f in FIGURES.values())]

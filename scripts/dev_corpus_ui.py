@@ -218,9 +218,9 @@ def seed_position(store_path: Path) -> None:
     """
     from datetime import date
 
-    from obdi.balance_anchors import record_stated_anchor
     from obdi.ingest.store import Store
     from obdi.ingest.valuations import Asset, AssetKind, record_observation
+    from obdi.verify.balance_anchors import record_stated_anchor
 
     with Store(store_path) as store:
         record_stated_anchor(store, "synthetic-current", "2026-03-31", "2310.45")

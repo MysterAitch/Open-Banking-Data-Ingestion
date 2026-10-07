@@ -15,10 +15,10 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.balance_anchors import record_stated_anchor, removed_stated_anchors, stated_anchors
 from obdi.cli import build_web_config
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.store import Store
+from obdi.verify.balance_anchors import record_stated_anchor, removed_stated_anchors, stated_anchors
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_balance_anchors import ACCOUNT, everyday
 
@@ -121,7 +121,7 @@ class TestThePressAsksFirst:
 class TestTheRemovalIsKept:
     def test_Store_WhenAStatedBalanceIsRemoved_KeepsItsDateFigureAndTime(self, db):
         with Store(db) as store:
-            from obdi.balance_anchors import remove_stated_anchor
+            from obdi.verify.balance_anchors import remove_stated_anchor
 
             remove_stated_anchor(store, ACCOUNT, DAY)
             kept = removed_stated_anchors(store, ACCOUNT)

@@ -45,7 +45,7 @@ from obdi.ingest.connections import Connection, ConnectionStore
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
 from obdi.todo import wanted_days
-from obdi.trust import trust_of
+from obdi.verify.trust import trust_of
 from obdi.web_bring_in import (
     BringInData,
     Evidence,

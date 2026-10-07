@@ -46,8 +46,6 @@ from datetime import date
 import pytest
 
 from obdi.actual_push import opening_balances
-from obdi.balance_anchors import FAMILY, effective_opening, record_stated_anchor
-from obdi.balance_anchors import STATEMENT as STATEMENT_BASIS
 from obdi.core.models import TransactionStatus
 from obdi.ingest.accounts import (
     BALANCE_ONLY_KIND,
@@ -73,6 +71,8 @@ from obdi.ledger import (
     build_ledger,
 )
 from obdi.replay import ActualAccountBinding
+from obdi.verify.balance_anchors import FAMILY, effective_opening, record_stated_anchor
+from obdi.verify.balance_anchors import STATEMENT as STATEMENT_BASIS
 from test_space_attribution import (
     BILLS,
     FEED,

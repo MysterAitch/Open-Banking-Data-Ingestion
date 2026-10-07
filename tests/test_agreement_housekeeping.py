@@ -35,11 +35,11 @@ from datetime import date
 
 import pytest
 
-from obdi.balance_anchors import record_stated_anchor
 from obdi.ingest.store import Store
-from obdi.movement_completeness import MISSING, MovementCompleteness, RowCountFault
 from obdi.overview import STALE_AGREEMENT_DAYS, standing_items_from
-from obdi.standing_data import AccountStanding, standings_for
+from obdi.verify.balance_anchors import record_stated_anchor
+from obdi.verify.movement_completeness import MISSING, MovementCompleteness, RowCountFault
+from obdi.verify.standing_data import AccountStanding, standings_for
 from test_balance_anchors import everyday
 from test_ledger import land, txn
 

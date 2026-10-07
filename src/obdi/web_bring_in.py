@@ -70,10 +70,10 @@ from .ingest.pipeline import MatcherPreview
 from .ingest.pull import STARLING_CONNECTION
 from .ingest.rebuild_hold import RebuildInProgress
 from .overview import AccountOverview, Overview
-from .standing_data import AccountStanding
 from .todo import account_page, wanted_days
-from .trust import Trust, month_marks, trust_of
 from .trust_bar import bar_html, source_lane_html
+from .verify.standing_data import AccountStanding
+from .verify.trust import Trust, month_marks, trust_of
 from .web_marks import (
     MARKS_STYLE_TAG,
     contradicted_html,

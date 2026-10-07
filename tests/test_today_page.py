@@ -12,15 +12,6 @@ import re
 from dataclasses import replace
 from datetime import UTC, date, datetime
 
-from obdi.agreement import (
-    AGREES,
-    HELD_UNMET,
-    NONE,
-    Agreement,
-    HeldBack,
-    Known,
-    Standing,
-)
 from obdi.fetch_gaps import AccountOutlook, Basis, FetchGap, FetchReport, GapKind
 from obdi.ingest.rebuild_hold import RebuildHold
 from obdi.overview import (
@@ -34,7 +25,16 @@ from obdi.overview import (
     AttentionItem,
     Overview,
 )
-from obdi.standing_data import AccountStanding
+from obdi.verify.agreement import (
+    AGREES,
+    HELD_UNMET,
+    NONE,
+    Agreement,
+    HeldBack,
+    Known,
+    Standing,
+)
+from obdi.verify.standing_data import AccountStanding
 from obdi.web_overview import overview_html
 from page_dom import Node, elements, inside, parse
 

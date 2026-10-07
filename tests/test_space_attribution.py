@@ -27,10 +27,7 @@ from typing import ClassVar
 
 import pytest
 
-from obdi.balance_anchors import effective_opening, record_stated_anchor
-from obdi.balance_reconciliation import balance_reconciliation
 from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
-from obdi.coverage import agreements
 from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.identity import artefact_digest, content_key
 from obdi.ingest.identity_health import identity_health
@@ -52,6 +49,9 @@ from obdi.ledger import build_ledger
 from obdi.overview import held_by_account
 from obdi.position import read_position
 from obdi.replay import ActualAccountBinding, build_payload, withheld_reason
+from obdi.verify.balance_anchors import effective_opening, record_stated_anchor
+from obdi.verify.balance_reconciliation import balance_reconciliation
+from obdi.verify.coverage import agreements
 
 MAIN = "starling-personal"
 BILLS = "starling-space-bills"

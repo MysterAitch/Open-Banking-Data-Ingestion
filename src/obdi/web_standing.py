@@ -12,10 +12,10 @@ import html
 from typing import Any
 from urllib.parse import quote
 
-from .agreement import HELD_MOVEMENT, NONE, held_sentence, standing_line
 from .core.page_words import REMOVE_PROTECTION
 from .core.plural import plural
-from .protection import protection_line
+from .verify.agreement import HELD_MOVEMENT, NONE, held_sentence, standing_line
+from .verify.protection import protection_line
 from .web_accounts import submit_button
 
 _esc = html.escape

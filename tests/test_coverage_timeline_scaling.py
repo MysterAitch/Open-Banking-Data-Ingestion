@@ -19,7 +19,7 @@ from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import starling
 from obdi.ingest.store import Store
-from obdi.statement_span import describe_account
+from obdi.verify.statement_span import describe_account
 from obdi.web_coverage_timeline import render_account_timeline
 
 REF = "long"

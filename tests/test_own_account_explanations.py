@@ -18,21 +18,27 @@ from datetime import date
 import pytest
 
 from bank_balance_corpus import at, balance_body, item
-from obdi.balance_anchors import STATEMENT, Anchor, derive_opening, effective_opening, own_walk
 from obdi.balance_chart import build_balance_chart
 from obdi.core.models import TransactionStatus
-from obdi.fault_explanation import (
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.sighting_placement import SightingPlacement
+from obdi.ingest.store import Store
+from obdi.ledger import build_ledger
+from obdi.verify.balance_anchors import (
+    STATEMENT,
+    Anchor,
+    derive_opening,
+    effective_opening,
+    own_walk,
+)
+from obdi.verify.fault_explanation import (
     COUNTED_NOT_LISTED,
     LISTED_NOT_COUNTED,
     ONE_ROW,
     TIMING_PAIR,
     explain_walk,
 )
-from obdi.fault_structure import select_explained
-from obdi.ingest.family_anchors import families_of
-from obdi.ingest.sighting_placement import SightingPlacement
-from obdi.ingest.store import Store
-from obdi.ledger import build_ledger
+from obdi.verify.fault_structure import select_explained
 from obdi.web_ledger import render_ledger
 from own_account_corpus import BANK_ON_THE_2ND, OWN_MAP, own_household
 from test_space_attribution import FEED, MAIN, Household, pay

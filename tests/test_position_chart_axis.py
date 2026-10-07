@@ -30,9 +30,9 @@ from datetime import date
 
 import pytest
 
-from obdi.balance_anchors import record_stated_anchor
 from obdi.ingest.store import Store
 from obdi.position import read_position
+from obdi.verify.balance_anchors import record_stated_anchor
 from obdi.web_position import render_position
 from test_ledger import land, txn
 from test_position_chart_choice import household

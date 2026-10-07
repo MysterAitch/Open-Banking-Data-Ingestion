@@ -13,8 +13,8 @@ from datetime import date
 
 from .account_names import AccountShown, AccountsShown, code_html
 from .core.plural import agree, plural
-from .standing_data import ADDS_UP, DOES_NOT_ADD_UP
-from .statement_listing_measure import (
+from .verify.standing_data import ADDS_UP, DOES_NOT_ADD_UP
+from .verify.statement_listing_measure import (
     AccountListing,
     DayReading,
     Held,
@@ -22,7 +22,7 @@ from .statement_listing_measure import (
     StatementListing,
     StatementListingReport,
 )
-from .statement_openings import spans_text
+from .verify.statement_openings import spans_text
 
 #: Where a statement's own periods are shown line by line, which this section does not repeat.
 PERIOD_PAGE = "/period-reconciliation"

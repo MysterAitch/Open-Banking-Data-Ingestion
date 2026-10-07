@@ -19,10 +19,10 @@ from coverage_timeline_world import (
     build_household,
 )
 from obdi import coverage_timeline as ct
-from obdi.agreement import standing_of
-from obdi.balance_anchors import effective_opening
 from obdi.fetch_gaps import gaps_for_account
 from obdi.ingest.store import Store
+from obdi.verify.agreement import standing_of
+from obdi.verify.balance_anchors import effective_opening
 
 
 def d(text: str) -> date:

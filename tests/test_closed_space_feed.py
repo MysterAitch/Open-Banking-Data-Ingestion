@@ -32,7 +32,6 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from obdi.balance_anchors import effective_opening
 from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.pipeline import import_file, pair_transfers_across_store
@@ -41,6 +40,7 @@ from obdi.ingest.pull import STARLING_CONNECTION, pull_starling
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.space_windows import CLOSED_SPACE_EMPTY, CLOSED_SPACE_MARK, CLOSED_SPACE_RETRY_DAYS
 from obdi.ingest.store import Store
+from obdi.verify.balance_anchors import effective_opening
 
 MAIN = "starling-personal"
 BILLS = "starling-space-bills"

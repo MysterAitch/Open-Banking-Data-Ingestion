@@ -28,7 +28,7 @@ import pytest
 
 from coverage_page_world import repeated_lines
 from obdi.callback import render_page
-from obdi.period_reconciliation import (
+from obdi.verify.period_reconciliation import (
     AccountPeriods,
     Leftover,
     Period,

@@ -90,38 +90,38 @@ from pathlib import Path
 
 import pytest
 
-from obdi.agreement import (
-    HELD_CONFLICT,
-    Standing,
-    closed_before_sentence,
-    standing_line,
-    standing_of,
-)
-from obdi.balance_anchors import (
-    STATEMENT,
-    AnchorRefused,
-    disregard_balance,
-    effective_opening,
-    record_stated_anchor,
-)
 from obdi.checks_index import CHECKS, IN_ORDER, result_of
 from obdi.core.models import SourceTier, Transaction
 from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.statement_terms import keep_statement_readings
 from obdi.ingest.store import Store
-from obdi.movement_completeness import MovementCompleteness, movement_completeness
 from obdi.overview import Overview, standing_items_from
-from obdi.protection import tested_days as days_offered
-from obdi.standing_data import (
+from obdi.verify.agreement import (
+    HELD_CONFLICT,
+    Standing,
+    closed_before_sentence,
+    standing_line,
+    standing_of,
+)
+from obdi.verify.balance_anchors import (
+    STATEMENT,
+    AnchorRefused,
+    disregard_balance,
+    effective_opening,
+    record_stated_anchor,
+)
+from obdi.verify.movement_completeness import MovementCompleteness, movement_completeness
+from obdi.verify.protection import tested_days as days_offered
+from obdi.verify.standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,
     AccountStanding,
     standings_for,
     verification_of,
 )
-from obdi.statement_checks import StatementChecks
-from obdi.statement_listing_measure import statement_checks
+from obdi.verify.statement_checks import StatementChecks
+from obdi.verify.statement_listing_measure import statement_checks
 from statement_span_world import Spend, feed, statement
 from test_statement_listing_measure import (
     FAMILIES,

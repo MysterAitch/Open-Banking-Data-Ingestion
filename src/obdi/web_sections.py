@@ -36,9 +36,9 @@ from .web_connections import Hooks, connections_body
 from .web_marks import FETCH_NEXT_LINE
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
-    from .coverage import SourceCoverage
     from .ingest.accounts import AccountRecord
     from .ingest.spaces import ArchiveNote
+    from .verify.coverage import SourceCoverage
     from .web import ExtendableAccount, WebConfig
 
 _esc = html.escape

@@ -26,7 +26,7 @@ from datetime import date
 from obdi.coverage_timeline import STATEMENT, build_account_timeline
 from obdi.ingest.statement_terms import keep_statement_readings
 from obdi.ingest.store import Store
-from obdi.statement_span import statement_spans
+from obdi.verify.statement_span import statement_spans
 from statement_span_world import Spend, statement
 from test_statement_span import _five_and_a_half
 

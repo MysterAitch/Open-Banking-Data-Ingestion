@@ -19,7 +19,7 @@ import html
 
 from .account_names import AccountsShown
 from .core.plural import plural
-from .period_reconciliation import (
+from .verify.period_reconciliation import (
     AccountPeriods,
     Locus,
     Period,

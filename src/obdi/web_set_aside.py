@@ -35,7 +35,7 @@ from .fetch_marks import (
 from .ingest.rebuild_hold import RebuildInProgress
 from .ingest.store import Store
 from .navigation import page_name
-from .statement_span import STATEMENT_SOURCES
+from .verify.statement_span import STATEMENT_SOURCES
 from .web_marks import MARKS_STYLE_TAG, form_html, mark_query, span_words
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone

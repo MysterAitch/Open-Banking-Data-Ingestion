@@ -68,7 +68,7 @@ class TestWhatTheEnvelopeCarries:
             assert "reconciled" not in row
 
     def test_Envelope_KeepsTheOpeningRowCleared(self, tmp_path):
-        from obdi.balance_anchors import record_stated_anchor
+        from obdi.verify.balance_anchors import record_stated_anchor
 
         with Store(tmp_path / "opening.sqlite3") as opened:
             land(opened, "d", txn(ACCOUNT, "truelayer-booked", "x", D(2026, 3, 2), -100, "ONE"))

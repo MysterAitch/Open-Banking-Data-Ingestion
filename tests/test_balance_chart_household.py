@@ -16,18 +16,18 @@ from datetime import date
 
 import pytest
 
-import obdi.balance_anchors as balance_anchors
-from obdi.balance_anchors import STATED, Anchor, derive_opening
+import obdi.verify.balance_anchors as balance_anchors
 from obdi.balance_chart import build_balance_chart
 from obdi.core.models import Transaction, TransactionStatus
-from obdi.fault_structure import (
+from obdi.ingest.family_anchors import families_of
+from obdi.ingest.sighting_placement import SightingPlacement
+from obdi.verify.balance_anchors import STATED, Anchor, derive_opening
+from obdi.verify.fault_structure import (
     EXPLAINED,
     TRANSIENT,
     UNHELD,
     account_report,
 )
-from obdi.ingest.family_anchors import families_of
-from obdi.ingest.sighting_placement import SightingPlacement
 from test_balance_chart_pages import Parsed
 from test_export_dating import (
     MAIN,

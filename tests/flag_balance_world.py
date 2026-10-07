@@ -51,12 +51,12 @@ from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
 
-from obdi.balance_anchors import record_stated_anchor
 from obdi.ingest.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
 from obdi.ingest.pipeline import import_file, reconcile_batch
 from obdi.ingest.providers import truelayer
 from obdi.ingest.rebuild import parse_artefact_transactions, rebuild_from_raw
 from obdi.ingest.store import Store
+from obdi.verify.balance_anchors import record_stated_anchor
 
 #: The day nothing may be stated after, so no test reads the clock.
 TODAY = date(2026, 10, 1)

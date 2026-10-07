@@ -49,7 +49,6 @@ import pytest
 
 from credit_union_documents import nine_accounts, pdf
 from obdi.account_names import AccountsShown
-from obdi.balance_anchors import record_stated_anchor
 from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.family_anchors import Families
@@ -59,7 +58,9 @@ from obdi.ingest.pipeline import import_file, media_type_of, reconcile_batch
 from obdi.ingest.statement_terms import keep_statement_readings
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
-from obdi.statement_listing_measure import (
+from obdi.statement_listing_page import statement_listing_html
+from obdi.verify.balance_anchors import record_stated_anchor
+from obdi.verify.statement_listing_measure import (
     DayReading,
     Held,
     Link,
@@ -68,7 +69,6 @@ from obdi.statement_listing_measure import (
     _pair,
     statement_listing_report,
 )
-from obdi.statement_listing_page import statement_listing_html
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from section_harness import config, environment, keep
 from statement_span_world import MONTHS, Spend, _ordinal, _pounds, feed, statement
@@ -947,7 +947,7 @@ class TestASectionOfAnAllAccountsStatement:
     def test_Readings_WhenTheDocumentsOwnReadingIsAnotherStatements_IsNeverBorrowed(self):
         from obdi.ingest.parsers.statement_reading import StatementReading
         from obdi.ingest.statement_terms import KeptPdf
-        from obdi.statement_listing_measure import _Readings
+        from obdi.verify.statement_listing_measure import _Readings
 
         whole = StatementReading(
             statement_date=D(2026, 3, 1), closing_balance_minor=5, opening_balance_minor=5
@@ -1212,7 +1212,7 @@ class TestTheSectionShowsNoFigure:
         assert "Every statement passes every check." in " ".join(_text_of(page))
 
     def test_Section_WhenNoAccountHoldsAStatement_SaysThereIsNothingToTest(self):
-        from obdi.statement_listing_measure import StatementListingReport
+        from obdi.verify.statement_listing_measure import StatementListingReport
 
         page = statement_listing_html(StatementListingReport(), AccountsShown())
 

@@ -26,7 +26,7 @@ from ..core.models import (
     TransactionStatus,
 )
 from ..core.plural import plural
-from ..review_settlement import settle_review_flags
+from ..verify.review_settlement import settle_review_flags
 from .accounts import AccountMap
 from .identity import artefact_digest, entity_id_for
 from .matching import (

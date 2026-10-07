@@ -24,7 +24,6 @@ import httpx
 import pytest
 
 from obdi.actual_push import transactions_to_push
-from obdi.balance_anchors import AnchorRefused
 from obdi.cli import build_web_config
 from obdi.core.models import RawArtefact, SourceTier, TransactionStatus
 from obdi.core.namespaces import MANUAL_SOURCE, MANUAL_WITHDRAWAL_SOURCE
@@ -42,6 +41,7 @@ from obdi.ingest.typed_transactions import (
 )
 from obdi.ledger import running_balance
 from obdi.replay import ActualAccountBinding, build_payload
+from obdi.verify.balance_anchors import AnchorRefused
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_ledger import land, txn
 

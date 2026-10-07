@@ -23,16 +23,6 @@ from datetime import date, timedelta
 
 import pytest
 
-from obdi.balance_anchors import (
-    EXPORT,
-    FAMILY,
-    STATED,
-    STATEMENT,
-    Anchor,
-    derive_opening,
-    effective_opening,
-)
-from obdi.balance_meaning import WHOLE
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.family_anchors import families_of
@@ -41,6 +31,16 @@ from obdi.ingest.pipeline import import_file, reconcile_batch
 from obdi.ingest.space_attribution import fold_space_copies
 from obdi.ingest.store import Store
 from obdi.ledger import build_ledger
+from obdi.verify.balance_anchors import (
+    EXPORT,
+    FAMILY,
+    STATED,
+    STATEMENT,
+    Anchor,
+    derive_opening,
+    effective_opening,
+)
+from obdi.verify.balance_meaning import WHOLE
 
 MAIN = "starling-personal"
 FEED, AGGREGATOR = "starling", "truelayer"

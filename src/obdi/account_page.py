@@ -37,16 +37,16 @@ from .ingest.rebuild_hold import RebuildInProgress
 from .ledger import Ledger
 from .navigation import account_address
 from .overview import HOUSEKEEPING, AccountOverview, Overview
-from .protection import ProtectionView
-from .standing_data import (
+from .todo import Todo, account_page, build_todos, grouped, wanted_days
+from .trust_bar import bar_html, ends_html, own_life, source_lane_html
+from .verify.protection import ProtectionView
+from .verify.standing_data import (
     DOES_NOT_ADD_UP,
     NOTHING_TO_CHECK_AGAINST,
     AccountStanding,
     verification_of,
 )
-from .todo import Todo, account_page, build_todos, grouped, wanted_days
-from .trust import Trust, month_marks, trust_of
-from .trust_bar import bar_html, ends_html, own_life, source_lane_html
+from .verify.trust import Trust, month_marks, trust_of
 from .web_accounts import submit_button
 from .web_overview import OPEN_TODO_LIMIT, _whole_dates, todo_row_html
 

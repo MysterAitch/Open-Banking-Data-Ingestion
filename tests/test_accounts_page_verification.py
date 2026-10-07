@@ -31,10 +31,10 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.balance_anchors import record_stated_anchor
 from obdi.cli import build_web_config
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.store import Store
+from obdi.verify.balance_anchors import record_stated_anchor
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_ledger import land, txn
 

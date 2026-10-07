@@ -14,10 +14,7 @@ from datetime import UTC, date, datetime
 import pytest
 
 import home_world as world
-from obdi.agreement import standing_of
-from obdi.balance_anchors import effective_opening, record_stated_anchor
 from obdi.ingest.store import Store
-from obdi.movement_completeness import MovementCompleteness
 from obdi.overview import (
     _KINDS,
     HOUSEKEEPING,
@@ -28,7 +25,10 @@ from obdi.overview import (
     Overview,
     build_overview,
 )
-from obdi.protection import press
+from obdi.verify.agreement import standing_of
+from obdi.verify.balance_anchors import effective_opening, record_stated_anchor
+from obdi.verify.movement_completeness import MovementCompleteness
+from obdi.verify.protection import press
 from obdi.web_overview import (
     arrange,
     band_phrase,

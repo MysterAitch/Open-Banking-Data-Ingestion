@@ -220,8 +220,8 @@ class TestStatedBalances:
     def test_AStatedBalance_IsExportedWithItsAccountDateAndSignedAmount(self, tmp_path):
         """A balance a person stated has no artefact to replay it from, so an
         export that left it out would lose it silently. Owed is negative."""
-        from obdi.balance_anchors import record_stated_anchor
         from obdi.export_declared import export_declared
+        from obdi.verify.balance_anchors import record_stated_anchor
 
         store_path = tmp_path / "store.sqlite3"
         _store_with_hand_work(store_path)

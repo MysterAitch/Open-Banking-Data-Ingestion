@@ -31,7 +31,7 @@ from obdi.ingest.parsers.pdf_statements import SectionReading
 from obdi.ingest.parsers.statement_reading import StatementReading, StatementRow
 from obdi.ingest.statement_terms import statement_periods
 from obdi.ingest.store import SectionAssignment, Store
-from obdi.statement_span import HoleReason, Known, statement_spans
+from obdi.verify.statement_span import HoleReason, Known, statement_spans
 from statement_span_world import Spend, feed
 
 D = date

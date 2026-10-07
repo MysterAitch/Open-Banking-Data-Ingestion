@@ -18,9 +18,9 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
-from obdi.balance_anchors import record_stated_anchor
 from obdi.cli import build_web_config
 from obdi.ingest.store import Store
+from obdi.verify.balance_anchors import record_stated_anchor
 from obdi.web import AuthorisationSession, ConnectionHandler
 from test_account_pages import assert_tap_targets_are_thumb_sized
 from test_balance_anchors import ACCOUNT, everyday
@@ -117,7 +117,7 @@ class TestOfferingAProtection:
     def test_Ledger_WhenNoBalanceIsKnown_OffersNothingAndSaysWhy(self, tmp_path, lab):
         with Store(lab.db) as store:
             for day in ("2026-03-05", "2026-03-10", "2026-03-20"):
-                from obdi.balance_anchors import remove_stated_anchor
+                from obdi.verify.balance_anchors import remove_stated_anchor
 
                 remove_stated_anchor(store, ACCOUNT, day)
 

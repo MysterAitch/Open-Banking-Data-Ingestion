@@ -40,7 +40,6 @@ from typing import Any
 
 import pytest
 
-from obdi.balance_anchors import effective_opening
 from obdi.core.models import TransactionStatus
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.rebuild import rebuild_from_raw
@@ -50,6 +49,7 @@ from obdi.replay import (
     build_payload,
     withheld_reason,
 )
+from obdi.verify.balance_anchors import effective_opening
 from round_up_corpus import (
     card_payment,
     counted,

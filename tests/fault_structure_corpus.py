@@ -28,7 +28,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from obdi.balance_anchors import FamilyWalk, walk_family
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.ingest.family_anchors import (
     CSV_SOURCE,
@@ -38,6 +37,7 @@ from obdi.ingest.family_anchors import (
     OpeningEvidence,
 )
 from obdi.ingest.identity import content_key
+from obdi.verify.balance_anchors import FamilyWalk, walk_family
 
 MAIN = "starling-personal"
 OPENING_DAY = date(2025, 12, 31)

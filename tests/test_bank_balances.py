@@ -33,9 +33,9 @@ from bank_balance_corpus import (
     item,
     main_items,
 )
-from obdi import bank_balances
-from obdi.balance_anchors import BANK, effective_opening
 from obdi.ingest.family_anchors import families_of
+from obdi.verify import bank_balances
+from obdi.verify.balance_anchors import BANK, effective_opening
 from test_export_dating import render as render_escaped
 from test_space_attribution import MAIN, MAP
 

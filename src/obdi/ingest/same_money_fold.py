@@ -162,7 +162,7 @@ from itertools import combinations
 
 from ..core import instrumentation
 from ..core.models import Transaction
-from ..period_reconciliation import (
+from ..verify.period_reconciliation import (
     FEED_SIDE,
     SAME_MONEY_PHASE,
     STATEMENT_SIDE,
@@ -173,7 +173,7 @@ from ..period_reconciliation import (
     gather_evidence,
     held_in,
 )
-from ..same_money_outcome import AccountOutcome, ClosingOutcome, Verdict
+from ..verify.same_money_outcome import AccountOutcome, ClosingOutcome, Verdict
 from .accounts import AccountMap
 from .statement_terms import keep_statement_readings
 from .store import Store

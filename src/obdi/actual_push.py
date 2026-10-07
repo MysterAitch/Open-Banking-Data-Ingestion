@@ -22,8 +22,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .balance_anchors import effective_opening, unitemised_for_store
-from .clearing import cleared_entity_ids
 from .core.models import Transaction
 from .core.plural import plural, word
 from .ingest.family_anchors import Families
@@ -37,6 +35,8 @@ from .replay import (
     history_imported_ids,
     unbound_accounts,
 )
+from .verify.balance_anchors import effective_opening, unitemised_for_store
+from .verify.clearing import cleared_entity_ids
 
 # Version 3 added `transfers` and `opening_balances` beside `accounts`. The
 # applier refuses any version it does not know, so a change here ships with

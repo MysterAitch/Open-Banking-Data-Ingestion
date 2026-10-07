@@ -31,7 +31,6 @@ from datetime import date
 import pytest
 
 from obdi.account_names import AccountsShown
-from obdi.balance_anchors import record_stated_anchor
 from obdi.fetch_gaps import Basis, GapKind, fetch_report, gather_evidence
 from obdi.fetch_reasons import gap_lines as _lines
 from obdi.ingest.accounts import AccountRecord, AccountRef
@@ -39,8 +38,9 @@ from obdi.ingest.pipeline import import_file
 from obdi.ingest.spaces import SPACE_KIND
 from obdi.ingest.statement_terms import keep_statement_readings
 from obdi.ingest.store import Store
-from obdi.standing_data import standings_for
-from obdi.statement_span import HoleReason
+from obdi.verify.balance_anchors import record_stated_anchor
+from obdi.verify.standing_data import standings_for
+from obdi.verify.statement_span import HoleReason
 from obdi.web_bring_in import BringInData, render_bring_in
 from page_dom import elements, parse
 from statement_span_world import Spend, feed, statement
@@ -244,7 +244,7 @@ class TestWhenAStatementIsDue:
                     received=D(2026, 5, 20),
                 )
             keep_statement_readings(store)
-            from obdi.statement_span import statement_spans
+            from obdi.verify.statement_span import statement_spans
 
             following = statement_spans(store, TODAY)["late"].next
 

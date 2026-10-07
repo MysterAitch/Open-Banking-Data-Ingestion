@@ -24,7 +24,7 @@ from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
-from obdi.standing_data import standings_for
+from obdi.verify.standing_data import standings_for
 
 D = date
 TODAY = D(2026, 10, 5)

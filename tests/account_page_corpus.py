@@ -28,12 +28,12 @@ from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 
-from obdi.agreement import standing_of
-from obdi.balance_anchors import effective_opening, record_stated_anchor
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.store import Store
-from obdi.movement_completeness import MovementCompleteness
-from obdi.protection import press
+from obdi.verify.agreement import standing_of
+from obdi.verify.balance_anchors import effective_opening, record_stated_anchor
+from obdi.verify.movement_completeness import MovementCompleteness
+from obdi.verify.protection import press
 from test_ledger import land, txn
 
 HELD = "starling-personal"

@@ -76,7 +76,6 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from obdi.balance_anchors import record_stated_anchor
 from obdi.core.models import RawArtefact, SourceTier, Transaction
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.identity import content_key
@@ -85,6 +84,7 @@ from obdi.ingest.providers import starling
 from obdi.ingest.statement_terms import keep_statement_readings
 from obdi.ingest.store import Store
 from obdi.ingest.typed_transactions import record_typed_transaction
+from obdi.verify.balance_anchors import record_stated_anchor
 from test_period_reconciliation import _statement
 
 TODAY = date(2026, 10, 5)

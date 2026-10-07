@@ -40,20 +40,7 @@ from .account_page import (
     todos_html,
     trust_html,
 )
-from .agreement import (
-    HELD_MOVEMENT,
-    HELD_STATEMENT,
-    STRETCH_MEANINGS,
-    closed_before_sentence,
-    date_difference_sentence,
-    held_sentence,
-    listing_tested_sentence,
-    stretch_sentences,
-)
-from .balance_anchors import parse_calendar_day
 from .balance_chart import OWN
-from .balance_meaning import READING_THRESHOLD
-from .bank_balances import BANK_SOURCE
 from .callback import render_page
 from .core.errors import DataError
 from .core.logs import say
@@ -92,8 +79,21 @@ from .ledger_scope import (
     read_scope,
 )
 from .navigation import account_address, page_name
-from .standing_data import ADDS_UP, DOES_NOT_ADD_UP, verification_of
 from .trust_bar import key_html
+from .verify.agreement import (
+    HELD_MOVEMENT,
+    HELD_STATEMENT,
+    STRETCH_MEANINGS,
+    closed_before_sentence,
+    date_difference_sentence,
+    held_sentence,
+    listing_tested_sentence,
+    stretch_sentences,
+)
+from .verify.balance_anchors import parse_calendar_day
+from .verify.balance_meaning import READING_THRESHOLD
+from .verify.bank_balances import BANK_SOURCE
+from .verify.standing_data import ADDS_UP, DOES_NOT_ADD_UP, verification_of
 from .web_account_about import declared_html, stated_html
 from .web_accounts import archive_controls, submit_button
 from .web_answers import AnswerPages

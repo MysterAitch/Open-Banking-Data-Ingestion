@@ -26,15 +26,15 @@ from enum import StrEnum
 
 from .core.plural import plural
 from .fetch_gaps import Basis, FetchReport, GapKind
-from .standing_data import (
+from .todo import gap_todos, lockable
+from .verify.standing_data import (
     ADDS_UP,
     DOES_NOT_ADD_UP,
     NOTHING_TO_CHECK_AGAINST,
     AccountStanding,
     verification_of,
 )
-from .statement_span import STATEMENT_SOURCES
-from .todo import gap_todos, lockable
+from .verify.statement_span import STATEMENT_SOURCES
 
 #: The gaps a person answers by stating a balance, which is an account page's to-do and not a
 #: file to bring in.

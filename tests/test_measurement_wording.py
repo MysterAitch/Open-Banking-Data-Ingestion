@@ -18,10 +18,10 @@ from consecutive_days_corpus import consecutive_payments
 from late_settlement_corpus import ORDERS, household
 from obdi.account_names import AccountShown, AccountsShown
 from obdi.core.page_words import INTERNAL_ON_PAGES
-from obdi.exact_rule_measure import exact_rule_report
 from obdi.ingest import rebuild
 from obdi.ingest.providers import starling
 from obdi.ingest.store import Store
+from obdi.verify.exact_rule_measure import exact_rule_report
 from round_up_corpus import card_payment
 from test_absorbed_rows import arrive
 from test_cash_transfers import world
@@ -91,7 +91,7 @@ class TestTheMeasurementReadsLikeThePage:
     def test_StatementOpenings_WhenRenderedOverTheHousehold_UseNoRetiredWordOrShout(
         self, tmp_path
     ):
-        from obdi.statement_opening_measure import statement_opening_report
+        from obdi.verify.statement_opening_measure import statement_opening_report
         from test_statement_opening_measure import NO_SPACES, WITH_A_SPACE, build
 
         with Store(tmp_path / "openings.sqlite3") as store:

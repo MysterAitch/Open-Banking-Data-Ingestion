@@ -63,7 +63,7 @@ from dataclasses import dataclass
 from datetime import date
 
 from ..core.models import Transaction, TransactionStatus
-from ..coverage import same_movement_days
+from ..verify.coverage import same_movement_days
 from .accounts import AccountMap
 from .store import Store
 

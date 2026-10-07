@@ -42,7 +42,7 @@ from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import import_file, reconcile_batch
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
-from obdi.period_reconciliation import Locus, PeriodKind, period_reconciliation
+from obdi.verify.period_reconciliation import Locus, PeriodKind, period_reconciliation
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from page_dom import elements, parse
 
@@ -398,7 +398,7 @@ class TestAFeeDatedOnEitherSideOfAStatementDate:
         date still serves a row no statement lists (a feed row against a
         statement that omits it cannot arise from merged rows). Two periods one
         statement apart, over by 6.66 and short by 6.66, are paired."""
-        from obdi.period_reconciliation import Period, _mark_cancellations
+        from obdi.verify.period_reconciliation import Period, _mark_cancellations
 
         def period(last: date, held: int) -> Period:
             return Period(
@@ -454,7 +454,7 @@ class TestThePairingIsTheAgreementsPagesOwn:
         return world
 
     def test_Leftovers_AreExactlyTheRowsTheAgreementsReportLeavesUnmatched(self, store, tmp_path):
-        from obdi.coverage import agreements
+        from obdi.verify.coverage import agreements
 
         report = report_for(store, tmp_path, self._world())
 
@@ -474,7 +474,7 @@ class TestThePairingIsTheAgreementsPagesOwn:
         """Why this report asks for the row-by-row pairing itself: the page's
         default leaves an agreeing pair unpaired, so the offsetting 9.99 rows
         are invisible there while the store holds both."""
-        from obdi.coverage import agreements
+        from obdi.verify.coverage import agreements
 
         build_world(store, tmp_path, self._world())
 

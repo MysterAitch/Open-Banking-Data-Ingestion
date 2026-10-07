@@ -199,7 +199,7 @@ class TestHowManyStillNeedADecision:
     ):
         base, root = served
         queue = _Queue(root, [])
-        monkeypatch.setattr("obdi.review_flags.build_queue", queue)
+        monkeypatch.setattr("obdi.verify.review_flags.build_queue", queue)
         keep(base, "Up-card-2025-09-04.pdf", middle_statement())
 
         page = parse(press(base, root, "Up-card-2025-09-04.pdf", "up-card").text)
@@ -215,7 +215,7 @@ class TestHowManyStillNeedADecision:
     ):
         base, root = served
         cards = [SimpleNamespace(ref="up-card"), SimpleNamespace(ref="other-card")]
-        monkeypatch.setattr("obdi.review_flags.build_queue", _Queue(root, cards))
+        monkeypatch.setattr("obdi.verify.review_flags.build_queue", _Queue(root, cards))
         keep(base, "Up-card-2025-09-04.pdf", middle_statement())
 
         page = parse(press(base, root, "Up-card-2025-09-04.pdf", "up-card").text)
@@ -230,7 +230,7 @@ class TestHowManyStillNeedADecision:
     ):
         base, root = served
         monkeypatch.setattr(
-            "obdi.review_flags.build_queue", _Queue(root, RuntimeError("held"))
+            "obdi.verify.review_flags.build_queue", _Queue(root, RuntimeError("held"))
         )
         keep(base, "Up-card-2025-09-04.pdf", middle_statement())
 

@@ -34,9 +34,9 @@ from urllib.parse import quote
 from .account_names import AccountShown, AccountsShown, code_html
 from .core.page_times import date_with_age
 from .core.plural import agree, plural
-from .coverage import SourceCoverage
 from .coverage_timeline import KIND_NAMES, LANE_ORDER, kind_of_source
 from .ingest.spaces import ArchiveNote
+from .verify.coverage import SourceCoverage
 from .web_accounts import archive_label
 
 #: A source whose last day is more than this many days before the account's newest transaction has

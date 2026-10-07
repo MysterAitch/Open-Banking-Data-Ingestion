@@ -27,7 +27,7 @@ from .core.money import format_amount
 from .core.plural import plural
 from .ingest.accounts import AccountRecord, LimitWindow
 from .navigation import account_address
-from .statement_sections import masked
+from .verify.statement_sections import masked
 
 
 def _esc(text: object) -> str:

@@ -30,8 +30,8 @@ import pytest
 
 from obdi import cli
 from obdi.ingest.rebuild import rebuild_from_raw
-from obdi.movement_completeness import movement_completeness
-from obdi.standing_data import KeyedMemo
+from obdi.verify.movement_completeness import movement_completeness
+from obdi.verify.standing_data import KeyedMemo
 from round_up_corpus import household_store
 from section_harness import config, environment
 from test_space_attribution import MAP
@@ -224,7 +224,7 @@ class TestWarmingAtStart:
         return tmp_path / "household.sqlite3"
 
     def counting(self, monkeypatch):
-        import obdi.movement_completeness as module
+        import obdi.verify.movement_completeness as module
 
         calls: list[int] = []
         real = module.movement_completeness
@@ -323,6 +323,6 @@ class TestTheMovementReportsOwnTiming:
         assert text.splitlines()[-1] == "Worked out in 3.0 s at 15:02."
 
     def test_Describe_WhenBuiltByHand_SaysNothingOfTiming(self):
-        from obdi.movement_completeness import MovementCompleteness
+        from obdi.verify.movement_completeness import MovementCompleteness
 
         assert "Worked out" not in MovementCompleteness().describe()

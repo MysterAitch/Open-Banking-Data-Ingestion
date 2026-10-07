@@ -38,8 +38,8 @@ from .core.page_times import range_text
 from .fetch_gaps import Basis, FetchGap, FetchReport, GapKind
 from .navigation import account_address
 from .overview import HOUSEKEEPING, NOW, SOON, AttentionItem, Overview
-from .protection import tested_days_of
-from .standing_data import AccountStanding
+from .verify.protection import tested_days_of
+from .verify.standing_data import AccountStanding
 
 
 def upload_page(ref: str) -> str:

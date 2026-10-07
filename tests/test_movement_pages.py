@@ -30,8 +30,12 @@ import pytest
 
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.store import Store
-from obdi.movement_completeness import ChainFault, MovementCompleteness, movement_completeness
 from obdi.overview import NOW, build_overview
+from obdi.verify.movement_completeness import (
+    ChainFault,
+    MovementCompleteness,
+    movement_completeness,
+)
 from obdi.web import AuthorisationSession, ConnectionHandler, WebConfig
 from round_up_corpus import main_feed, space_feed
 from test_export_cuts import Row
