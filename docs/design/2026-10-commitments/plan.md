@@ -409,6 +409,40 @@ statement closing balance, which the account page already holds as a known balan
 calendar shows both: £12.99 on the 10th on the card, and the card's due date with the statement
 balance.
 
+### Worked example E - a coffee that is also a reclaimable expense
+
+The owner, 2026-10-07: "A transaction at a restaurant/coffee shop/supermarket/similar could be
+'dining out'/'date night'/'fun money' etc., and it can also be a reclaimable expense (e.g.
+while volunteering). This hasn't been easily represented before and no easy way to auto assign
+or report on these (and track if an expense has been reimbursed)."
+
+Seen: £4.20 at a coffee shop on a Saturday, on the current account, paid by card.
+
+What the model says, with nothing added to it: the category is one ("Dining out" - what the
+money was spent on), the label is a second axis ("volunteering", or the organisation's name as
+a label), and the reclaim is a RECEIVABLE - an incoming leg declared on the transaction: "owed
+by <entity> £4.20", open until a transfer from that entity matches it, and a thing to do once
+past the day the owner expects it. The same shape as a partner's share of a bill (section 3,
+"Flow and legs"), with the counterparty an organisation rather than a partner, and one
+transaction rather than a commitment. Reporting asks the label axis ("volunteering this year:
+£N, of which £M reimbursed, £K owed") and the receivable state ("owed to you"), which Today
+already sums for shared bills.
+
+What cannot be automatic: the same coffee shop is a date one week and a volunteering expense the
+next, so no rule on the entity can assign the label or the receivable - this is the hand-work
+case by nature, and the requirement is on obdi, not the owner: ONE press from the row being
+looked at ("reclaimable from …", which sets the label and the receivable together), and the
+receivable's reimbursement matched by the same leg matcher as a partner's share (entity, amount
+within a window, day within a tolerance) with "reimbursed on D" on the row and nothing to do.
+What can be partly automatic: a receivable's entity remembered as a suggestion for the next
+press ("reclaimable from <the last organisation>"), and a label implying the receivable where
+the owner says so once ("volunteering" always reclaimable from X).
+
+Roadmap: this is R6a (labels) plus the receivable half of R3 applied to a single transaction;
+no new concept. It is listed as a use case so that R3's leg matcher is built to take a declared
+receivable on a transaction, not only one implied by a commitment's shares, and so that R6a's
+label press can set a receivable in the same press.
+
 ## 4. The forward facet
 
 **The calendar.** For each month ahead (one, three, twelve), by account and by space: the
@@ -751,8 +785,10 @@ variant; a merge of two shapes into one entity joins two series into one history
 Build: the entity's OWNS and IS PARTY TO roles - an account's ownership as a declared fact
 (which entities, in what shares; `me` solely by default) and a leg's entities - built here so
 a joint account fits when it arrives (question 7); a commitment's share and its flow as legs,
-incoming legs as receivables; the leg matcher (entity, amount window, day tolerance); the
-space's monthly sum by draw-down day; Today's line when the space is short from the 25th of the
+incoming legs as receivables, and a receivable declared on a single transaction with no
+commitment behind it (worked example E: a reclaimable expense, set by one press from the row
+with a label, and closed by the same matcher); the leg matcher (entity, amount window, day
+tolerance); the space's monthly sum by draw-down day; Today's line when the space is short from the 25th of the
 month before, and "owed to you" when a receivable is past its day; the account page's
 "Expected" fold for a space. Measure: on the real store, the bills space's computed need
 against what the owner actually transfers. Tests: the three-leg rent example end to end, each

@@ -222,3 +222,22 @@ evidence with a basis. Actual, YNAB, or any tool receives a generated projection
 categories, commitments, and targets. The backward facet (what happened) and the forward
 facet (what is expected) are kept apart and labelled. A local model may propose names,
 categories, and outliers; every proposal is a suggestion with its basis until confirmed.
+
+## UC-RECUR-02 A purchase that is also a reclaimable expense
+
+**Status:** NOT YET - `docs/design/2026-10-commitments/plan.md`, worked example E; FR-RECUR-12.
+
+**Intended path.** The owner buys a coffee while volunteering. On the ledger row he presses
+"reclaimable from …", names the organisation (the last one used is offered), and the row gains
+the label and a receivable for its amount in one press; its category stays "Dining out". The
+receivable is "owed to you" on Today once past the day he expects it. When the organisation's
+transfer arrives, the leg matcher closes the receivable and the row says "reimbursed on D". A
+report by label says what volunteering cost this year, how much came back, and what is still
+owed.
+
+**Alternative paths.** The reimbursement is for several expenses in one transfer: the matcher
+closes the receivables whose amounts sum to it within the window, and says which. The owner
+presses the same control on a date-night coffee at the same shop: no rule fires, because the
+payee alone cannot tell the two apart, and no rule is offered - the press is the decision. The
+reimbursement never arrives: the receivable stays owed and ages on Today; a press closes it as
+written off, with the reason kept.
