@@ -26,6 +26,40 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.368] - 2026-10-07
+
+### Added
+- **The groups withheld for width are shown.** The owner: "Where is the too
+  broad section? I don't see it on the entities page." They were counted in
+  the summary line and listed nowhere. A closed fold after the proposals,
+  "N groups too wide to offer whole", holds each as an ordinary proposal -
+  its reason, its names with their transactions and derivation, the Merge
+  press - with every tick unticked, so a group the cap withheld is the
+  owner's to read and act on name by name.
+- **An entity is defined from first principles**, in
+  `docs/design/2026-10-commitments/entities.md`: a party, not a string; the
+  five kinds of evidence a source states about the other party (the party's
+  account identifier, the source's own id for it, a stated name, the printed
+  description, amount and cadence), ranked by what each identifies and how
+  consistently; a link as a claim with a kind; what obdi learns from a
+  payment seen by two sources; and four builds in order. The owner, after
+  three releases of text rules: "starting from first principles about what
+  an entity is supposed to be and then work from there to what data is
+  available ... So far it seems to be backwards." It was: the page used the
+  weakest kind as the strongest, and two housemates paying `rent` are one
+  name under it while one housemate across twelve references is twelve.
+  The first build (R2c) is in progress; this release's rules are the last
+  text rules.
+
+### Changed
+- **A possessive "s" is part of its word in the comparison** -
+  `SAINSBURY'S` and `SAINSBURYS` are one name to the proposals (the key is
+  unchanged) - and **a wallet printed before a payee is a payment method**
+  (`google pay`, `apple pay`), so `Google Pay Sainsburys` compares as
+  Sainsburys; PayPal is not, since it is a party of its own. Adding the
+  wallets would have made `google` a method word and lost the group of three
+  Google services, so a method phrase now names its brand word to keep.
+
 ## [0.4.367] - 2026-10-07
 
 ### Fixed
