@@ -150,13 +150,15 @@ class TestTheSameWordsDifferently:
         assert group.rules == frozenset({SAME_WORDS})
         assert group.name == "Lidl"
 
-    def test_Proposal_WhenReorderedAndSharingAnOpening_SaysBothRulesJoinedIt(self):
+    def test_Proposal_WhenReorderedAndSharingAnOpening_IsTheLargerReasonAloneAndNeverBoth(self):
+        # "tesco stores" is in the opening set of three and the same-words set of two; it goes
+        # to the larger, and the reordered name is left free for the owner to place.
         (group,) = proposals(
             "TESCO STORES LONDON", "TESCO STORES", "STORES TESCO", "TESCO STORES READING"
         )
 
-        assert group.rules == frozenset({OPENING_WORDS, SAME_WORDS})
-        assert len(group.shapes) == 4
+        assert group.rules == frozenset({OPENING_WORDS})
+        assert set(group.shapes) == {"tesco stores london", "tesco stores", "tesco stores reading"}
 
     def test_Proposal_WhenNoOpeningIsCommon_IsNamedForItsCommonestShape(self):
         (group,) = proposals("LIDL GB LONDON", "LIDL GB LONDON", "LIDL GB LONDON", "GB LIDL LONDON")

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from ..analysis.entities import (
+    BANK_NAMES,
     COVERED_SHOWN,
     OPENING_WORDS,
     SAME_WORDS,
@@ -94,21 +95,20 @@ def summary_line(view: EntitiesView) -> str:
 
 
 def _why(group: Proposal) -> str:
-    """The rule that joined a group, said with the words it joined on so no two groups read alike.
+    """The rule that made a group, said with the words it holds on so no two groups read alike.
 
-    Said only on the unmasked page: the shared words are the payee's name.
+    A group has exactly one rule (`propose_groups`), so the sentence is true of every name in it.
+    Said only on the unmasked page: the shared words are the payee's name. A group with no
+    rule to state is refused here, so a page never shows a proposal with no reason.
     """
-    parts = []
-    if group.opening:
-        parts.append(f"all begin with “{group.opening}”")
-    elif OPENING_WORDS in group.rules:
-        parts.append("some begin with the same words")
-    if SAME_WORDS in group.rules:
-        parts.append("some are the same words in another order or without a code")
-    if group.bank_name:
-        both = "both" if len(group.shapes) == 2 else "all"
-        parts.append(f"the bank names {both} as “{group.bank_name}”")
-    return "; ".join(parts)
+    both = "both" if len(group.shapes) == 2 else "all"
+    if BANK_NAMES in group.rules and group.bank_name:
+        return f"the bank names {both} as “{group.bank_name}”"
+    if OPENING_WORDS in group.rules and group.opening:
+        return f"{both} begin with “{group.opening}”"
+    if SAME_WORDS in group.rules and group.shared:
+        return f"{both} are the same words, “{group.shared}”, in another order or without a code"
+    raise ValueError(f"a proposal must state its rule and the words it holds on: {group!r}")
 
 
 def _sealed(text: str) -> str:

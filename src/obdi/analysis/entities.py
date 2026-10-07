@@ -7,6 +7,7 @@ from raw); this module holds what is computed from the transactions alone.
 
 from __future__ import annotations
 
+import heapq
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -367,7 +368,7 @@ class Proposal:
     name: str
     #: Most-used first, then alphabetical.
     shapes: tuple[str, ...]
-    #: The rules (`OPENING_WORDS`, `SAME_WORDS`) under which some pair in the group joined.
+    #: The one rule (`OPENING_WORDS`, `SAME_WORDS`, `BANK_NAMES`) that holds for every shape.
     rules: frozenset[str]
     #: Transactions across the shapes.
     transactions: int
@@ -709,6 +710,68 @@ def suggest_for_entities(
     )
 
 
+def _key_size(key: object) -> int:
+    """How many words a bucket's key holds: a longer key is the more specific reason."""
+    if isinstance(key, str):
+        return len(key.split())
+    if isinstance(key, tuple | frozenset):
+        return len(key)
+    return 0
+
+
+def _key_text(key: object) -> str:
+    if isinstance(key, str):
+        return key
+    if isinstance(key, tuple | frozenset):
+        return " ".join(sorted(str(word) for word in key))
+    return str(key)
+
+
+def _one_rule_groups(
+    buckets: Mapping[tuple[str, object], list[str]],
+    needs: Mapping[tuple[str, object], int],
+    counts: Mapping[str, int],
+) -> list[tuple[tuple[str, object], list[str]]]:
+    """The buckets that become groups, each with the shapes it keeps, every shape in at most one.
+
+    A group is the members of ONE bucket (one rule, one key), so the sentence that says why is
+    true of every member. A shape in several buckets goes to the bucket with the most
+    transactions, then the most members, then the longer key; a bucket left with fewer shapes
+    than it needs after that is not a group, and its remaining shapes stay free. Taking the
+    best bucket first and re-ranking what is left is lazy: a bucket's rank only ever falls as
+    shapes are taken, so a bucket popped at an unchanged rank is the best remaining.
+    """
+    assigned: set[str] = set()
+    chosen: list[tuple[tuple[str, object], list[str]]] = []
+    index = list(buckets)
+
+    def ranked(position: int, live: Sequence[str]) -> tuple[int, int, int, str, str]:
+        rule, key = index[position]
+        return (
+            -sum(counts[shape] for shape in live),
+            -len(live),
+            -_key_size(key),
+            rule,
+            _key_text(key),
+        )
+
+    heap = [(ranked(i, buckets[key]), i) for i, key in enumerate(index)]
+    heapq.heapify(heap)
+    while heap:
+        rank, position = heapq.heappop(heap)
+        key = index[position]
+        live = [shape for shape in buckets[key] if shape not in assigned]
+        if len(live) < needs[key]:
+            continue
+        current = ranked(position, live)
+        if current != rank:
+            heapq.heappush(heap, (current, position))
+            continue
+        assigned.update(live)
+        chosen.append((key, live))
+    return chosen
+
+
 def propose_groups(
     counts: Mapping[str, int],
     *,
@@ -717,12 +780,13 @@ def propose_groups(
 ) -> Proposals:
     """The groups of free shapes that plain text analysis says are one counterparty.
 
-    Two shapes join where they share their first `MIN_OPENING_WORDS` words, or where they hold the
-    same words once one-letter codes are set aside, or (`BANK_NAMES`) where every row of each
-    states the same merchant, `counterparties` being each shape's stated merchants and their row
-    counts; joining is transitive, so a group is every shape reachable through any rule. Shapes
-    in `taken` (already under an entity) are shown where they are and never proposed again. A
-    group is at least two shapes and at most `MAX_SHAPES_PROPOSED`, largest first.
+    A group is the shapes that share ONE reason: their first `MIN_OPENING_WORDS` words, or the
+    same words once one-letter codes are set aside, or (`BANK_NAMES`) the one merchant every row
+    of each states, `counterparties` being each shape's stated merchants and their row counts.
+    Reasons are never chained (`_one_rule_groups` says how a shape in two goes to one), so
+    the sentence for a group is true of every member. Shapes in `taken` (already under an
+    entity) are shown where they are and never proposed again. A group is at least two shapes
+    and at most `MAX_SHAPES_PROPOSED`, largest first.
     """
     stated_by = counterparties or {}
     named = {shape: tokens_of(shape) for shape in counts}
@@ -732,15 +796,7 @@ def propose_groups(
         for shape in counts
         if shape not in taken and not is_method_only(shape) and _words(named[shape])
     )
-    parent = {shape: shape for shape in free}
-
-    def root(shape: str) -> str:
-        while parent[shape] != shape:
-            parent[shape] = parent[parent[shape]]
-            shape = parent[shape]
-        return shape
-
-    # (rule, key) -> the shapes that share it, and how many it takes to join them.
+    # (rule, key) -> the shapes that share it, and how many it takes to make a group of them.
     buckets: dict[tuple[str, object], list[str]] = {}
     needs: dict[tuple[str, object], int] = {}
     for shape in free:
@@ -763,25 +819,22 @@ def propose_groups(
             if not is_method_only(said):
                 buckets.setdefault((BANK_NAMES, said), []).append(shape)
                 needs[(BANK_NAMES, said)] = 2
-    for key, members in buckets.items():
-        if len(members) < needs[key]:
-            continue
-        for other in members[1:]:
-            parent[root(other)] = root(members[0])
+    # The longer opening wins where it reaches its need: the one-word bucket keeps only the shapes
+    # that no qualifying two-word opening holds.
+    longer = {
+        shape
+        for (rule, key), members in buckets.items()
+        if rule == OPENING_WORDS and _key_size(key) > 1 and len(members) >= needs[(rule, key)]
+        for shape in members
+    }
+    for (rule, key), members in buckets.items():
+        if rule == OPENING_WORDS and _key_size(key) == 1:
+            members[:] = [shape for shape in members if shape not in longer]
 
-    groups: dict[str, list[str]] = {}
-    for shape in free:
-        groups.setdefault(root(shape), []).append(shape)
     found: list[Proposal] = []
     broad: list[Proposal] = []
-    for members in groups.values():
-        if len(members) < 2:
-            continue
-        rules = frozenset(
-            rule
-            for (rule, key), joined in buckets.items()
-            if len(joined) >= needs[(rule, key)] and root(joined[0]) == root(members[0])
-        )
+    for (rule, bucket_key), members in _one_rule_groups(buckets, needs, counts):
+        rules = frozenset({rule})
         ordered = tuple(sorted(members, key=lambda s: (-counts[s], s)))
         # The commonest shape, of those the shortest, since a longer one carries a town or a
         # branch: its printed words name the group, cut to what every member opens with.
@@ -791,16 +844,11 @@ def propose_groups(
         words = " ".join(printed[:shared] if shared else printed).split()
         held_by_all = frozenset.intersection(*(_words(named[s]) for s in members))
         bank_name = ""
-        if BANK_NAMES in rules:
-            agreed = {
-                key
-                for (rule, key), joined in buckets.items()
-                if rule == BANK_NAMES and len(joined) >= 2 and root(joined[0]) == root(members[0])
-            }
+        if rule == BANK_NAMES:
             spellings: Counter[str] = Counter()
             for shape in members:
                 for raw, rows in stated_by.get(shape, {}).items():
-                    if _bank_key(raw) in agreed:
+                    if _bank_key(raw) == bucket_key:
                         spelt = " ".join(w.capitalize() for w in core_words(shape_of(raw)))
                         spellings[spelt] += rows
             bank_name = min(spellings, key=lambda s: (-spellings[s], s))
