@@ -3874,12 +3874,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             transactions = store.all_transactions()
             pairs = store.confirmed_transfer_pairs()
             held, _unusable = statement_balances(store)
+            gathered = {shape: name for shape, (_id, name) in store.shape_entities().items()}
         closings: dict[str, list[tuple[date, int]]] = {}
         for closing in held:
             owed = (closing.day, closing.balance_minor)
             closings.setdefault(closing.account_ref, []).append(owed)
         today = local_day(datetime.now(UTC))
-        return RecurringFindings(find_recurring(transactions, pairs, today, closings), today)
+        found = find_recurring(transactions, pairs, today, closings, entities=gathered)
+        return RecurringFindings(found, today)
 
     def _shape_counts(store: Store) -> dict[str, int]:
         from .entities import count_shapes

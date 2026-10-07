@@ -22,9 +22,10 @@ from obdi.store import Store
 
 #: Statements a GET of the page may issue: the transactions, the pairing table twice over (once
 #: for the confirmation set and once for the pairs), the declared accounts, and the connections'
-#: own start-up reads. Measured 23 (14 of them selects), allowing two more; a read per account
-#: or per series would add eleven or more.
-RECURRING_STATEMENTS = 25
+#: own start-up reads, and the one read of which shapes the owner gathered into entities.
+#: Measured 26 with that read, which is one select and so took the page past the 25 this budget
+#: was; allowing two more. A read per account or per series would add eleven or more.
+RECURRING_STATEMENTS = 28
 SECONDS = 20.0
 
 
