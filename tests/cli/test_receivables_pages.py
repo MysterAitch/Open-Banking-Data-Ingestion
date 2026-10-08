@@ -196,9 +196,23 @@ class TestDeclaringOnTheRow:
         with served(tmp_path, monkeypatch) as (base, _, coffee, income):
             html = httpx.get(f"{base}/ledger", params={"ref": ACCOUNT}, timeout=60).text
 
-        assert f'name="anchor" value="{coffee}"' in html
-        assert f'value="{income}"' not in html.replace(f"anchor-{income}", "")
-        assert html.count('form="owed-form"') >= 4
+        assert f'href="/owed?r={coffee}"' in html
+        assert f"/owed?r={income}" not in html
+        assert html.count("/owed?r=") >= 2
+
+    def test_OwedPage_WhenOpenedFromARow_HoldsTheFormAndNamesNoPaymentOrPerson(
+        self, tmp_path, monkeypatch
+    ):
+        with served(tmp_path, monkeypatch) as (base, _, coffee, _income):
+            response = httpx.get(f"{base}/owed", params={"r": coffee}, timeout=60)
+            bare = httpx.get(f"{base}/owed", timeout=60)
+
+        page = response.text
+        assert response.status_code == 200
+        assert 'action="/receivable-declare"' in page
+        assert f'name="anchor" value="{coffee}"' in page
+        assert COFFEE not in page and CHARITY not in page
+        assert bare.status_code == 400
 
 
 class TestMetByATransfer:

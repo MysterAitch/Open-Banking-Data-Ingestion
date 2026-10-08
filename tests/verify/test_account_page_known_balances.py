@@ -300,7 +300,7 @@ class TestThePageDoesNotGrowWithTheBalances:
         """
         page = re.sub(r"<style>.*?</style>", "", get(base, BULK), flags=re.S)
 
-        assert len(page.encode()) < 96_000
+        assert len(page.encode()) < 96_000, len(page.encode())
 
     def test_ProtectionDropDown_OffersOnlyTheNewestDatesUntilTheFullListIsAsked(self, base):
         default = get(base, BULK)

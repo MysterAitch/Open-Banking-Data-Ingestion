@@ -104,8 +104,11 @@ if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
 #: two reads of the stated dates and the coded words its sources stated for the month's rows
 #: alone (`Store.sighting_details_of`, which asks in chunks of 400, so a month of more rows adds
 #: two for each chunk beyond the first; a month holding none issues neither). An account with
-#: no rows adds the registry lookup that tells "declared but empty" from "unknown".
-QUERIES_PER_PAGE = 11
+#: no rows adds the registry lookup that tells "declared but empty" from "unknown", and every
+#: account adds the one read of what the owner declared owed back on its rows
+#: (`Store.receivables`), which the rows' fold says; the name of who owes it is a further read
+#: only for an account that has any, and is not counted here.
+QUERIES_PER_PAGE = 12
 
 #: Statements issued to look for the account's opening-balance anchors when it
 #: has no TrueLayer records and no held statements: the stated balances, the

@@ -3865,6 +3865,9 @@ class ConnectionHandler(
         if route == "/this-month":
             self._this_month_get(params)
             return
+        if route == "/owed":
+            self._owed_get(params)
+            return
         if route == "/connections":
             self._connections_page()
             return

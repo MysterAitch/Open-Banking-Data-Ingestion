@@ -78,6 +78,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/spaces": "today",
     "/ledger-anchor": "today",
     "/account-ownership": "today",
+    "/owed": "today",
     "/receivable-declare": "today",
     "/receivable-close": "more",
     "/ledger-anchor-remove": "today",
