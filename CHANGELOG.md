@@ -26,6 +26,45 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.379] - 2026-10-08
+
+### Changed
+- **Eighteen of the twenty upward imports the split began with are gone;
+  two remain.** The direction `core <- ingest <- verify <- read <- analysis
+  <- export <- pages` now holds everywhere but two places, and the
+  direction test's shrink-only list says which. The largest was the
+  settle-after-landing group, cured as the plan decided: a landing function
+  (`import_file`, the two pulls, the typed-transaction record and
+  withdrawal, `rebuild_from_raw`) no longer reaches up into verification to
+  settle review flags, recheck protections, and replay statement sections
+  after rows land; it takes those finishers as a REQUIRED keyword - an
+  optional one defaulting to doing nothing would fail open, which is the
+  fault the rule about quiet failure forbids - defined in `ingest` as a
+  record of callables and built by `verify.landing` from the real
+  functions; the nine production callers pass it and the 470 test calls
+  across 149 files go through one test wrapper, so no behaviour moved
+  (the collected tests are the same plus the six that pin the TypeError).
+  Then ten smaller moves, one commit each: an exception to `core.errors`;
+  an address builder to `core.addresses`; an instrumentation phase name
+  beside the others; a chain helper made public; a movement-days function
+  down to ingest; `running_balance` down to verify; the same-money outcome
+  types to ingest; the Actual orphan plan out of a page module into
+  `export.orphan_plan` (about 250 lines, not the two functions the plan
+  counted); and the ledger's "would Actual refuse this row" asking a
+  predicate in `read.actual_sendable` that raises the same two sentences
+  word for word, instead of running the whole conversion per row. Left:
+  the `period_reconciliation` split and the three parsers in
+  `balance_anchors`, both larger than the plan's table says.
+- **A richer party arriving later replaces a weaker one when sightings
+  fold.** Measured red first: the fold had been "latest wins" although its
+  comment said first. Now the first sighting that states a party field
+  fills it, and a later one replaces it only from a higher source tier
+  (an authoritative feed over a file or document reader over a manual
+  entry); equal tiers keep the first. The row's content key and entity id
+  are untouched. One limit, written beside the rule: the tier compared is
+  the held row's, which is its last sighting's, so per-field provenance
+  would be needed to be exact.
+
 ## [0.4.378] - 2026-10-08
 
 ### Added

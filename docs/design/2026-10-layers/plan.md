@@ -11,8 +11,19 @@ importing the `Entity` record from `analysis.entities`); it was the twenty-first
 `ALLOWED_UPWARD` and the first removed, the same evening, by cure A's shape: the records moved
 down to `ingest.entity_records`, the store hands back rows, and `analysis.entities` decides
 which names are under an entity. The marker table was replaced by the directory rule as
-planned. What remains of the plan is the removal of the twenty, each in its own commit,
-starting with the settle-after-landing group under cure A.
+planned.
+
+**Eighteen of the twenty removed (2026-10-08, 0.4.379):** the settle-after-landing group under
+cure A (`ingest.finishers` defines the `Finishers` the six landing functions take as a required
+keyword; `verify.landing` builds the real one; the tests land through `tests/landing.py`), then
+U2, U3, U5, U8, U16, U20, U15, U4, and U1 each in its own commit, in that order, with the
+allowance list and its count test shrinking by exactly the lines named each time. Two remain
+on the list: U14 (`same_money_fold` to `period_reconciliation`, the evidence half of that
+module not yet split) and U17 (`typed_transactions` to `balance_anchors`, whose three parsers
+raise `AnchorRefused` and lean on its patterns, a larger move than the table says). What the
+plan under-counted: U4 moved about 250 lines, not two functions (`OrphanCount`, the audit
+readers, the thresholds, and `AlignPlan` come with them); U20's `running_balance` had seven
+other users (`position` and six test modules).
 
 **What the move broke outside this repository (2026-10-07, 0.4.365's converge):** the deploy
 role in `homelab-ansible` asked the container `from obdi.buildinfo import describe` as its
