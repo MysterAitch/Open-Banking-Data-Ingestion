@@ -26,6 +26,22 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.377] - 2026-10-08
+
+### Fixed
+- **0.4.376 has no image.** Its CI build failed on three page tests from
+  0.4.375 that pin two housemates who print alike: the new
+  evidence-proposal rule tied their two accounts through the stated name
+  they share and offered them as one party, which the page tests and the
+  owner's rule both refuse - a bank account is somebody's by definition, so
+  a stated name across two accounts is two people, not one. A group holding
+  two or more account identifiers is never offered; two source ids under
+  one name still are, since a source's id may be per branch. The merge gate
+  I ran covered four layers and not the command-line tests, which is the
+  one that reaches every page; the routine in BUILDING.md already says a
+  change this low adds `cli`, and this release is the cost of not doing so.
+  This version is 0.4.376 plus that rule.
+
 ## [0.4.376] - 2026-10-08
 
 ### Added
