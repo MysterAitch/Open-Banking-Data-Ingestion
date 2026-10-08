@@ -531,6 +531,7 @@ something never agreed to).
 | 0.4.382 (party account and id on the row; the ladder reads them) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 972 (45 account, 651 source id, 207 stated, 69 description, 210 linked, 54 exact) |
 | 0.4.383 (learned-rule rung, SUPPORT 2, CONFIDENCE 300; branches grouped) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 967 (45 account, 651 source id, 207 stated, 64 description; 9,195 transactions identified and 7 inferred; 210 linked) |
 | 0.4.386 (the rules shown with their settings) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 967 (as 383; 7 inferred); at the defaults 118 rules apply, 0 offered unticked, 49 openings shared by two parties |
+| 0.4.390 (one population; channel phrases are methods; branch labels; inferred links kept) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 963 (45 account, 651 source id, 206 stated, 61 description); 7,511 rows carry an identifier of their own, 11 inferred; 117 rules apply, 0 offered, 49 openings shared; 0 confirmations |
 | Next release (party account and id on the row; the ladder reads them; own accounts named "your <account>"): PREDICTED, NOT MEASURED | about 62 | 54 / 8 / 0 to 1 | about 47 / 7 / 8 | about 36 (17), falling if the habit returns | 4 | names fall where one person was paid under several spellings and rise where people share a stated name; the net on mostly card spending is small |
 
 0.4.383 on the real store: the learned rule reached 7 transactions and retired 5 description
@@ -540,7 +541,17 @@ the default settings. 0.4.386 showed why: 118 rules are learned and every one cl
 rows open as any rule does. The rules are plentiful and the statement descriptions do not share
 their openings; raising or lowering the thresholds cannot change that. The join the habit needs
 is between two vocabularies, which only the owner's Keep with the right opening, a declared
-"begins with" rule, or a merge supplies. Whether raising CONFIDENCE's population or lowering it changes that is
+"begins with" rule, or a merge supplies.
+
+0.4.390 on the real store: the channel phrases retired four names (967 to 963; description
+names 64 to 61, stated 207 to 206) and the rules' population fix moved the head's count from
+9,195 (every named row) to 7,511 (rows carrying an identifier of their own); inferred rows rose
+from 7 to 11 and applied rules fell by one (118 to 117), both from the method words changing
+what an opening is. Recurring did not move. Confirmations are 0, as predicted: no second source
+has yet overlapped a row the rule named. The phrase groups themselves (www, visa purchase,
+zettle, paypal-prefixed, first payment, interest) are no longer in the count of groups the
+page offers; whether each is gone from the proposals is for the owner to see on the shown
+page, since the groups' names are sealed on the masked GET. Whether raising CONFIDENCE's population or lowering it changes that is
 for the owner to try on the settings form once it lands (0.4.384 or after); the page's counts
 line will say how many rules are applied and how many offered. The rung's other measurement -
 rows a later identifier confirms or refutes - is not yet built.
