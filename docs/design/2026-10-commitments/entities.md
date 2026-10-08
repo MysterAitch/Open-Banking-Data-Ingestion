@@ -113,6 +113,20 @@ record with an identifier and an owner), after which those rows are transfers "t
 <name>". The same press serves a space or pot not fed, and a joint account declared later.
 What it must never do is decide from the owner's name being printed in a description.
 
+### 3b. A richer source arriving later is taken
+
+The owner, 2026-10-08: "where a new data source is introduced with higher credibility/fidelity
+(e.g. a description only pdf import followed by CSV with counterparty details) then the higher
+fidelity details are not ignored/disregarded/overlooked?" They are taken: when a later sighting
+folds onto a payment already held, each party field (`counterparty`, `party_account`,
+`party_source_id`) is filled by the first sighting that STATES it, so a PDF row that stated no
+party takes the CSV's. The row's identity (content key, entity id) is what does not move; the
+party fields are not part of it. The refinement still to make: "first non-empty wins" is by
+arrival, not by fidelity, so a lower-tier party stated first (a reader's party from a layout)
+is kept over a feed's merchant name landing later; the fold should let a higher `SourceTier`
+replace a lower one for these fields. A small change in `matching`, tested by the PDF-then-CSV
+case and its reverse.
+
 ## 4. What obdi can learn without being told
 
 A payment seen by two sources is ONE row in the derived layer carrying both sources' fields
