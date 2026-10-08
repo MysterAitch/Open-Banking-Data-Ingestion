@@ -51,7 +51,13 @@ from ..analysis.entities import (
 )
 from ..analysis.entity_tokens import COMPARISON_SENTENCE, DROPPED, IGNORED_TRAILING
 from ..analysis.external_accounts import LABEL_LENGTH
-from ..analysis.learned_rules import APPLIED, RuleView, rule_sentence, summary_sentence
+from ..analysis.learned_rules import (
+    APPLIED,
+    WITHDRAWN,
+    RuleView,
+    rule_sentence,
+    summary_sentence,
+)
 from ..analysis.payment_methods import METHODS
 from ..core.logs import say
 from ..core.masking import mask_text
@@ -646,6 +652,13 @@ def _rule_item(item: RuleView, view: EntitiesView, *, unmasked: bool) -> str:
             "applied because you ticked it" if item.ticked else "applied by default"
         ) + f", linking {plural(item.rows, 'row')}"
         body = ""
+    elif item.state == WITHDRAWN:
+        verdict = (
+            f"withdrawn: {plural(item.disagreed, 'later-identified row')} named another party"
+            if item.disagreed
+            else "withdrawn by you"
+        )
+        body = ""
     else:
         verdict = f"offered, unticked: would link {plural(item.rows, 'row')}"
         tick = (
@@ -663,9 +676,10 @@ def _rule_item(item: RuleView, view: EntitiesView, *, unmasked: bool) -> str:
                 f'<ul class="ent-names">{listed}</ul></details>'
             )
         body = tick + listing
+    measured = f"confirmed by {plural(item.confirmed, 'later-identified row')}"
     return (
         f'<li class="ent-learned-rule"><span class="ent-rule-party">{party}</span> '
-        f'<span class="muted">{verdict}. It {sentence}</span>{body}</li>'
+        f'<span class="muted">{verdict}; {measured}. It {sentence}</span>{body}</li>'
     )
 
 

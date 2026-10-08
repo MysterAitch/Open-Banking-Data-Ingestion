@@ -29,6 +29,14 @@ transcription would add no reasoning that the subjects do not already carry.
 ## [Unreleased]
 
 ### Added
+- **The learned rule is measured against the identifiers that arrive after it (schema 32).** A
+  description-only row named by the rule is a guess, and the one place the guess is tested for
+  real is when a richer source later supplies an identifier for the same payment; until now that
+  moment left no trace because the inference was recomputed each time. The inference is now
+  written down when first made (`inferred_links`, kept across the rebuild) and compared when the
+  identifier arrives: agreement is counted and shown on the Entities page as "confirmed by N
+  later-identified rows" (shown at zero too), and one disagreement withdraws the rule and says
+  so. The check runs when rows have landed, never on a page read.
 - **A company gathered from its locations can be split back into them.** Merging a retailer's
   branch ids into one entity was the only way to join its series, with no way back short of
   detaching each id by hand. An entity holding two or more of the bank's own ids now offers

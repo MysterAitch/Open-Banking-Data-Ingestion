@@ -774,7 +774,7 @@ def learned_rules(
         for rule in learning.rules
         for shape, name in refused
         if name == rule.party and opens(_words_of(shape, cache), rule.opening)
-    }
+    } | {rule.key for rule in learning.rules if chosen.disagreed.get(rule.key)}
     return learning, {rule.key: decide(rule, chosen, withdrawn) for rule in learning.rules}
 
 
@@ -804,7 +804,15 @@ def rule_views(
                 shapes.append(shape)
                 rows += sum(forms.values())
         views.append(
-            RuleView(rule, state, tuple(sorted(shapes)), rows, rule.key in chosen.kept)
+            RuleView(
+                rule,
+                state,
+                tuple(sorted(shapes)),
+                rows,
+                rule.key in chosen.kept,
+                chosen.agreed.get(rule.key, 0),
+                chosen.disagreed.get(rule.key, 0),
+            )
         )
     return tuple(views), learning
 

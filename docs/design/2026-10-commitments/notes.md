@@ -668,3 +668,16 @@ The rung is `analysis/learned_rules.py` (learning, state, sentences, the setting
    no name is removed). Not built: naming a location from its town; a series test of the split
    (no constructed world was found where the split changes a series, which merging, not splitting,
    is for).
+4. DATA CONFIRMATION (schema 32; 31 is reserved for the ownership tables). `inferred_links`
+   (entity id, party, opening, decided, outcome) is written by `rule_confirmation.confirm_inferred`
+   after rows land (the command line's `landing_finishers` wraps `settle`; the `verify` finishers
+   cannot reach `analysis`), never on a GET. A pending record whose row has since an identifier OF
+   THE SAME KIND (a source's id against a source's id, an account against an account) is AGREED
+   when it names the recorded party and DISAGREED when it names another; a different kind settles
+   nothing. The tallies are preferences beside the settings (`learned-rules.agreed:<key>` and
+   `.disagreed:<key>`), so the pages read them in the same single select; one disagreement
+   withdraws the rule. Measured while testing: the folded row takes the FEED's description, so a
+   disagreeing row usually no longer opens as the rule does and the tally, not a shared opening,
+   is what withdraws it. Not built: the withdrawal is shown on the Entities page only, not on the
+   entity page; an identifier of another kind is left pending for ever; and the live count stays
+   zero until a second source overlaps a row the rule named.

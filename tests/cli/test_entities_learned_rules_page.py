@@ -275,6 +275,35 @@ class TestAnOfferedRule:
         assert len(rules_text(page)) < 1200
 
 
+class TestTheRulesMeasuredPrecision:
+    def test_Page_ShowsTheCountOfLaterIdentifiedRowsEvenAtZero(self, served):
+        text = rules_text(shown(served))
+
+        assert "confirmed by 0 later-identified rows" in text
+
+    def test_RuleWithdrawnByALaterRowThatNamedAnotherParty_SaysSoAndLinksNothing(
+        self, tmp_path, monkeypatch
+    ):
+        db = tmp_path / "store.sqlite3"
+        with Store(db) as store:
+            reconcile_batch(store, world(), digest="feed")
+            store.set_preference("learned-rules.confidence", "40")
+            store.set_preference("learned-rules.agreed:" + KEY, "3")
+            store.set_preference("learned-rules.disagreed:" + KEY, "1")
+        environment(monkeypatch, tmp_path)
+        config = build_web_config(db)
+        assert config is not None
+        base, stop = serve_config(config)
+        try:
+            text = rules_text(shown(base))
+        finally:
+            stop()
+
+        assert "withdrawn: 1 later-identified row named another party" in text
+        assert "confirmed by 3 later-identified rows" in text
+        assert "linking" not in text
+
+
 class TestSettingsAndTicks:
     def test_RaisingNothingButLoweringConfidenceToTheTestedRows_AppliesTheRule(self, served):
         response = press(served, "/entities-rule-settings", support="2", confidence="40")

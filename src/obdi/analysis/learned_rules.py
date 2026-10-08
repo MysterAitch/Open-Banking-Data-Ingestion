@@ -54,6 +54,8 @@ SUPPORT_SETTING = "learned-rules.support"
 CONFIDENCE_SETTING = "learned-rules.confidence"
 KEPT_PREFIX = "learned-rules.kept:"
 ORIGIN_PREFIX = "learned-rules.origin:"
+AGREED_PREFIX = "learned-rules.agreed:"
+DISAGREED_PREFIX = "learned-rules.disagreed:"
 
 APPLIED = "applied"
 OFFERED = "offered"
@@ -81,6 +83,11 @@ class RulePolicy:
     #: For each entity rule the owner kept from a learned one (`rule_origin`), the rule's id to
     #: what was true when it was kept: how many rows taught it and the day.
     origins: Mapping[int, tuple[int, str]] = field(default_factory=dict)
+    #: For each rule key, how many later-identified rows agreed with its inference and how many
+    #: disagreed (`rule_confirmation`). One disagreement withdraws the rule, the same way one
+    #: "Not this" does.
+    agreed: Mapping[str, int] = field(default_factory=dict)
+    disagreed: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -121,6 +128,10 @@ class RuleView:
     rows: int = 0
     #: Whether the owner ticked it (so it is applied whatever the confidence setting says).
     ticked: bool = False
+    #: Later-identified rows that agreed with the rule's inference, and that disagreed (which
+    #: withdrew it): the one measurement of the reverse direction the rows ever give.
+    confirmed: int = 0
+    disagreed: int = 0
 
 
 def rule_key(party: str, opening: Form) -> str:
@@ -257,7 +268,17 @@ def rule_policy(store: Store) -> RulePolicy:
         ),
         frozenset(name[len(KEPT_PREFIX) :] for name in held if name.startswith(KEPT_PREFIX)),
         _origins(held),
+        _tallies(held, AGREED_PREFIX),
+        _tallies(held, DISAGREED_PREFIX),
     )
+
+
+def _tallies(held: Mapping[str, str], prefix: str) -> dict[str, int]:
+    return {
+        name[len(prefix) :]: int(value)
+        for name, value in held.items()
+        if name.startswith(prefix) and value.isdigit()
+    }
 
 
 def _origins(held: Mapping[str, str]) -> dict[int, tuple[int, str]]:

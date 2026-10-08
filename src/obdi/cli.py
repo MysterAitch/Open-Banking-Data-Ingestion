@@ -43,6 +43,7 @@ from .analysis.free_position import DeclaredLimit, FreeFigures
 from .analysis.goals import GoalsView
 from .analysis.learned_rules import rule_policy
 from .analysis.recurring import RecurringFindings, Series
+from .analysis.rule_confirmation import confirm_inferred
 from .analysis.this_month import MonthNote, ThisMonth
 from .core.errors import DataError
 from .core.money import parse_amount
@@ -83,6 +84,7 @@ from .ingest.connections import ConnectionStore
 from .ingest.declined_items import void_declined_items
 from .ingest.doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .ingest.family_anchors import Families, families_of
+from .ingest.finishers import Finishers, SettleReport
 from .ingest.pipeline import (
     MatcherPreview,
     import_file,
@@ -142,7 +144,7 @@ from .verify.coverage import (
     transpositions,
 )
 from .verify.coverage import report as coverage_report
-from .verify.landing import finishers as landing_finishers
+from .verify.landing import finishers as verify_finishers
 from .verify.protection import recheck as recheck_protections
 from .verify.review_flags import FlagQueue, Outcome
 from .verify.review_settlement import settle_review_flags
@@ -159,6 +161,20 @@ from .verify.statement_opening_measure import StatementOpeningReport, statement_
 from .verify.statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
 
 DEFAULT_DB = "./data/store.sqlite3"
+
+
+def landing_finishers() -> Finishers:
+    """What runs once rows have landed: `verify`'s finishers, and after the review flags settle the
+    learned rule's inferences are written down and compared with any identifier that has arrived
+    (`analysis.rule_confirmation`). The composition root is the one place both layers meet."""
+    base = verify_finishers()
+
+    def settle(store: Store) -> SettleReport:
+        report = base.settle(store)
+        confirm_inferred(store)
+        return report
+
+    return replace(base, settle=settle)
 
 
 def _store_path(explicit: str | None) -> Path:
