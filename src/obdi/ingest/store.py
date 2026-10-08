@@ -4817,6 +4817,16 @@ class Store:
             )
         }
 
+    def preferences_with_prefix(self, prefix: str) -> dict[str, str]:
+        """Every preference whose name begins with `prefix`, name to value, in one statement."""
+        return {
+            str(row[0]): str(row[1])
+            for row in self.connection.execute(
+                "SELECT name, value FROM preferences WHERE substr(name, 1, ?) = ?",
+                (len(prefix), prefix),
+            )
+        }
+
     def forget_preference(self, name: str) -> None:
         """Remove the owner's choice for `name`, and commit; nothing is said if there was none."""
         self.connection.execute("DELETE FROM preferences WHERE name = ?", (name,))

@@ -23,6 +23,7 @@ from ..ingest.store import Store
 from ..read.coverage_timeline import AGGREGATOR, EXPORT, FEED, kind_of_source
 from ..read.party_coverage import PartyStated, party_stated
 from .entities import name_rows, refused_links
+from .learned_rules import rule_policy
 
 #: The ways in that can carry a stated party where a statement reader states none.
 _CAN_STATE = frozenset({FEED, AGGREGATOR, EXPORT})
@@ -35,6 +36,7 @@ def party_stated_by_account(store: Store) -> dict[str, PartyStated]:
         rows,
         store.confirmed_transfer_pairs(),
         refused=refused_links(store),
+        policy=rule_policy(store),
         external=store.external_identifiers(),
     )
     held: dict[str, list[tuple[date, bool]]] = defaultdict(list)

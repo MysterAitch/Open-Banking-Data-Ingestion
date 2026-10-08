@@ -33,7 +33,9 @@ from page_dom import parse
 #: Declared external accounts add one select (`Store.external_identifiers`) to every page that
 #: names rows, which took the with-a-rule case to 26 beside the learned lines' refusal read; the
 #: bound is raised by that one statement, not reworked, since it does not grow with the store.
-ENTITIES_STATEMENTS = 26
+#: Measured 27 once the learned rules' settings and ticks were read
+#: (`Store.preferences_with_prefix`, one select, not growing with the rules or the store).
+ENTITIES_STATEMENTS = 27
 SECONDS = 5.0
 
 
