@@ -317,6 +317,12 @@ MORE_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
         (
             ("/accounts", "Accounts", "Every account held, declare or rename one, or archive one."),
             ("/spaces", "Spaces", "Spaces recovered from the bank, to declare or leave alone."),
+            (
+                "/this-month",
+                "This month",
+                "Each commitment on the day it falls due, paid or not, and whether its account "
+                "is funded until the next income.",
+            ),
             ("/review", "Categorise", "Give transactions a category, account by account."),
             (
                 "/recurring",

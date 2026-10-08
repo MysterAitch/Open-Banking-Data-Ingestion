@@ -33,6 +33,11 @@ from dataclasses import dataclass
 #: "Today" rather than "Overview": the page opens with whether anything needs a person now, and
 #: a word that says when it is read says more than one that says only that it is broad.
 #: Five items sit in one row on a phone; the browser test in test_phone_layout.py holds it.
+#: "This month" (the forward calendar, `web_this_month`) is under More and not a sixth item: six
+#: columns give the longest word, "Connections", a sixth of the width, which that test was written
+#: for a fifth of and does not show to fit at 360 px. It is reached from Today's note when the
+#: month needs a look, and a swap with a less daily item (Bring in, Connections) is the owner's
+#: to decide.
 #: "Connections" is every external place data moves to or from: the banks and the aggregator it is
 #: fetched from, and the budgeting tool it is sent to. "More" lists everything else: the accounts
 #: page, the checks, and the diagnostics, which are read when something is wrong and are not a
@@ -140,6 +145,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/checks": "more",
     "/reports": "more",
     "/review-flags": "more",
+    "/this-month": "more",
     "/recurring": "more",
     "/recurring-confirm": "more",
     "/recurring-price": "more",
@@ -206,6 +212,7 @@ PAGE_NAMES: dict[str, PageName] = {
     # each other (`page_words`).
     "/agreements": PageName("Do my sources match?", "Cross-source agreement"),
     "/recurring": PageName("Recurring payments"),
+    "/this-month": PageName("This month"),
     "/entities": PageName("Entities"),
     "/entity": PageName("Entity"),
     "/identity-health": PageName("Is any payment counted twice?", "Identity health"),

@@ -47,6 +47,7 @@ from ..analysis.commitments import ACT_CONFIRM, ACT_DISMISS, ACT_PRICE, ACT_REST
 from ..analysis.entities import EntitiesView, EntityPage, RuleTrial
 from ..analysis.free_position import FreeFigures
 from ..analysis.recurring import RecurringFindings
+from ..analysis.this_month import MonthNote, ThisMonth
 from ..core.classification import redact_summary
 from ..core.errors import DataError
 from ..core.logs import say
@@ -159,6 +160,7 @@ from .web_sections import (
 )
 from .web_set_aside import SetAsidePages
 from .web_statements import refile_form
+from .web_this_month import ThisMonthPages
 from .web_transfer_skips import relinked_pairs_block, skipped_pairs_block
 
 #: A basename that has been through `_scratch_name` and is therefore safe to
@@ -831,6 +833,12 @@ class WebConfig:
     #: What is held, owed, committed before the next income, and free, for the position the page
     #: was just handed (`analysis.free_position`); None leaves the section off the page.
     free_data: Callable[[Position], FreeFigures] | None = None
+    #: The month's calendar and funding (`analysis.this_month`), for the month after this one where
+    #: the flag is true; the This month page's one read.
+    this_month_data: Callable[[bool], ThisMonth] | None = None
+    #: What Today says of the month - days overdue, accounts short - or None where there is
+    #: nothing to say or no commitment is confirmed. Never read for a page other than Today.
+    this_month_note: Callable[[], MonthNote | None] | None = None
     #: The same position for the home page's masked status line, held while nothing it reads has
     #: changed, so opening the home page does not re-walk every account (`position_data` costs
     #: several statements per account).
@@ -3590,6 +3598,8 @@ def render_index(
     fetch_gaps: Callable[[date], FetchReport] | None = None,
     #: The quiet note each account's row may carry about its declared terms.
     term_notes: Callable[[date], Mapping[str, str]] | None = None,
+    #: What the month asks of the owner (`analysis.this_month.MonthNote`): one quiet line.
+    month_note: Callable[[], MonthNote | None] | None = None,
     #: The Actual page's other hooks, so the home page's line about Actual reads everything
     #: that page's verdict reads and the two cannot say different things.
     actual_queue: Callable[[], list[dict[str, object]]] | None = None,
@@ -3626,6 +3636,7 @@ def render_index(
     actual_configured=actual_configured,
     fetch=fetch_gaps,
     term_notes=term_notes,
+    month_note=month_note,
 )}
 """
     return render_page("Overview", body, wide=True)
@@ -3638,6 +3649,7 @@ class ConnectionHandler(
     BalanceChartPages,
     CoverageTimelinePages,
     PositionPages,
+    ThisMonthPages,
     RecurringPages,
     EntityPages,
     DestinationPages,
@@ -3737,6 +3749,8 @@ class ConnectionHandler(
             return False
         if route == "/position":
             self._position_post(params)
+        elif route == "/this-month":
+            self._this_month_post(params)
         elif route == "/balance-chart":
             self._balance_chart_post(params)
         elif route == "/review":
@@ -3829,6 +3843,9 @@ class ConnectionHandler(
             return
         if route == "/position":
             self._position_get()
+            return
+        if route == "/this-month":
+            self._this_month_get(params)
             return
         if route == "/connections":
             self._connections_page()
@@ -3978,6 +3995,7 @@ class ConnectionHandler(
                 fresh_overview=params.get("fresh", [""])[0] == "1",
                 fetch_gaps=timer.wrap("fetch_gaps", config.fetch_gaps),
                 term_notes=timer.wrap("account_term_notes", config.account_term_notes),
+                month_note=timer.wrap("this_month_note", config.this_month_note),
                 actual_queue=config.actual_queue,
                 actual_heartbeat=config.actual_heartbeat,
                 actual_configured=config.actual_configured,
@@ -6344,6 +6362,10 @@ class ConnectionHandler(
         if route == "/position":
             # A POST because showing values is a decision, not a link.
             self._position_post(self._read_form())
+            return
+        if route == "/this-month":
+            # A POST because showing values is a decision, not a link.
+            self._this_month_post(self._read_form())
             return
         if route == "/ledger-anchor":
             self._anchor_save_post(self._read_form())

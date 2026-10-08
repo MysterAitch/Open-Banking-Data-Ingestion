@@ -28,6 +28,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 from urllib.parse import quote
 
+from ..analysis.this_month import MonthNote
 from ..core.logs import say
 from ..core.page_times import (
     clock_text,
@@ -426,6 +427,26 @@ def _lock_line(
     return f'<p class="muted lockline">{say}</p>'
 
 
+def month_line_html(
+    note: MonthNote | None, shown: Callable[[str], AccountShown]
+) -> str:
+    """The one quiet line about the month, or "": which accounts are short before which day and
+    how many commitments are overdue, with no amount, and the way to the page (`/this-month`,
+    which owns the rule for both)."""
+    if note is None or not note.worth_saying():
+        return ""
+    parts = []
+    for account in note.short:
+        before = f" before {_esc(str(account.before))}" if str(account.before) else ""
+        parts.append(f"{shown(str(account.ref)).as_name()} is short{before}")
+    if int(note.overdue):
+        parts.append(f"{plural(int(note.overdue), 'commitment')} overdue")
+    return (
+        f'<p class="muted monthline">{"; ".join(parts)}. '
+        '<a class="tap" href="/this-month">See this month</a></p>'
+    )
+
+
 # ------------------------------------------------------------------------------------ Accounts
 
 
@@ -777,6 +798,7 @@ def overview_html(
     actual_configured: Callable[[], bool] | None = None,
     fetch: Callable[[date], FetchReport] | None = None,
     term_notes: Callable[[date], Mapping[str, str]] | None = None,
+    month_note: Callable[[], MonthNote | None] | None = None,
 ) -> str:
     """Today's body.
 
@@ -785,7 +807,9 @@ def overview_html(
 
     `term_notes` is each account's note on its declared terms, as of a day. Without it, or when it
     cannot be read, the rows carry no note: a note is a convenience that must never take down the
-    page the owner reads first, and its absence is logged.
+    page the owner reads first, and its absence is logged. `month_note` is the same for the
+    month's overdue commitments and short accounts: one quiet line under the lock line, only
+    where it has something to say, and never an amount.
     """
     now = now or datetime.now(UTC)
     if load is None:
@@ -848,6 +872,12 @@ def overview_html(
             notes = term_notes(today)
         except Exception as fault:
             say("overview.term_notes.fault", kind=type(fault).__name__)
+    month_line = ""
+    if month_note is not None:
+        try:
+            month_line = month_line_html(month_note(), shown)
+        except Exception as fault:
+            say("overview.month_note.fault", kind=type(fault).__name__)
     return (
         '<div class="overview home today">'
         '<section class="home-lead" aria-label="What needs you">'
@@ -855,6 +885,7 @@ def overview_html(
         f"{_evidence_html(overview, lines, system_html, fetch_unread, now)}"
         f"{todos_html(todos, shown, today)}"
         f"{'' if any(t.urgency == NOW for t in todos) else _lock_line(overview.accounts, shown)}"
+        f"{month_line}"
         "</section>"
         '<section id="accounts" class="home-accounts"><h2>Accounts</h2>'
         f"{_accounts_html(overview, todos, wanted, shown, notes)}</section>"

@@ -105,6 +105,23 @@ def next_due(window: Window, today: date) -> date | None:
     return None
 
 
+def due_days(window: Window, first: date, last: date) -> list[date]:
+    """Every day from `first` to `last` (both included) the window's payment falls due, and
+    that is not before the window began or after it closed. The same placing as `next_due`, which
+    is asked again from the day after each answer, so the calendar and the Position figures cannot
+    place a payment on different days."""
+    found: list[date] = []
+    cursor = first
+    while cursor <= last:
+        due = next_due(window, cursor)
+        if due is None or due > last:
+            break
+        if due >= window.from_day and (window.to_day is None or due <= window.to_day):
+            found.append(due)
+        cursor = due + timedelta(days=1)
+    return found
+
+
 @dataclass(frozen=True)
 class DueLine:
     """One confirmed commitment counted against an account: what it is, when, and how much."""

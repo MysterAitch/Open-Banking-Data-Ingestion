@@ -40,7 +40,8 @@ from .analysis.entities import (
 )
 from .analysis.external_accounts import dismissed_keys, unheld_accounts
 from .analysis.free_position import FreeFigures
-from .analysis.recurring import RecurringFindings
+from .analysis.recurring import RecurringFindings, Series
+from .analysis.this_month import MonthNote, ThisMonth
 from .core.errors import DataError
 from .core.money import parse_amount
 from .core.namespaces import UNASSIGNED_ACCOUNT
@@ -75,6 +76,7 @@ from .ingest.attended_fetch import (
     write_status,
 )
 from .ingest.backup import BackupRefused, take_backup, verify_copy
+from .ingest.commitment_records import Commitment
 from .ingest.connections import ConnectionStore
 from .ingest.declined_items import void_declined_items
 from .ingest.doctor import CheckResult, live_checks, report, run_checks, shape_problems
@@ -3978,6 +3980,53 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         detected = recurring_data().series if asks else []
         return build_free(position, commitments, detected, today=on)
 
+    def month_inputs_key(store: Store) -> tuple[object, ...]:
+        # What the calendar reads beyond the position: the commitments, whose windows the owner
+        # edits, and the transactions the position's own key already follows.
+        return (*position_memo_key(store), repr(store.commitments()))
+
+    def month_inputs() -> tuple[Position, list[Commitment], list[Series], FreeFigures]:
+        from .analysis.free_position import build_free
+
+        position = home_position()
+        on = date.fromisoformat(position.as_of)
+        with Store(db_path) as store:
+            commitments = store.commitments()
+        found = recurring_data().series if commitments else []
+        return position, commitments, found, build_free(position, commitments, found, today=on)
+
+    month_memo: KeyedMemo[tuple[Position, list[Commitment], list[Series], FreeFigures]] = (
+        KeyedMemo(month_inputs_key, name="this month", epoch=rebuild_epoch)
+    )
+
+    def this_month_data(ahead: bool) -> ThisMonth:
+        """The month's calendar over Position's own figures, read once for Today's note and the
+        page together (`month_memo`): the detector is the cost, and it is not run when no
+        commitment is confirmed."""
+        from .analysis.this_month import build_this_month
+
+        with Store(db_path) as store:
+            position, commitments, found, free = month_memo.get(store, month_inputs)
+        return build_this_month(
+            position,
+            commitments,
+            found,
+            free,
+            today=date.fromisoformat(position.as_of),
+            ahead=ahead,
+        )
+
+    def this_month_note() -> MonthNote | None:
+        """What Today says of the month, or None. A household that has confirmed nothing pays one
+        select."""
+        from .analysis.this_month import note_of
+
+        with Store(db_path) as store:
+            if not store.commitments():
+                return None
+        note = note_of(this_month_data(False))
+        return note if note.worth_saying() else None
+
     def recurring_act(action: str, form: dict[str, list[str]]) -> str:
         """One press on the Recurring page: the series it names is found again from the
         transactions, so that a press made on a page that has gone stale is refused and never
@@ -5018,6 +5067,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         coverage_timeline_household=coverage_timeline_household,
         position_data=position_data,
         free_data=free_data,
+        this_month_data=this_month_data,
+        this_month_note=this_month_note,
         home_position=home_position,
         anchor_save=anchor_save,
         anchor_remove=anchor_remove,

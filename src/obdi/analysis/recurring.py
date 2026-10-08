@@ -239,6 +239,15 @@ class Series:
     #: The first day of the run of newest occurrences at the latest amount (within
     #: `CHANGE_PERCENT` of it), which is the day a changed price began; None where unknown.
     latest_from: date | None = None
+    #: The days of the newest occurrences (at most `SEEN_DAYS_KEPT`), oldest first, on the date
+    #: the cadence was fitted on. `This month` sets a commitment's due days against these to say
+    #: which were paid; a weekly rhythm has several in a month, so the last day alone is not enough.
+    seen_days: tuple[date, ...] = ()
+
+
+#: How many of a series' newest occurrence days `Series.seen_days` keeps: enough to cover a month
+#: of the shortest cadence (weekly) and the one before it.
+SEEN_DAYS_KEPT = 10
 
 
 @dataclass(frozen=True)
@@ -623,6 +632,7 @@ def _series_of(
         dated_on=_dating(chosen, kind),
         name_keys=frozenset(leg.name for leg in legs if leg.name),
         latest_from=_day_of(legs[began].row, chosen),
+        seen_days=tuple(_day_of(leg.row, chosen) for leg in legs[-SEEN_DAYS_KEPT:]),
     )
 
 
