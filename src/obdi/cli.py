@@ -4221,10 +4221,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+            policy = rule_policy(store)
             fields, links, named = name_rows(
                 rows,
                 store.confirmed_transfer_pairs(),
-                refused=refused_links(store), policy=rule_policy(store),
+                refused=refused_links(store),
+                policy=policy,
                 external=store.external_identifiers(),
             )
             origins = name_origins(named, [t.source for t in rows])
@@ -4257,6 +4259,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 origins,
                 display_names(fields, named, _held_labels(store, rows, named, names)),
                 links,
+                policy.origins,
             )
 
     def entity_trial(entity_id: int, kind: str, words: str) -> RuleTrial:

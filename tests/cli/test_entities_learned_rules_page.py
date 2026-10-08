@@ -21,7 +21,7 @@ two rows) and one printing "MARLOW BAKERY HIGH STREET YORK GB 1".
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import httpx
 import pytest
@@ -183,6 +183,51 @@ class TestSettingsAndTicks:
 
         assert response.status_code == 400
         assert "no longer teach" in response.text
+
+
+class TestKeepOnAnInferredRow:
+    def test_Keep_PromotesTheRuleToADeclaredBeginsWithRuleWithItsOrigin(self, served):
+        entity = TestNotThisOnAnInferredRow().gathered(served)
+
+        kept = press(
+            served,
+            "/entity-link-keep",
+            entity=entity,
+            shape="marlow bakery high street london gb",
+        )
+
+        assert kept.status_code == 200, kept.text[:300]
+        page = httpx.post(f"{served}/entity?id={entity}", timeout=60).text
+        text = " ".join(parse(page).text().split())
+        today = datetime.now(UTC).date().isoformat()
+        assert f"learned from 2 identified rows, kept by you on {today}" in text
+        assert "begin" in text
+        assert "kept as a rule of this entity" in text
+
+    def test_Keep_PressedAgain_IsRefusedAndNotThisIsRefusedOnADeclaredLine(self, served):
+        entity = TestNotThisOnAnInferredRow().gathered(served)
+        fields = {"entity": entity, "shape": "marlow bakery high street london gb"}
+        press(served, "/entity-link-keep", **fields)
+
+        again = press(served, "/entity-link-keep", **fields)
+        refuse = press(served, "/entity-link-refuse", **fields)
+
+        assert again.status_code == 400 and "already kept" in again.text
+        assert refuse.status_code == 400 and "kept" in refuse.text
+
+    def test_KeptRule_SurvivesTheConfidenceRisingAboveItsTestedRows(self, served):
+        entity = TestNotThisOnAnInferredRow().gathered(served)
+        press(
+            served,
+            "/entity-link-keep",
+            entity=entity,
+            shape="marlow bakery high street london gb",
+        )
+
+        press(served, "/entities-rule-settings", support="2", confidence="5000")
+
+        page = httpx.post(f"{served}/entity?id={entity}", timeout=60).text
+        assert "kept by you on" in " ".join(parse(page).text().split())
 
 
 class TestNotThisOnAnInferredRow:

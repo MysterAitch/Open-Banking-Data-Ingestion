@@ -53,6 +53,7 @@ from .learned_rules import (
     decide,
     learn_rules,
     opens,
+    origin_sentence,
 )
 from .payment_methods import strip_leading_methods
 
@@ -532,8 +533,10 @@ class Alias:
     #: or `LEARNED_RULE` (the identified rows open so, and no other does); `rows` is 0 for the
     #: two text matches, since no row says so, and for a `LEARNED_RULE` the rows that taught it.
     by: str = ALIAS
-    #: For a `LEARNED_RULE`: how many other identified rows the rule was tested against.
+    #: For a `LEARNED_RULE`: how many other identified rows the rule was tested against, and the
+    #: opening (its comparable words, space separated) every row of the party shares.
     tested: int = 0
+    opening: str = ""
 
 
 @dataclass(frozen=True)
@@ -829,7 +832,12 @@ def _rule_links(
         if len(parties) == 1:
             ((party, rule),) = parties.items()
             links[shape] = Alias(
-                party, rule.taught, seen.kinds[party], LEARNED_RULE, tested=rule.tested
+                party,
+                rule.taught,
+                seen.kinds[party],
+                LEARNED_RULE,
+                tested=rule.tested,
+                opening=rule.words,
             )
     return links
 
@@ -1109,26 +1117,43 @@ class LearnedLine:
     #: For `ALIAS`: the payments seen by both sources that taught it.
     rows: int
     kept: bool = False
+    #: For a `LEARNED_RULE` line: the other identified rows the rule was tested against, and
+    #: whether the owner has kept the rule as a declared one on the entity (`declared`).
+    tested: int = 0
+    declared: bool = False
 
 
 #: What a learned line says about how it was learned, after "learned: "; the one table the page
-#: reads. `{payments}` is the count of payments seen by both sources.
+#: reads. `{payments}` is the count of payments seen by both sources; `{taught}` and `{tested}`
+#: the two counts of an inferred rule.
 LEARNED_SENTENCES: dict[str, str] = {
     ALIAS: "through {payments} seen by both",
     MATCHED_NAME: "the description matches exactly",
     TRUNCATED_NAME: "a truncation",
-    LEARNED_RULE: "inferred from an opening this party's identified rows share",
+    LEARNED_RULE: (
+        "inferred from an opening every one of this party's {taught} identified rows shares and "
+        "none of the other {tested} identified rows does"
+    ),
 }
 
 
 def learned_sentence(line: LearnedLine) -> str:
-    """"learned: through 4 payments seen by both", or "kept" for a line the owner stored."""
+    """"learned: through 4 payments seen by both", or "kept" for a line the owner stored, or
+    "kept as a rule" for an inferred one the owner declared."""
+    if line.declared:
+        return "kept as a rule of this entity"
     if line.kept:
         return "kept"
-    return "learned: " + LEARNED_SENTENCES[line.by].format(payments=plural(line.rows, "payment"))
+    return "learned: " + LEARNED_SENTENCES[line.by].format(
+        payments=plural(line.rows, "payment"), taught=f"{line.rows:,}", tested=f"{line.tested:,}"
+    )
 
 
-def learned_lines(entity: Entity, links: Mapping[str, Alias]) -> tuple[LearnedLine, ...]:
+def learned_lines(
+    entity: Entity,
+    links: Mapping[str, Alias],
+    declared: Collection[str] = (),
+) -> tuple[LearnedLine, ...]:
     """The shapes the links resolve to a party this entity holds an identifier for, by target and
     then shape. A shape that IS the party's own name is not a line (it names nothing new), and a
     name the entity holds only because a rule matches it has none: a press needs an identifier to
@@ -1138,7 +1163,15 @@ def learned_lines(entity: Entity, links: Mapping[str, Alias]) -> tuple[LearnedLi
     return tuple(
         sorted(
             (
-                LearnedLine(shape, alias.name, alias.by, alias.rows, kept=shape in kept)
+                LearnedLine(
+                    shape,
+                    alias.name,
+                    alias.by,
+                    alias.rows,
+                    kept=shape in kept,
+                    tested=alias.tested,
+                    declared=alias.by == LEARNED_RULE and _shape(alias.opening) in declared,
+                )
                 for shape, alias in links.items()
                 if alias.name in held
                 and shape != alias.name
@@ -1991,6 +2024,8 @@ class RuleLine:
 
     rule: EntityRule
     matches: int
+    #: Where the rule came from, said, for one kept from a learned rule; "" for one typed.
+    origin: str = ""
 
 
 @dataclass(frozen=True)
@@ -2062,15 +2097,23 @@ def entity_page_of(
     origins: Mapping[str, NameOrigin] | None = None,
     labels: Mapping[str, str] | None = None,
     links: Mapping[str, Alias] | None = None,
+    origins_kept: Mapping[int, tuple[int, str]] | None = None,
 ) -> EntityPage | None:
     """The page of one entity, or None where no entity not removed has that id. `entities` are
     resolved (`with_rules`) and `rules` are the live rules of all of them; `links` are the
-    learned links (`name_rows`), from which the page's learned lines are worked out each time."""
+    learned links (`name_rows`), from which the page's learned lines are worked out each time.
+    `origins_kept` says, for a rule the owner kept from a learned one, what taught it and when
+    (`RulePolicy.origins`)."""
+    kept_from = origins_kept or {}
     found = next((e for e in entities if e.id == entity_id), None)
     if found is None:
         return None
     lines = tuple(
-        RuleLine(rule, sum(rule_matches(rule.kind, rule.words, s) for s in found.shapes))
+        RuleLine(
+            rule,
+            sum(rule_matches(rule.kind, rule.words, s) for s in found.shapes),
+            origin_sentence(*kept_from[rule.id]) if rule.id in kept_from else "",
+        )
         for rule in rules
         if rule.entity_id == entity_id
     )
@@ -2087,7 +2130,11 @@ def entity_page_of(
             origins=origins or {},
             labels=labels or {},
         ),
-        learned=learned_lines(found, links or {}),
+        learned=learned_lines(
+            found,
+            links or {},
+            {r.words for r in rules if r.entity_id == entity_id},
+        ),
     )
 
 

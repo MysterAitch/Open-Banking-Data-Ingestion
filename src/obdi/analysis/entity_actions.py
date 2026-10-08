@@ -8,12 +8,21 @@ page shows (`EntityRefused`).
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from ..core.models import Transaction
 from ..core.plural import plural
-from ..ingest.entity_records import DECLARED, DESCRIPTION, Entity, EntityRefused, Identifier
+from ..ingest.entity_records import (
+    BEGINS,
+    DECLARED,
+    DESCRIPTION,
+    Entity,
+    EntityRefused,
+    Identifier,
+)
 from .entities import (
+    LEARNED_RULE,
     Alias,
     Fields,
     LearnedLine,
@@ -31,7 +40,7 @@ from .entities import (
     rule_phrase,
 )
 from .external_accounts import declare_external, dismiss, offer_again
-from .learned_rules import keep_rule, rule_policy, set_settings
+from .learned_rules import keep_rule, record_origin, rule_policy, set_settings
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from ..ingest.store import Store
@@ -259,17 +268,37 @@ def apply_action(
     if action in (KEEP_LINK, REFUSE_LINK):
         pressed, line = _learned_line(store, links or {}, form)
         if action == REFUSE_LINK:
-            if line.kept:
-                raise EntityRefused("That description is kept; split it apart first.")
+            if line.kept or line.declared:
+                raise EntityRefused(
+                    "That description is kept; split it apart first, or remove its rule."
+                )
             store.exclude_shape(pressed.id, line.shape)
             return f"Not this: that description is named by itself, apart from {pressed.name}."
-        if line.kept:
+        if line.kept or line.declared:
             raise EntityRefused("That description is already kept.")
+        if line.by == LEARNED_RULE:
+            return _keep_learned_rule(store, pressed, links or {}, line)
         store.attach_shapes(
             pressed.id, [Identifier(DESCRIPTION, line.shape, "", DECLARED, line.rows)]
         )
         return f"Kept that description for {pressed.name}; it no longer depends on the link."
     raise EntityRefused("That press is not one this page makes.")
+
+
+def _keep_learned_rule(
+    store: Store, entity: Entity, links: Mapping[str, Alias], line: LearnedLine
+) -> str:
+    """Keep on an inferred description promotes the rule it came from to a declared "begins with"
+    rule of the entity: from then on it is the owner's claim and no longer a statistic, and its
+    provenance (the rows that taught it, the day it was kept) is remembered beside it."""
+    opening = links[line.shape].opening
+    kind, words = clean_rule(BEGINS, opening)
+    rule_id = store.add_entity_rule(entity.id, kind, words)
+    record_origin(store, rule_id, line.rows, datetime.now(UTC).date().isoformat())
+    return (
+        f"Kept a rule: {rule_phrase(kind, words)} will join {entity.name}, "
+        f"learned from {plural(line.rows, 'identified row')}."
+    )
 
 
 def _learned_line(
@@ -283,7 +312,12 @@ def _learned_line(
     )
     if entity is None:
         raise EntityRefused("There is no such entity; it may have been removed.")
-    line = next((found for found in learned_lines(entity, links) if found.shape == shape), None)
+    declared = {
+        rule.words for rule in store.entity_rules() if rule.entity_id == entity.id
+    }
+    line = next(
+        (found for found in learned_lines(entity, links, declared) if found.shape == shape), None
+    )
     if line is None:
         raise EntityRefused(
             "The rows no longer teach that description for this entity; reload the page."
