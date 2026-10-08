@@ -172,6 +172,84 @@ above; it must exist before any strong field becomes a key, and the constructed 
 change here is the mixed-source series (six statement rows, six feed rows, one party, one live
 series).
 
+### 4a. Patterns learned from definitive rows
+
+The owner, 2026-10-08: "Lessons drawn from definitive data (uid per merchant location) can be
+used as data to infer from non definitive data. For example, if every instance of a given uid
+has a merchant name of x and a description prefix or partial body of y then we could possibly
+use that to infer the reverse relation (ie when seeing that prefix we can know it's a merchant
+location)."
+
+And, the same day: "statistical rigour should be in place - just because all instances of X
+is consistent with y, it doesn't always mean that every y is indicative of X being true."
+
+The two directions are different claims. The rows carrying identifier U teach that every row
+of U opens with Y - P(Y given U) is one, measured. What the inference needs is the reverse,
+P(U given Y), and nothing measures it over the rows it will be applied to: a description-only
+row has, by definition, no identifier to check against. So what is learned is a RULE held as
+a hypothesis, and the record of it says what was tested and what was not:
+
+- Learned from U's rows: the longest opening in tokens that ALL of them share; kept only
+  where two or more rows carry it and it is distinctive (two or more tokens, or one token of
+  eight or more letters, after the normalisation steps the page already lists). "Card payment
+  to" teaches nothing.
+- Tested against every OTHER identified row in the store: the rule must match none of them.
+  That is the only estimate of P(U given Y) available, and its strength is the size of the
+  population it was tested against, so the sentence carries both numbers: "every one of U's 14
+  rows opens Y; none of the other 2,310 identified rows does".
+- Confidence, not a gate. The owner, 2026-10-08: "it is more a confidence issue - we could draw
+  on p values or something similar and still show low confidence / 'unable to definitively
+  confirm' results but just be honest about it. It could be the entry is shown but defaults
+  to unticked." So a weak rule is never hidden: every rule is SHOWN with its two numbers and a
+  confidence derived from them, and the confidence decides only the DEFAULT. With k = 0
+  matches among N other identified rows, the one-sided 95% bound on the share of such rows
+  that would match is about 3/N (the rule of three), so N is the figure that matters and the
+  page says it plainly: "tested against 2,310 other identified rows, none opened so - if the
+  unidentified rows are like them, fewer than 1 in 770 would belong to someone else", and
+  below the line, in the same sentence, the caveat that the unidentified rows need not be like
+  them. Above a stated confidence threshold (a named constant with its reason) the rule is
+  applied by default - ticked; below it the rule is offered unticked, its inferred rows listed
+  but NOT linked until the owner ticks it, and the sentence says "unable to confirm from the
+  rows held: tested against only 41 other identified rows". Ticking is a Keep; the unticked
+  state is the honest answer, not an absence.
+- The thresholds are settings. The owner, 2026-10-08: "if you can't make it perfect, make it
+  configurable." Two numbers decide a rule's fate and both are guesses until the real store
+  has been read: the SUPPORT (how many of U's rows must share the opening before anything is
+  learned; raising it trades missed rules for fewer wrong ones) and the CONFIDENCE (how many
+  other identified rows a rule must have been tested against before it is applied by default;
+  raising it moves rules from ticked to offered). Each is a preference in the store with a
+  named default, set from the Entities page beside the learned rules, and the page says what
+  the current values decide - "at these settings 12 rules apply by default and 7 are offered
+  unticked; 3 openings are shared by two parties and teach nothing" - so a change can be seen
+  before it is trusted. Changing a setting re-decides DEFAULTS only: a rule the owner has
+  ticked or refused keeps the owner's decision, which is a claim and not a statistic. The
+  defaults chosen, and what the real store showed at them, are recorded in notes.md.
+- Applied to description-only rows: a row opening Y is linked to U with kind `LEARNED_RULE`,
+  BELOW truncation (which checks a name against a name on the same row) and above the bare
+  description. The row's sentence names it as inferred, not stated, and carries the
+  confidence: "from the description, which opens as every one of U's 14 identified rows does
+  and none of the other 2,310 identified rows does".
+- Falsifiable by the owner: Not this on one inferred row is a counterexample, and a single
+  counterexample withdraws the rule (P(U given Y) is no longer one on the only labelled
+  evidence there is); the refusal is kept so the rule is not re-learned tomorrow. Keep
+  promotes it to a declared rule, at which point it is the owner's claim and no longer a
+  statistic.
+- Falsifiable by data: a description-only row that LATER gains an identifier (a richer
+  source for the same transaction, section 3b) is the one place the reverse direction is
+  measured for real. Where the identifier disagrees with the inferred link, the rule is
+  withdrawn and the disagreement is shown; where it agrees, the agreement is counted and
+  shown as the rule's measured precision. The count of such confirmations is the number
+  that would let the owner trust the rung, and is zero until a second source overlaps.
+- Shown apart: an entity's inferred rows are counted separately from its identified ones
+  everywhere a count appears, so a series or a group never looks better evidenced than it
+  is. Where an opening is shared by two identifiers, nothing is learned, as everywhere else.
+
+It reaches what exact match and truncation could not - a statement's narrative that neither
+equals nor truncates the stated name but opens as every feed row of that location opens -
+and it does so as an inference whose evidence is stated, not as a fact. Measured by whether
+the habit returns on the real store, and by how many inferred rows a later identifier
+confirms or refutes.
+
 ## 5. What the current page gets wrong, in these terms
 
 - It groups rows by a cleaned description-shape and calls the groups "names"; a merge attaches
