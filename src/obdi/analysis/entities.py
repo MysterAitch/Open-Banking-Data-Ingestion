@@ -767,7 +767,7 @@ def learned_rules(
     whose description opens as the rule does."""
     chosen = policy or RulePolicy()
     seen = inputs or rule_inputs(held)
-    learning = learn_rules(seen.forms, seen.rows, chosen.settings.support)
+    learning = learn_rules(seen.forms, chosen.settings.support)
     cache: dict[str, tuple[str, ...]] = {}
     withdrawn = {
         rule.key

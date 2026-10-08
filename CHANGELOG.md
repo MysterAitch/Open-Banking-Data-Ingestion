@@ -28,6 +28,22 @@ transcription would add no reasoning that the subjects do not already carry.
 
 ## [Unreleased]
 
+### Changed
+- **The Learned rules section is read at a glance on a phone.** It listed every rule, 118 of them
+  linking no row, each with the same five-line sentence. The method and the bound's caveat are
+  now said once at the head; a rule that links rows is one line ("<party> `opening` - taught by
+  N, tested against M, links K") with its state, confirmations, and rows in a closed drill-down;
+  rules that reach no row sit in one closed fold of one line each. The form's labels are
+  sentences.
+
+### Fixed
+- **The page head and a rule counted different populations as "identified".** The head summed
+  every row named by anything a source states (9,195) while a rule said "tested against 4,585
+  other identified rows". A rule is tested against the other rows that carry an identifier AND a
+  description, because a row with no description cannot open any way and counting it overstated
+  the bound; the head now counts the rows that carry an identifier of their own, and the method
+  line says what "tested against" counts.
+
 ### Added
 - **The learned rule is measured against the identifiers that arrive after it (schema 32).** A
   description-only row named by the rule is a guess, and the one place the guess is tested for

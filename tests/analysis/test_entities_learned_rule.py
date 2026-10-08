@@ -254,6 +254,40 @@ class TestWhatThePageSays:
         assert len(applied.rules) == len(offered.rules) == 1
 
 
+class TestOnePopulation:
+    """Five rows carry an identifier of their own: Marlow's two described rows, one other party's
+    described row, and two rows of a third party with NO description. The page head counts five;
+    a rule for Marlow is tested against the OTHER described rows only, which is one, because a
+    row with no description cannot open any way and counting it would overstate the evidence."""
+
+    def rows(self) -> list[Fields]:
+        return [
+            *feed(),
+            Fields("ZEPHYR WATER BOARD 1", "", "", "starling:uid-zephyr"),
+            Fields("", "", "", "starling:uid-blank"),
+            Fields("", "", "", "starling:uid-blank"),
+            Fields(STATEMENT),
+        ]
+
+    def test_RuleIsTestedAgainstTheOtherDescribedRowsOnly(self):
+        learning, _states = learned_rules(self.rows(), policy(confidence=1))
+
+        (rule,) = learning.rules
+        assert (rule.taught, rule.tested) == (2, 1)
+
+    def test_HeadCountsEveryRowThatCarriesAnIdentifier(self):
+        named = names_of(self.rows())
+        origins = name_origins(named)
+
+        assert sum(o.account + o.source_id for o in origins.values()) == 5
+
+    def test_TheBoundIsComputedOverTheNarrowerPopulation(self):
+        learning, _states = learned_rules(self.rows(), policy(confidence=1))
+        (rule,) = learning.rules
+
+        assert "tested against 1 other identified rows" in rule_sentence(rule, APPLIED)
+
+
 class TestCountedApart:
     def test_Origins_CountTheInferredRowApartFromTheIdentifiedOnes(self):
         rows = world(Fields(STATEMENT))

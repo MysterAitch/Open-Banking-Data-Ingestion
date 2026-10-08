@@ -256,9 +256,13 @@ class TestAnOfferedRule:
             "0 openings are shared by two parties and teach nothing."
         )
         text = rules_text(page)
-        assert "offered, unticked: would link 3 rows" in text
-        assert "unable to confirm from the rows held: tested against only 40 other" in text
-        assert "need not be like them" in text
+        assert "taught by 2, tested against 40, would link 3" in text
+        assert "offered, unticked: unable to confirm from the rows held" in text
+        assert "tested against only 40 other identified rows" in text
+        assert " ".join(parse(page).text().split()).count("which they need not be") == 1, (
+            "the bound's caveat is said once, at the head of the section"
+        )
+        assert "need not be" not in text, "and never per rule"
         folds = [d for d in elements(parse(page), "details") if "would link" in d.text()]
         assert len(folds) == 1 and "open" not in folds[0].attrs
         assert "MARLOW BAKERY HIGH STREET LONDON GB" in folds[0].text().upper().replace("  ", " ")
@@ -301,7 +305,7 @@ class TestTheRulesMeasuredPrecision:
 
         assert "withdrawn: 1 later-identified row named another party" in text
         assert "confirmed by 3 later-identified rows" in text
-        assert "linking" not in text
+        assert "applied" not in text
 
 
 class TestSettingsAndTicks:
@@ -312,7 +316,8 @@ class TestSettingsAndTicks:
         assert "At these settings 1 rule applies by default and 0 are offered" in counts_line(
             response.text
         )
-        assert "applied by default, linking 3 rows" in rules_text(response.text)
+        text = rules_text(response.text)
+        assert "links 3" in text and "applied by default" in text
 
     def test_RaisingConfidenceAgain_MovesTheRuleBackToOffered(self, served):
         press(served, "/entities-rule-settings", support="2", confidence="40")
@@ -329,7 +334,8 @@ class TestSettingsAndTicks:
     def test_TickingTheOfferedRule_AppliesItWhateverTheConfidenceIs(self, served):
         page = press(served, "/entities-rule-tick", rule=KEY).text
 
-        assert "applied because you ticked it, linking 3 rows" in rules_text(page)
+        text = rules_text(page)
+        assert "links 3" in text and "applied because you ticked it" in text
         raised = press(served, "/entities-rule-settings", support="2", confidence="5000").text
         assert "applied because you ticked it" in rules_text(raised)
 

@@ -755,3 +755,12 @@ The rung is `analysis/learned_rules.py` (learning, state, sentences, the setting
    is what withdraws it. Not built: the withdrawal is shown on the Entities page only, not on the
    entity page; an identifier of another kind is left pending for ever; and the live count stays
    zero until a second source overlaps a row the rule named.
+6. AT A GLANCE (after the owner read 0.4.386 on a phone: 118 rules listed, every one "linking 0
+   rows" with the same five-line sentence). `method_sentence` is said once at the section head;
+   `_rule_item` is one line with a closed drill-down; rules that link no row (and are not
+   withdrawn) are one closed fold of one line each (`tests/pages/test_entities_learned_rules_
+   layout.py` holds that 120 such rules add nothing outside the fold). Count defect: the head
+   summed `NameOrigin.identified` (every row not inferred, including description-named ones)
+   against a rule's `total - party rows` over rows with an identifier; they are now both
+   identifier-carrying rows, and the rule's test population is those WITH a description, said in
+   the method line. Not measured on the real store.
