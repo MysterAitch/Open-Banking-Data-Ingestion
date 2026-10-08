@@ -37,7 +37,7 @@ def party_stated_by_account(store: Store) -> dict[str, PartyStated]:
         store.confirmed_transfer_pairs(),
         refused=refused_links(store),
         policy=rule_policy(store),
-        external=store.external_identifiers(),
+        external=store.declared_identifiers(),
     )
     held: dict[str, list[tuple[date, bool]]] = defaultdict(list)
     for row, item in zip(rows, named, strict=True):

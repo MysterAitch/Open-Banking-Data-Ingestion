@@ -40,7 +40,7 @@ from .entities import (
     resolve_form_value,
     rule_phrase,
 )
-from .external_accounts import declare_external, dismiss, offer_again
+from .external_accounts import declare_external, dismiss, identify_held, offer_again
 from .learned_rules import keep_rule, record_origin, rule_policy, set_settings
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -66,7 +66,8 @@ SPLIT_LOCATIONS = "split-locations"
 DECLARE_EXTERNAL = "declare-external"
 NOT_EXTERNAL = "not-external"
 OFFER_AGAIN = "offer-again"
-EXTERNAL_ACTIONS = (DECLARE_EXTERNAL, NOT_EXTERNAL, OFFER_AGAIN)
+IDENTIFY_HELD = "identify-held"
+EXTERNAL_ACTIONS = (DECLARE_EXTERNAL, NOT_EXTERNAL, OFFER_AGAIN, IDENTIFY_HELD)
 #: The presses about the learned rules (`learned_rules`): the two settings, and ticking an offered
 #: rule. They read the rows the rules are learned from, as the external presses do.
 RULE_SETTINGS = "rule-settings"
@@ -105,6 +106,8 @@ def apply_external_action(
         return dismiss(store, rows, named, form)
     if action == OFFER_AGAIN:
         return offer_again(store)
+    if action == IDENTIFY_HELD:
+        return identify_held(store, rows, named, form)
     raise EntityRefused("That press is not one this page makes.")
 
 

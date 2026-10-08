@@ -742,3 +742,44 @@ The rung is `analysis/learned_rules.py` (learning, state, sentences, the setting
    no name is removed). Not built: naming a location from its town; a series test of the split
    (no constructed world was found where the split changes a series, which merging, not splitting,
    is for).
+
+## Payments to held accounts as built (entities.md section 3a, schema 33)
+
+The owner, 2026-10-08, on his phone: payments listed as "to accounts not held here" were often
+accounts obdi already holds, with only a text box to name them, and no way to look at the payments.
+
+- **"It is this account".** A select of the declared held accounts beside each unheld line and a
+  press (`/entities-held`) that adds the line's number to that account. An account known only from
+  its rows has no declaration to carry a number, so it is not offered and the store refuses it
+  ("declare it first"); creating a bare declaration was rejected because the kind it would need
+  (`known_accounts` works it out from the provider) is not known on the Entities page, and a wrong
+  kind changes how the balance is derived.
+- **An account carries many numbers** (`account_identifiers`, schema 33; 32 belongs to a change
+  landing beside it). Rejected: widening `declared_accounts.identifier` to the held case, since a
+  sort-code migration or a merger gives one balance history a second number, and one column holds
+  one. An `account` number belongs to one account (a partial unique index) and a second press for
+  the same account ADDS; the same number on another account is refused naming the first. External
+  accounts keep the column, which `declare_account` also copies into the table;
+  `_migrate_account_identifiers` copies the existing ones.
+- **`first_seen`/`last_seen` are not stored.** The brief asked for the columns; they are read from
+  the transactions (`Store.identifier_sightings`, one statement) when the edit page is drawn, since
+  a stored copy would be a second truth that the next rebuild leaves stale.
+- **Cards.** `kind = 'card'` keeps the last four digits of a card and refuses anything else; it
+  joins no row (`declared_identifiers` reads `account` only), because a card's last four is shared
+  by chance and a payment states a card as a card. The owner's `valid_from`/`valid_to` are kept
+  beside, and cards on one account list in date order.
+- **The fold.** Each unheld line has a closed fold of its newest ten payments (day and source
+  masked; account, description as printed, and amount only when values are shown, each a ledger
+  link) and "and N more", from the rows the page has already read: no statement per account.
+- **A transfer whose other leg is not held says why** (`other_leg_notes`): an unpaired payment
+  named for a held account whose first row (`overview.first_row_dates`) is later than the payment
+  reads "<account>'s rows begin <day>, so the other leg is not held". No leg is created. Only the
+  START of an account's rows is read; an account whose rows END before a payment is not noted.
+- **Budgets.** The Entities page gained two statements (the held accounts, the first rows) and
+  the entity page one; the bounds in `test_entities_speed` and `test_entity_page_speed` say so.
+- **Not built / unproven.** The ledger does not name a transfer's other side by entity (it reads
+  confirmed pairs only), so "your <label>" is on the Entities, entity, and Recurring pages and not
+  on the ledger. Identifiers learned only from a confirmed pair are not listed on the edit page as
+  "seen". The edit page prints last four digits only, never the whole number, shown or masked.
+  The note is displayed on covered rows, which the Entities page reaches only for a name gathered
+  into an entity. Nothing has been run against the real store.

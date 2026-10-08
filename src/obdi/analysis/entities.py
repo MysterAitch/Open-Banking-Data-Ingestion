@@ -1065,15 +1065,16 @@ def held_counterparts(
     show leading to two accounts is ambiguous and counts as neither, and a row is never its own
     account's counterpart.
 
-    And `external`, the identifier of each account the owner declared theirs that obdi holds no
-    source for (`Store.external_identifiers`), to that account's name: a row stating one is a
-    transfer to it. A pair is proof and a declaration is a statement, so an identifier the pairs
-    have spoken for (even ambiguously) is never taken from a declaration.
+    And `external`, every identifier the owner declared an account answers to, held or not
+    (`Store.declared_identifiers`), to that account's name: a row stating one is a transfer to
+    it, paired or not. A pair is proof and a declaration is a statement, so an identifier the
+    pairs have spoken for (even ambiguously) is never taken from a declaration.
 
-    The held accounts' own sort codes and numbers are not held anywhere (`ingest.identifiers`
-    reads them from landed account payloads and keeps nothing), so an identifier of a held account
-    is learned only from a pair that has been confirmed; a transfer to a held account that has no
-    confirmed leg and states an identifier no pair states is not known to be one.
+    A held account's own sort code and number is not held anywhere unless declared
+    (`ingest.identifiers` reads them from landed account payloads and keeps nothing), so an
+    identifier of a held account is learned from a confirmed pair or from the owner's
+    declaration; a transfer to a held account that has no confirmed leg and states an identifier
+    neither has spoken for is not known to be one.
     """
     by_id = {row.entity_id: row for row in rows if row.entity_id}
     other: dict[str, str] = {}
@@ -1960,6 +1961,25 @@ class Covered:
     linked_by: str = ""
     #: For a `LEARNED_RULE` row: the other identified rows the rule was tested against.
     tested: int = 0
+    #: Said beside a row that is a transfer to an account whose rows do not reach the row's day
+    #: (`external_accounts.other_leg_notes`), "" otherwise.
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class UnheldPayment:
+    """One payment to an account no held account owns, as the fold under it lists it."""
+
+    day: date
+    source: str
+    description: str
+    amount_minor: int
+    currency: str
+    #: The account the payment left, and the label pages show it under ("" where it has none).
+    account: str
+    account_label: str
+    #: The ledger's key for the row (`ledger.row_anchor`).
+    anchor: str
 
 
 @dataclass(frozen=True)
@@ -1967,11 +1987,13 @@ class UnheldAccount:
     """An account number some payments state that no held account owns: how many payments, and
     the last characters of the number (`external_accounts`). `key` is the name `name_of` gives
     rows that state it; the number is not carried, since a repr, a traceback, or a template could
-    print it."""
+    print it. `paid` is the newest of the payments (`external_accounts.PAID_SHOWN`) when the
+    caller has them."""
 
     key: str
     ending: str
     payments: int
+    paid: tuple[UnheldPayment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1997,6 +2019,9 @@ class EntitiesView:
     #: (`external_accounts.unheld_accounts`), and how many more they declined.
     unheld: tuple[UnheldAccount, ...] = ()
     declined: int = 0
+    #: The held accounts a payment's number can be said to belong to, as (name, label) pairs
+    #: (`external_accounts.held_choices`).
+    held_choices: tuple[tuple[str, str], ...] = ()
     #: The learned rules (`learned_rules`), the openings shared by several parties that taught
     #: nothing, and the settings that decided each rule's state.
     rules: tuple[RuleView, ...] = ()
@@ -2151,12 +2176,14 @@ def view_of(
     rules: tuple[RuleView, ...] = (),
     rules_shared: int = 0,
     rule_settings: RuleSettings = DEFAULT_SETTINGS,
+    held_choices: tuple[tuple[str, str], ...] = (),
 ) -> EntitiesView:
     """The page's view of the names held and the entities made from them.
 
     `rules`, `rules_shared`, and `rule_settings` are the learned rules (`rule_views`).
 
-    `unheld` and `declined` are `external_accounts.unheld_accounts`.
+    `unheld` and `declined` are `external_accounts.unheld_accounts`, and `held_choices` is
+    `external_accounts.held_choices`.
 
     `origins` is `name_origins`: how each name's rows came to have it.
     `readings` is `name_readings`: the text each name is compared on where that is not the name.
@@ -2186,6 +2213,7 @@ def view_of(
         suggestions=suggest_for_entities(text_names, made, set_apart | offered, readings),
         unheld=unheld,
         declined=declined,
+        held_choices=held_choices,
         rules=rules,
         rules_shared=rules_shared,
         rule_settings=rule_settings,

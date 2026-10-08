@@ -30,12 +30,15 @@ from page_dom import parse
 #: (`test_entity_page_speed` holds that case). Where the two extra come from was not
 #: investigated. The bound stays two above the larger.
 #:
-#: Declared external accounts add one select (`Store.external_identifiers`) to every page that
+#: Declared external accounts add one select (`Store.declared_identifiers`) to every page that
 #: names rows, which took the with-a-rule case to 26 beside the learned lines' refusal read; the
 #: bound is raised by that one statement, not reworked, since it does not grow with the store.
 #: Measured 27 once the learned rules' settings and ticks were read
 #: (`Store.preferences_with_prefix`, one select, not growing with the rules or the store).
-ENTITIES_STATEMENTS = 27
+#: Measured 29 once the held accounts a number can be pinned on were listed
+#: (`Store.held_account_refs`) and the first row of each account was read to say why a transfer
+#: has no other leg (`overview.first_row_dates`): two selects, neither growing with the store.
+ENTITIES_STATEMENTS = 29
 SECONDS = 5.0
 
 

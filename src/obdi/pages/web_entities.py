@@ -18,6 +18,7 @@ from __future__ import annotations
 import html
 from collections import Counter
 from collections.abc import Sequence
+from datetime import date
 from typing import TYPE_CHECKING
 from urllib.parse import quote
 
@@ -76,6 +77,7 @@ FOLD_ROUTE = "/entities-fold"
 CHILD_ROUTE = "/entities-child"
 NEW_ROUTE = "/entities-new"
 EXTERNAL_ROUTE = "/entities-external"
+HELD_ROUTE = "/entities-held"
 NOT_EXTERNAL_ROUTE = "/entities-not-external"
 OFFER_AGAIN_ROUTE = "/entities-offer-again"
 #: Where one entity's page is (`web_entity`); the name of each entity here links to it.
@@ -205,14 +207,15 @@ def _across(names: int, transactions: int) -> str:
     return f"{plural(transactions, 'transaction')} across {plural(names, 'name')}"
 
 
-def _ledger_address(covered: Covered) -> str:
-    """Where the ledger lists the row: its account's month, at the row's own key, the way a
+def _ledger_address_of(account: str, day: date, anchor: str) -> str:
+    """Where the ledger lists a row: its account's month, at the row's own key, the way a
     transfer's other leg is linked (`web_ledger._facts_html`)."""
-    month = covered.day.isoformat()[:7]
-    return (
-        f"/ledger?ref={quote(covered.account, safe='')}&month={month}"
-        f"#t-{quote(covered.anchor, safe='')}"
-    )
+    month = day.isoformat()[:7]
+    return f"/ledger?ref={quote(account, safe='')}&month={month}#t-{quote(anchor, safe='')}"
+
+
+def _ledger_address(covered: Covered) -> str:
+    return _ledger_address_of(covered.account, covered.day, covered.anchor)
 
 
 def _covered_row(covered: Covered) -> str:
@@ -220,11 +223,13 @@ def _covered_row(covered: Covered) -> str:
     whole line a link to its row in the ledger."""
     account = AccountShown.named(covered.account, covered.account_label).as_name()
     amount = format_amount(covered.amount_minor, currency=covered.currency)
+    note = f' <span class="muted">; {_esc(covered.note)}</span>' if covered.note else ""
     return (
         f'<li><a class="tap" href="{_esc(_ledger_address(covered))}">'
         f'<span class="mono">{covered.day.isoformat()}</span> {account} '
         f'<span class="mono">{_esc(amount)}</span> '
-        f'<span class="txt">{_esc(covered.description)}</span></a></li>'
+        f'<span class="txt">{_esc(covered.description)}</span></a>'
+        f"{note}</li>"
     )
 
 
@@ -562,7 +567,53 @@ def _child_form(entity: Entity, view: EntitiesView, *, nested: bool) -> str:
     )
 
 
-def _unheld_account(account: UnheldAccount, *, unmasked: bool) -> str:
+def _paid_fold(account: UnheldAccount, *, unmasked: bool) -> str:
+    """The payments an unheld account line counts, newest first, under a closed fold: the day
+    and the source on the masked page, and the account paid from, the description as printed, and
+    the amount beside them on the shown one, each a link to its row in the ledger. The rest are
+    counted, not listed."""
+    if not account.paid:
+        return ""
+    more = account.payments - len(account.paid)
+    tail = f'<li class="muted">and {more:,} more</li>' if more > 0 else ""
+    items = []
+    for paid in account.paid:
+        day = f'<span class="mono">{paid.day.isoformat()}</span> {_esc(paid.source)}'
+        if not unmasked:
+            items.append(f"<li>{day}</li>")
+            continue
+        shown = AccountShown.named(paid.account, paid.account_label).as_name()
+        amount = format_amount(paid.amount_minor, currency=paid.currency)
+        address = _ledger_address_of(paid.account, paid.day, paid.anchor)
+        items.append(
+            f'<li><a class="tap" href="{_esc(address)}">{day} {shown} '
+            f'<span class="mono">{_esc(amount)}</span> '
+            f'<span class="txt">{_esc(paid.description)}</span></a></li>'
+        )
+    return (
+        '<details class="ent-fold"><summary>The payments</summary>'
+        f'<ol class="ent-tx">{"".join(items)}{tail}</ol></details>'
+    )
+
+
+def _held_form(account: UnheldAccount, view: EntitiesView, key: str) -> str:
+    """The press that says a held account is the one this number belongs to: a select of the
+    held accounts the owner has declared, beside the press. Nothing where there are none."""
+    if not view.held_choices:
+        return ""
+    options = "".join(
+        f'<option value="{_esc(ref)}">{_esc(label)}</option>' for ref, label in view.held_choices
+    )
+    return (
+        '<details class="ent-fold"><summary>It is this account</summary>'
+        f'<form method="post" action="{HELD_ROUTE}">{key}'
+        '<div class="ent-name-field"><label><span>Which</span>'
+        f'<select name="held">{options}</select></label>'
+        '<button class="tap" type="submit">It is this account</button></div></form></details>'
+    )
+
+
+def _unheld_account(account: UnheldAccount, view: EntitiesView, *, unmasked: bool) -> str:
     """One account payments state that nothing owns: how many, and the last characters of its
     number, said on the masked page as well as the shown one. The number itself is on neither: a
     press carries `UnheldAccount.key`, and the number is read back from the transactions."""
@@ -570,11 +621,12 @@ def _unheld_account(account: UnheldAccount, *, unmasked: bool) -> str:
         f"{plural(account.payments, 'payment')} to the account ending "
         f"{_esc(account.ending)}"
     )
+    fold = _paid_fold(account, unmasked=unmasked)
     if not unmasked:
-        return f'<li class="ent-unheld">{said}</li>'
+        return f'<li class="ent-unheld">{said}{fold}</li>'
     key = f'<input type="hidden" name="account" value="{_esc(account.key)}">'
     return (
-        f'<li class="ent-unheld">{said}'
+        f'<li class="ent-unheld">{said}{fold}{_held_form(account, view, key)}'
         '<details class="ent-fold"><summary>This account is mine</summary>'
         f'<form method="post" action="{EXTERNAL_ROUTE}">{key}'
         '<div class="ent-name-field"><label><span>Call it</span>'
@@ -593,10 +645,10 @@ def _unheld(view: EntitiesView, *, unmasked: bool) -> str:
     first, rest = view.unheld[:UNHELD_SHOWN], view.unheld[UNHELD_SHOWN:]
     listing = ""
     if first:
-        items = "".join(_unheld_account(a, unmasked=unmasked) for a in first)
+        items = "".join(_unheld_account(a, view, unmasked=unmasked) for a in first)
         listing = f'<ul class="ent-names">{items}</ul>'
     if rest:
-        more = "".join(_unheld_account(a, unmasked=unmasked) for a in rest)
+        more = "".join(_unheld_account(a, view, unmasked=unmasked) for a in rest)
         listing += (
             '<details class="ent-more ent-unheld-more">'
             f'<summary>{plural(len(rest), "more account")}</summary>'
@@ -613,9 +665,13 @@ def _unheld(view: EntitiesView, *, unmasked: bool) -> str:
             )
     return (
         "<h2>Payments to accounts not held here</h2>"
-        '<p class="ent-why">These payments state an account number that none of the accounts held '
-        "here has. Where it is your own account at another bank, or a pot not fed to this page, "
-        "say so and its payments are shown as transfers to it.</p>" + listing + declined
+        '<p class="ent-why">Each line is a sort code and account number the other side\'s '
+        "source stated (a UK IBAN is read as the same, another IBAN is kept as it is), never a "
+        "card number, \"ending\" is the last four digits of the account number, and none of the "
+        "accounts held here has been told it; where it is your own account, held here or "
+        "elsewhere, say so and its payments are shown as transfers to it.</p>"
+        + listing
+        + declined
     )
 
 

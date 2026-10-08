@@ -26,6 +26,33 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.389] - 2026-10-08
+
+Payments to an account of the owner's that obdi holds, schema 33 (32 is in build).
+
+### Added
+- **"It is this account" on the Entities page.** An account whose source never
+  states its own number could only ever be recognised through a confirmed
+  transfer pair, so its payments sat under "not held here" as if foreign, with
+  only a text box to name them. Each line now has a select of the held accounts
+  and a press that pins the number on one; every payment stating it then reads as
+  a transfer to that account, paired or not. An account answers to many numbers
+  (`account_identifiers`), because a sort-code migration or a merger gives one
+  balance history a second.
+- **A fold under each line lists its payments**, newest ten and "and N more",
+  masked by default, from rows the page already read.
+- **The account's edit page keeps its numbers**, including a card's last four
+  digits with the owner's dates (a card replaced, a network switched); a card is
+  kept as the record and joins no payment.
+- **A transfer with no other leg says why**: when the account it went to has no
+  rows that early, the row says when that account's rows begin, and no leg is
+  invented.
+
+### Changed
+- `Store.external_identifiers` is `declared_identifiers` and returns every
+  account's numbers, held or external. The Entities page costs two more
+  statements and the entity page one, recorded beside their bounds.
+
 ## [0.4.388] - 2026-10-08
 
 0.4.387 was tagged and its build failed, so it has no image; this version carries 0.4.387's

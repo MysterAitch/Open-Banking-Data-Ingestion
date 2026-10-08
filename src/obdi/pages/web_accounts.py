@@ -49,6 +49,7 @@ from ..ingest.accounts import (
     UnknownAccountError,
     closing_problem,
 )
+from ..ingest.identifier_records import ACCOUNT, IdentifierEntry
 from ..ingest.rebuild_hold import RebuildInProgress
 from ..ingest.spaces import FINAL_MOVEMENTS_MEANING
 from ..read.account_about import Window, windows_in_order
@@ -903,6 +904,56 @@ def accounts_page(
     )
 
 
+def identifiers_section(
+    ref: str,
+    entries: Iterable[IdentifierEntry],
+    seen: Mapping[str, tuple[date, date]],
+) -> str:
+    """The numbers the account answers to, and the form that adds one.
+
+    Only the last four digits of a number are ever printed, whoever is looking: the page never
+    needs the whole of one, and the add form is blank. `seen` is the first and last day payments
+    state each account number (`Store.identifier_sightings`), beside the owner's own dates."""
+    rows = []
+    for entry in entries:
+        words = "account number" if entry.kind == ACCOUNT else "card"
+        span = ""
+        if entry.valid_from or entry.valid_to:
+            span = (
+                f", {('from ' + entry.valid_from.isoformat()) if entry.valid_from else ''}"
+                f"{' ' if entry.valid_from and entry.valid_to else ''}"
+                f"{('to ' + entry.valid_to.isoformat()) if entry.valid_to else ''}"
+            )
+        evidence = ""
+        if entry.kind == ACCOUNT and entry.value in seen:
+            first, last = seen[entry.value]
+            evidence = f", stated by payments from {first.isoformat()} to {last.isoformat()}"
+        rows.append(
+            f"<li>{words} ending <code>{html.escape(entry.value[-4:])}</code>{span}{evidence}"
+            ", declared"
+            '<form method="post" action="/remove-account-identifier">'
+            f'<input type="hidden" name="ref" value="{html.escape(ref)}">'
+            f'<input type="hidden" name="entry" value="{entry.id}">'
+            '<button class="tap secondary" type="submit">Remove</button></form></li>'
+        )
+    listing = f'<ul class="ent-names">{"".join(rows)}</ul>' if rows else ""
+    return (
+        "<h2>Identifiers</h2>"
+        '<p class="ent-why">The numbers this account answers to: a payment that states one is '
+        "a transfer to it. A card's last four is kept as the record; nothing is matched by it "
+        "yet.</p>"
+        f"{listing}"
+        '<form method="post" action="/add-account-identifier">'
+        f'<input type="hidden" name="ref" value="{html.escape(ref)}">'
+        '<label>Kind<select name="kind"><option value="account">Sort code and account number, '
+        'or IBAN</option><option value="card">Card, last four digits</option></select></label>'
+        '<label>Number<input name="value" autocomplete="off" required></label>'
+        '<label>In use from<input name="valid_from" placeholder="YYYY-MM-DD"></label>'
+        '<label>In use to<input name="valid_to" placeholder="YYYY-MM-DD"></label>'
+        '<button class="tap" type="submit">Add</button></form>'
+    )
+
+
 def refusal(title: str, message: str, extra: str = "") -> bytes:
     return render_page(
         title, f'<p class="bad">{html.escape(message)}</p>{extra}{BACK_LINKS}'
@@ -1506,7 +1557,7 @@ class AccountPages(AnswerPages):
             ),
         )
 
-    def _edit_account_form(self, params: dict[str, list[str]]) -> None:
+    def _edit_account_form(self, params: dict[str, list[str]], said: str = "") -> None:
         ref = (params.get("ref", [""])[0] or "").strip()
         declared = self.declared_accounts()
         record = next((r for r in declared if str(r.ref) == ref), None)
@@ -1519,17 +1570,48 @@ class AccountPages(AnswerPages):
                 ),
             )
             return
+        view = self.bound_config.account_identifier_view
+        entries, seen = view(ref) if view is not None else ([], {})
         self._respond(
             200,
             render_page(
                 f"Edit {record.label or record.ref}",
-                "<p>Every field can change, including both names. The "
+                (f'<p class="ent-why">{html.escape(said)}</p>' if said else "")
+                + "<p>Every field can change, including both names. The "
                 "account's identity is not one of them: it was minted once "
                 "and stays put, which is what makes renaming safe.</p>"
                 + account_form(record, declared)
+                + (identifiers_section(ref, entries, seen) if view is not None else "")
                 + BACK_LINKS,
             ),
         )
+
+    def _identifier_press(self, form: dict[str, list[str]], *, adding: bool) -> None:
+        """Add a number to an account, or take one off, and show the account's edit page with
+        what was done said above it. Refused, writing nothing, with the sentence the store gives."""
+        add, remove = self.bound_config.add_identifier, self.bound_config.remove_identifier
+        if add is None or remove is None:
+            self._respond(404, refusal("Not available", "Identifiers are not wired."))
+            return
+        fields = {name: values[0].strip() for name, values in form.items() if values}
+        ref = fields.get("ref", "")
+        try:
+            if adding:
+                added = add(
+                    ref,
+                    fields.get("kind", ""),
+                    fields.get("value", ""),
+                    fields.get("valid_from", ""),
+                    fields.get("valid_to", ""),
+                )
+                said = "Added." if added else "The account already has that; nothing changed."
+            else:
+                gone = remove(ref, int(fields.get("entry", "0") or 0))
+                said = "Removed." if gone else "That number is not on the account."
+        except (DataError, ValueError) as exc:
+            self._respond(400, refusal("Not changed", str(exc)))
+            return
+        self._edit_account_form({"ref": [ref]}, said)
 
     def _save_account(self, form: dict[str, list[str]]) -> None:
         """Declare a new account, or edit one already declared.

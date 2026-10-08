@@ -91,6 +91,7 @@ from ..ingest.asked_coverage import Hole, describe_spans
 from ..ingest.attended_fetch import PRESS_KIND, PressRefused
 from ..ingest.connections import ConnectionStore, build_connection
 from ..ingest.doctor import shape_problems
+from ..ingest.identifier_records import IdentifierEntry
 from ..ingest.pipeline import MatcherPreview
 from ..ingest.providers.truelayer import build_auth_link, exchange_code
 from ..ingest.space_binding import NOTHING_TO_DO, RETRY_NOTE, WHAT_HAPPENS_NEXT, SpacesPress
@@ -961,6 +962,15 @@ class WebConfig:
     #: Bring in page says of when each bank last answered.
     connection_last_answered: Callable[[], dict[str, str]] | None = None
     declare_account: Callable[[AccountRecord], AccountRecord] | None = None
+    #: The numbers an account answers to, for its edit page: what was declared, and the first and
+    #: last day payments state each account number. Add one (account, kind, value, valid from,
+    #: valid to as typed; whether it was new) and remove one (account, entry); both refuse with a
+    #: `DataError` that says why.
+    account_identifier_view: (
+        Callable[[str], tuple[list[IdentifierEntry], dict[str, tuple[date, date]]]] | None
+    ) = None
+    add_identifier: Callable[[str, str, str, str, str], bool] | None = None
+    remove_identifier: Callable[[str, int], bool] | None = None
     #: Every account obdi holds, declared or not, with the parent changes the
     #: provider's structure would make. Reads only; names, kinds, and counts.
     known_accounts: Callable[[], tuple[KnownAccounts, ParentPlan]] | None = None
@@ -6535,6 +6545,9 @@ class ConnectionHandler(
         if route == "/entities-external":
             self._entities_press_post(entity_actions.DECLARE_EXTERNAL)
             return
+        if route == "/entities-held":
+            self._entities_press_post(entity_actions.IDENTIFY_HELD)
+            return
         if route == "/entities-not-external":
             self._entities_press_post(entity_actions.NOT_EXTERNAL)
             return
@@ -6613,6 +6626,12 @@ class ConnectionHandler(
 
         if route == "/save-account":
             self._save_account(self._read_form())
+            return
+        if route == "/add-account-identifier":
+            self._identifier_press(self._read_form(), adding=True)
+            return
+        if route == "/remove-account-identifier":
+            self._identifier_press(self._read_form(), adding=False)
             return
         if route == "/archive-account":
             self._archive_account(self._read_form())
