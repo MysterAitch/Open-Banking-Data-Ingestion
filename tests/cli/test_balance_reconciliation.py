@@ -32,15 +32,13 @@ import pytest
 from landing import rebuild_from_raw
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.family_anchors import chain_ends
 from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import starling, truelayer
 from obdi.ingest.store import Store
 from obdi.pages.web import AuthorisationSession, ConnectionHandler, WebConfig
-from obdi.verify.balance_reconciliation import (
-    _chain_ends,
-    balance_reconciliation,
-)
+from obdi.verify.balance_reconciliation import balance_reconciliation
 
 ACCOUNT = "truelayer:tl-1"
 
@@ -241,23 +239,23 @@ class TestADayThatCannotBeResolved:
     def test_ChainEnds_WhenTwoSeparatePiecesLeaveOneEndEach_IsAmbiguous(self):
         """(10,20) is a chain. (50,60),(60,50) is a separate loop. Counting
         ends alone would read this as one chain from 10 to 20."""
-        opening, closing, why = _chain_ends([(10, 20), (50, 60), (60, 50)])
+        opening, closing, why = chain_ends([(10, 20), (50, 60), (60, 50)])
 
         assert (opening, closing) == (None, None)
         assert "2 separate chains" in why
 
     def test_ChainEnds_WhenOneRecordIsHeldTwice_IsAmbiguousWithTwoOfEachEnd(self):
         """The same pair twice is connected, yet two chains could start at 10."""
-        opening, closing, why = _chain_ends([(10, 20), (10, 20)])
+        opening, closing, why = chain_ends([(10, 20), (10, 20)])
 
         assert (opening, closing) == (None, None)
         assert why == "2 candidate openings and 2 candidate closings"
 
     def test_ChainEnds_WhenOneChain_NamesBothEnds(self):
-        assert _chain_ends([(10, 20), (20, 35)]) == (10, 35, "")
+        assert chain_ends([(10, 20), (20, 35)]) == (10, 35, "")
 
     def test_ChainEnds_WhenTheOnlyMovementIsZero_OpeningEqualsClosing(self):
-        assert _chain_ends([(70, 70)]) == (70, 70, "")
+        assert chain_ends([(70, 70)]) == (70, 70, "")
 
 
 class TestAFaultIsLocalised:

@@ -68,7 +68,7 @@ from __future__ import annotations
 import json
 import sys
 from bisect import bisect_right
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -76,7 +76,6 @@ from itertools import accumulate, pairwise
 from urllib.parse import parse_qs, urlparse
 
 from ..core.models import Transaction
-from ..verify.balance_reconciliation import _chain_ends
 from .accounts import AccountMap
 from .parsers.uk_banks import StarlingCsvParser
 from .providers.starling import round_up_of
@@ -571,6 +570,49 @@ def export_sequence(rows: Sequence[ExportRow]) -> tuple[ExportRow, ...] | None:
     return None
 
 
+def chain_ends(pairs: list[tuple[int, int]]) -> tuple[int | None, int | None, str]:
+    """(opening, closing, why-not) for one day's (before, after) pairs.
+
+    The ends are multiset differences. A single chain also has to be one
+    connected piece: two separate chains that happen to leave one end each
+    would otherwise read as one.
+    """
+    befores = Counter(before for before, _ in pairs)
+    afters = Counter(after for _, after in pairs)
+    openings = befores - afters
+    closings = afters - befores
+
+    parent: dict[int, int] = {}
+
+    def find(node: int) -> int:
+        parent.setdefault(node, node)
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for before, after in pairs:
+        parent[find(before)] = find(after)
+    pieces = len({find(node) for node in parent})
+
+    if pieces > 1:
+        return None, None, f"{pieces} separate chains of balances"
+    if sum(openings.values()) == 1 and sum(closings.values()) == 1:
+        return next(iter(openings)), next(iter(closings)), ""
+    if not openings and not closings:
+        figures = set(befores) | set(afters)
+        if len(figures) == 1:
+            only = next(iter(figures))
+            return only, only, ""
+        return None, None, "closed loop - the balances return to where they began"
+    return (
+        None,
+        None,
+        f"{sum(openings.values())} candidate openings and "
+        f"{sum(closings.values())} candidate closings",
+    )
+
+
 def cut_anchors(
     sequence: Sequence[ExportRow],
 ) -> tuple[tuple[tuple[date, int], ...], int, int]:
@@ -605,7 +647,7 @@ def cut_anchors(
     for row in sequence:
         by_day[row.day].append((row.before_minor, row.after_minor))
     found: dict[date, int] = {}
-    opening, _, _ = _chain_ends(by_day[days[0]])
+    opening, _, _ = chain_ends(by_day[days[0]])
     if sequence[0].day != days[0] or opening is None or opening == sequence[0].before_minor:
         found[days[0] - timedelta(days=1)] = sequence[0].before_minor
     uncut = 0
@@ -616,7 +658,7 @@ def cut_anchors(
             uncut += 1
             continue
         if last.day == day:
-            _, closing, _ = _chain_ends(by_day[day])
+            _, closing, _ = chain_ends(by_day[day])
             if closing is not None and closing != last.after_minor:
                 uncut += 1
                 continue
