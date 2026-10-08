@@ -34,7 +34,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from ..core.models import (
     BASIS_ID,
@@ -1764,13 +1764,48 @@ def supersede(previous: Transaction, observation: Transaction) -> Transaction:
         # it as spending on every pull.
         is_internal_transfer=previous.is_internal_transfer or observation.is_internal_transfer,
         # A later observation may not carry a counterparty the earlier one did.
-        # Losing it would degrade the payee on every replay.
-        counterparty=observation.counterparty or previous.counterparty,
-        # Kept first for the same reason, and each on its own: a statement sighting states
-        # neither, and the feed's stay.
-        party_account=observation.party_account or previous.party_account,
-        party_source_id=observation.party_source_id or previous.party_source_id,
+        # Losing it would degrade the payee on every replay. Each party field is judged on its
+        # own: a statement sighting states none and the feed's stay.
+        counterparty=_party_kept(previous, observation, "counterparty"),
+        party_account=_party_kept(previous, observation, "party_account"),
+        party_source_id=_party_kept(previous, observation, "party_source_id"),
     )
+
+
+#: How far a sighting's party details are to be believed, by the tier it came in on: the feed's
+#: own identifiers over a name or account read off a document, and either over what a person
+#: typed from memory (the same order in which a typed row yields to a reported one,
+#: `pipeline`). Three tiers cannot tell a statement reader from a CSV, so those two are equal
+#: here and the first to state a party keeps it.
+_PARTY_FIDELITY = {
+    SourceTier.AUTHORITATIVE: 2,
+    SourceTier.SYNTHETIC: 1,
+    SourceTier.MANUAL: 0,
+}
+
+
+def _party_kept(
+    previous: Transaction,
+    observation: Transaction,
+    name: Literal["counterparty", "party_account", "party_source_id"],
+) -> str:
+    """One party field of a row folded from two sightings.
+
+    The first sighting that states it fills it, so a statement row that stated no party takes a
+    later CSV's. A later sighting of a HIGHER tier replaces what is held (a feed's merchant name
+    over a layout's guess); an equal or lower one does not, so arrival order cannot make a
+    lesser source overwrite a better one. The tier compared is the held row's, which is the last
+    sighting's, so after a lower-tier sighting is folded the held party is judged as that lower
+    tier's: the one case this cannot see is a higher-tier value held beneath a lower-tier row.
+    """
+    held = getattr(previous, name)
+    offered = getattr(observation, name)
+    if not offered:
+        return str(held)
+    if not held:
+        return str(offered)
+    higher = _PARTY_FIDELITY[observation.tier] > _PARTY_FIDELITY[previous.tier]
+    return str(offered if higher else held)
 
 
 def pair_internal_transfers(
