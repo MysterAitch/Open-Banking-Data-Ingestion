@@ -6458,6 +6458,12 @@ class ConnectionHandler(
         if route == "/entity-parent":
             self._entity_press_post(entity_actions.PARENT)
             return
+        if route == "/entity-link-keep":
+            self._entity_press_post(entity_actions.KEEP_LINK)
+            return
+        if route == "/entity-link-refuse":
+            self._entity_press_post(entity_actions.REFUSE_LINK)
+            return
         if route == "/entity-rule-try":
             self._entity_trial_post()
             return

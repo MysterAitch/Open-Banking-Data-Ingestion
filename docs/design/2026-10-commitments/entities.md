@@ -225,6 +225,19 @@ series).
    Not done: a stated name shared by two PEOPLE who each have their own account is offered like
    a merchant with two ids, since the payments cannot tell them apart; the owner unticks it.
 
+What section 4 learns is SHOWN, never stored. The entity page lists, under each identifier an
+entity holds, the description-shapes the rows now resolve to it (`LearnedLine`: "learned: through
+N payments seen by both", "the description matches exactly", "a truncation"), worked out from
+`learned_links` on every read; storing them would be a second copy of derived state that goes
+stale with the rows, so the `learned` basis stays reserved and written by nothing. Two presses
+settle a line: Keep stores the shape as a declared description identifier (it then survives a
+change in the rows and the series do not move, the rows being already linked), and Not this
+records an exclusion against the entity that `name_rows` applies (`refused_links`), so the rows
+are named by their description again. Rejected for the exclusion: a new table (a schema bump for
+a claim that is already entity-scoped, which `entity_exclusions` holds). Not done: nothing lists
+or undoes a refusal; lines are offered only under identifiers held by hand, not names a rule
+attaches.
+
 Rejected: keeping description-shapes as the identity with better cleaning (three releases
 showed the limit, and the rent case is not a cleaning problem); asking the owner to join a
 party's spellings by hand where a payment seen by two sources already answers it; a single

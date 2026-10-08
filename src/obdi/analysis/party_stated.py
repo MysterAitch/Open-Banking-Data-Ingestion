@@ -22,7 +22,7 @@ from ..ingest.entity_records import DESCRIPTION
 from ..ingest.store import Store
 from ..read.coverage_timeline import AGGREGATOR, EXPORT, FEED, kind_of_source
 from ..read.party_coverage import PartyStated, party_stated
-from .entities import name_rows
+from .entities import name_rows, refused_links
 
 #: The ways in that can carry a stated party where a statement reader states none.
 _CAN_STATE = frozenset({FEED, AGGREGATOR, EXPORT})
@@ -31,7 +31,9 @@ _CAN_STATE = frozenset({FEED, AGGREGATOR, EXPORT})
 def party_stated_by_account(store: Store) -> dict[str, PartyStated]:
     """Every account's `PartyStated`, from one read of the booked transactions."""
     rows = [t for t in store.all_transactions() if t.status is TransactionStatus.BOOKED]
-    _fields, _links, named = name_rows(rows, store.confirmed_transfer_pairs())
+    _fields, _links, named = name_rows(
+        rows, store.confirmed_transfer_pairs(), refused=refused_links(store)
+    )
     held: dict[str, list[tuple[date, bool]]] = defaultdict(list)
     for row, item in zip(rows, named, strict=True):
         held[row.account_id].append((row.value_date, item.kind != DESCRIPTION))

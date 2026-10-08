@@ -42,4 +42,5 @@ ENTITIES_STYLES = """
  .ent-printed { list-style: none; margin: 0; padding: 0; }
  .ent-printed li { display: block; padding: var(--s1) 0; overflow-wrap: anywhere; }
  .ent-rule { font: var(--text-sm)/130% var(--sans); color: var(--ink-2); white-space: nowrap; }
+ .ent-learned { flex: 1 0 100%; order: 8; margin: var(--s1) 0 var(--s2) var(--s3); }
 """

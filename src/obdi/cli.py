@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 
 from .analysis.entities import (
     HELD_PREFIX,
+    Alias,
     Covered,
     EntitiesView,
     EntityPage,
@@ -35,6 +36,7 @@ from .analysis.entities import (
     display_names,
     name_origins,
     name_rows,
+    refused_links,
 )
 from .analysis.recurring import RecurringFindings
 from .core.errors import DataError
@@ -3211,8 +3213,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         mark_world_key, name="mark world", epoch=rebuild_epoch
     )
 
+    def party_key(store: Store) -> tuple[object, ...]:
+        """The mark world, and the entities' stamp: a learned link the owner refused names its
+        rows by their description again (`entities.refused_links`)."""
+        return (*mark_world_key(store), *store.entity_stamp())
+
     party_memo: KeyedMemo[dict[str, PartyStated]] = KeyedMemo(
-        mark_world_key, name="party stated", epoch=rebuild_epoch
+        party_key, name="party stated", epoch=rebuild_epoch
     )
 
     def party_stated_all(store: Store) -> dict[str, PartyStated]:
@@ -3905,7 +3912,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             from .analysis.recurring import counts_as_occurrence
 
             occurrences = [t for t in transactions if counts_as_occurrence(t)]
-            _fields, links, named = name_rows(occurrences, pairs)
+            _fields, links, named = name_rows(occurrences, pairs, refused=refused_links(store))
             held_names = {n: o.rows for n, o in name_origins(named).items()}
             gathered = {
                 key: name for key, (_id, name) in shape_entities(store, held_names).items()
@@ -3944,8 +3951,21 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .analysis.recurring import counts_as_occurrence
 
         rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
-        _fields, _links, named = name_rows(rows, store.confirmed_transfer_pairs())
+        _fields, _links, named = name_rows(
+            rows, store.confirmed_transfer_pairs(), refused=refused_links(store)
+        )
         return name_origins(named, [t.source for t in rows])
+
+    def _held_links(store: Store) -> Mapping[str, Alias]:
+        """The links the rows teach now, less those the owner refused: what a press on a learned
+        line is checked against."""
+        from .analysis.recurring import counts_as_occurrence
+
+        rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+        _fields, links, _named = name_rows(
+            rows, store.confirmed_transfer_pairs(), refused=refused_links(store)
+        )
+        return links
 
     def _shape_counts(store: Store) -> dict[str, int]:
         return {n: o.rows for n, o in _held_origins(store).items()}
@@ -3983,7 +4003,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
             names = account_names(store)
-            fields, _links, named = name_rows(rows, store.confirmed_transfer_pairs())
+            fields, _links, named = name_rows(
+                rows, store.confirmed_transfer_pairs(), refused=refused_links(store)
+            )
             listed: dict[str, list[Covered]] = {}
             order = sorted(
                 range(len(rows)),
@@ -4008,12 +4030,20 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
-        from .analysis.entity_actions import CHILD, MERGE, SPLIT, apply_action
+        from .analysis.entity_actions import (
+            CHILD,
+            KEEP_LINK,
+            MERGE,
+            REFUSE_LINK,
+            SPLIT,
+            apply_action,
+        )
 
         with Store(db_path) as store:
             origins = _held_origins(store) if action in (MERGE, SPLIT, CHILD) else {}
             known = {name: origin.rows for name, origin in origins.items()}
-            return apply_action(store, known, action, form, origins=origins)
+            links = _held_links(store) if action in (KEEP_LINK, REFUSE_LINK) else None
+            return apply_action(store, known, action, form, origins=origins, links=links)
 
     def entity_page(entity_id: int) -> EntityPage | None:
         """One entity with every name under it and the newest transactions of each: one
@@ -4023,7 +4053,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
-            fields, _links, named = name_rows(rows, store.confirmed_transfer_pairs())
+            fields, links, named = name_rows(
+                rows, store.confirmed_transfer_pairs(), refused=refused_links(store)
+            )
             origins = name_origins(named, [t.source for t in rows])
             counts = {n: o.rows for n, o in origins.items()}
             entities = entities_of(store, counts)
@@ -4053,6 +4085,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 {shape: tuple(covered) for shape, covered in listed.items()},
                 origins,
                 display_names(fields, named, _held_labels(store, rows, named, names)),
+                links,
             )
 
     def entity_trial(entity_id: int, kind: str, words: str) -> RuleTrial:

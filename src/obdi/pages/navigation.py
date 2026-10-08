@@ -155,6 +155,8 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/entity-rename": "more",
     "/entity-split": "more",
     "/entity-parent": "more",
+    "/entity-link-keep": "more",
+    "/entity-link-refuse": "more",
     "/review-flags-two": "more",
     "/review-flags-one": "more",
     "/review-flags-undo": "more",

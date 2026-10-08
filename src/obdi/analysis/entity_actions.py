@@ -11,8 +11,10 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from ..core.plural import plural
-from ..ingest.entity_records import EntityRefused
+from ..ingest.entity_records import DECLARED, DESCRIPTION, Entity, EntityRefused, Identifier
 from .entities import (
+    Alias,
+    LearnedLine,
     NameOrigin,
     clean_rule,
     detach_shape,
@@ -20,6 +22,7 @@ from .entities import (
     exclude_shape,
     holder_of,
     identifier_for,
+    learned_lines,
     resolve_form_value,
     rule_phrase,
 )
@@ -36,7 +39,13 @@ KEEP_RULE = "keep-rule"
 DROP_RULE = "drop-rule"
 NEW = "new"
 PARENT = "parent"
-ACTIONS = (MERGE, SPLIT, RENAME, FOLD, CHILD, KEEP_RULE, DROP_RULE, NEW, PARENT)
+#: The two presses on a learned line (`entities.LearnedLine`): keep it as a declared description
+#: identifier of the entity, or say it is not so.
+KEEP_LINK = "keep-link"
+REFUSE_LINK = "refuse-link"
+ACTIONS = (
+    MERGE, SPLIT, RENAME, FOLD, CHILD, KEEP_RULE, DROP_RULE, NEW, PARENT, KEEP_LINK, REFUSE_LINK
+)
 
 
 def _one(form: Mapping[str, Sequence[str]], field: str) -> str:
@@ -60,8 +69,12 @@ def apply_action(
     action: str,
     form: Mapping[str, Sequence[str]],
     origins: Mapping[str, NameOrigin] | None = None,
+    links: Mapping[str, Alias] | None = None,
 ) -> str:
     """Do what a press asked and say what was done; `known` is every shape the store holds.
+
+    `links` are the links the rows teach now (`name_rows`), which a press on a learned line is
+    checked against: a line the rows no longer teach is refused, never kept or refused by guess.
 
     A shape the transactions do not hold is refused: the form was made from a page that has since
     changed, or was not made from this page at all, and an entity over a name nothing prints would
@@ -164,7 +177,39 @@ def apply_action(
             raise EntityRefused("There is no such entity; it may have been removed.")
         store.create_empty_entity(_one(form, "name"), parent=int(under) if under else None)
         return f"Made {' '.join(_one(form, 'name').split())}, with no name attached yet."
+    if action in (KEEP_LINK, REFUSE_LINK):
+        pressed, line = _learned_line(store, links or {}, form)
+        if action == REFUSE_LINK:
+            if line.kept:
+                raise EntityRefused("That description is kept; split it apart first.")
+            store.exclude_shape(pressed.id, line.shape)
+            return f"Not this: that description is named by itself, apart from {pressed.name}."
+        if line.kept:
+            raise EntityRefused("That description is already kept.")
+        store.attach_shapes(
+            pressed.id, [Identifier(DESCRIPTION, line.shape, "", DECLARED, line.rows)]
+        )
+        return f"Kept that description for {pressed.name}; it no longer depends on the link."
     raise EntityRefused("That press is not one this page makes.")
+
+
+def _learned_line(
+    store: Store, links: Mapping[str, Alias], form: Mapping[str, Sequence[str]]
+) -> tuple[Entity, LearnedLine]:
+    """The entity and the learned line a press named, found among what the rows teach now."""
+    wanted = _one(form, "entity")
+    shape = _one(form, "shape")
+    entity = next(
+        (e for e in store.entities_with_shapes() if wanted.isdigit() and e.id == int(wanted)), None
+    )
+    if entity is None:
+        raise EntityRefused("There is no such entity; it may have been removed.")
+    line = next((found for found in learned_lines(entity, links) if found.shape == shape), None)
+    if line is None:
+        raise EntityRefused(
+            "The rows no longer teach that description for this entity; reload the page."
+        )
+    return entity, line
 
 
 def _refuse_unknown(shapes: Sequence[str], known: Mapping[str, int]) -> None:

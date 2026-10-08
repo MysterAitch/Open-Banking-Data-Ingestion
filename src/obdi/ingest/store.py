@@ -4716,6 +4716,20 @@ class Store:
             for row in self.connection.execute("SELECT of_entity, shape FROM entity_exclusions")
         }
 
+    def entity_stamp(self) -> tuple[int, int, int, int]:
+        """What identifies the identifiers and exclusions as they stand: how many of each there
+        are and the newest id of each. For a value derived from them that is held between
+        requests (a refused learned link changes how rows are named, `entities.refused_links`),
+        which neither the standing epoch nor the transactions move. Attaching, detaching, and
+        excluding all change one of the four."""
+        row = self.connection.execute(
+            "SELECT (SELECT COUNT(*) FROM entity_exclusions), "
+            "(SELECT COALESCE(MAX(id), 0) FROM entity_exclusions), "
+            "(SELECT COUNT(*) FROM entity_identifiers WHERE detached_at IS NULL), "
+            "(SELECT COALESCE(MAX(id), 0) FROM entity_identifiers)"
+        ).fetchone()
+        return int(row[0]), int(row[1]), int(row[2]), int(row[3])
+
     def add_entity_rule(
         self, entity: int, kind: str, words: str, *, now: datetime | None = None
     ) -> int:

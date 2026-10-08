@@ -899,21 +899,108 @@ def held_counterparts(rows: Sequence[Transaction], pairs: Iterable[tuple[str, st
     return result
 
 
+@dataclass(frozen=True)
+class LearnedLine:
+    """A description-shape that rows now name as a party an entity holds an identifier for: what
+    obdi learned (`learned_links`), shown under that identifier and never stored, since the rows
+    it rests on are the only truth and a stored copy would be a second one that goes stale.
+
+    `kept` is whether the owner has stored the shape as a declared description identifier of the
+    entity (so it keeps naming the entity when the rows change), and `by` is how the link was
+    made (`ALIAS`, `MATCHED_NAME`, or `TRUNCATED_NAME`)."""
+
+    shape: str
+    #: The value of the identifier of the entity the shape is linked to.
+    target: str
+    by: str
+    #: For `ALIAS`: the payments seen by both sources that taught it.
+    rows: int
+    kept: bool = False
+
+
+#: What a learned line says about how it was learned, after "learned: "; the one table the page
+#: reads. `{payments}` is the count of payments seen by both sources.
+LEARNED_SENTENCES: dict[str, str] = {
+    ALIAS: "through {payments} seen by both",
+    MATCHED_NAME: "the description matches exactly",
+    TRUNCATED_NAME: "a truncation",
+}
+
+
+def learned_sentence(line: LearnedLine) -> str:
+    """"learned: through 4 payments seen by both", or "kept" for a line the owner stored."""
+    if line.kept:
+        return "kept"
+    return "learned: " + LEARNED_SENTENCES[line.by].format(payments=plural(line.rows, "payment"))
+
+
+def learned_lines(entity: Entity, links: Mapping[str, Alias]) -> tuple[LearnedLine, ...]:
+    """The shapes the links resolve to a party this entity holds an identifier for, by target and
+    then shape. A shape that IS the party's own name is not a line (it names nothing new), and a
+    name the entity holds only because a rule matches it has none: a press needs an identifier to
+    stand on."""
+    held = {identifier.value for identifier in entity.identifiers}
+    kept = {identifier.value for identifier in entity.identifiers if identifier.kind == DESCRIPTION}
+    return tuple(
+        sorted(
+            (
+                LearnedLine(shape, alias.name, alias.by, alias.rows, kept=shape in kept)
+                for shape, alias in links.items()
+                if alias.name in held
+                and shape != alias.name
+                and not shape.startswith(STATED_PREFIX)
+            ),
+            key=lambda line: (line.target, line.shape),
+        )
+    )
+
+
+def refused_links(store: Store) -> frozenset[tuple[str, str]]:
+    """The learned links the owner said are not so, as (description-shape, name it was linked to).
+
+    A "Not this" press records an exclusion of the shape against the ENTITY whose page it was
+    pressed on (`Store.exclude_shape`; the table is the one a rule's split uses, so no schema
+    moves), and the link refused is that shape's to any name the entity holds an identifier for.
+    It lapses if the entity lets that identifier go, since the claim was about that entity's
+    party. Read only where an exclusion exists: the common case is one cheap query.
+    """
+    exclusions = store.entity_exclusions()
+    if not exclusions:
+        return frozenset()
+    held = {
+        entity.id: {i.value for i in entity.identifiers} for entity in store.entities_with_shapes()
+    }
+    return frozenset(
+        (shape, value) for entity, shape in exclusions for value in held.get(entity, ())
+    )
+
+
 def name_rows(
     rows: Sequence[Transaction],
     pairs: Iterable[tuple[str, str]] = (),
     links: Mapping[str, Alias] | None = None,
+    refused: Collection[tuple[str, str]] = (),
 ) -> tuple[list[Fields], Mapping[str, Alias], list[Named]]:
     """What each held row states about its other party, the links learned from all of them, and
     the name of each: the one place a row becomes a name, so the Entities page and the detector
     cannot disagree. `pairs` is the pairing pass's (leaving, arriving) entity for each proved
-    transfer (`held_counterparts`); `links` is given where the caller has them already."""
+    transfer (`held_counterparts`); `links` is given where the caller has them already, else
+    they are learned here less those the owner `refused` (`refused_links`), whose rows are named
+    by their description again. A caller that names rows without passing what the store refused
+    would disagree with the pages, so every caller that has a store passes it."""
     held = held_counterparts(rows, pairs)
     fields = [
         Fields(r.description, r.counterparty, r.party_account, r.party_source_id, account)
         for r, account in zip(rows, held, strict=True)
     ]
-    learned = learned_links(fields) if links is None else links
+    if links is None:
+        learned: Mapping[str, Alias] = {
+            shape: alias
+            for shape, alias in learned_links(fields).items()
+            if (shape, alias.name) not in refused
+        }
+    else:
+        learned = links
     named = [
         name_of(
             f.description,
@@ -1680,6 +1767,22 @@ class EntityPage:
     #: The counts and newest transactions of the entity's own names, in the form the Entities page
     #: lists them, so a name opens to its transactions the same way on both.
     view: EntitiesView
+    #: The shapes the rows now name as a party the entity holds, with whether each is kept
+    #: (`learned_lines`).
+    learned: tuple[LearnedLine, ...] = ()
+
+    @property
+    def kept_shapes(self) -> frozenset[str]:
+        """The description identifiers the owner stored from a learned line that rows still
+        resolve to a party of the entity: held ahead of the link failing, so no row carries them
+        as a name now and they are not orphans."""
+        return frozenset(line.shape for line in self.learned if line.kept)
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """The names under the entity, less the shapes kept from learned lines, which are lines
+        under a name and not names of their own."""
+        return tuple(s for s in self.entity.shapes if s not in self.kept_shapes)
 
     @property
     def transactions(self) -> int:
@@ -1691,7 +1794,7 @@ class EntityPage:
         the description's shape before rows were named by what a source states, and a row that
         states its counterparty no longer has that shape as its name; such an attachment is
         listed, never dropped, so the owner sees what no longer attaches to anything."""
-        return tuple(s for s in self.entity.shapes if s not in self.view.counts)
+        return tuple(s for s in self.names if s not in self.view.counts)
 
     @property
     def orphaned_identifiers(self) -> tuple[Identifier, ...]:
@@ -1703,8 +1806,11 @@ class EntityPage:
         return tuple(
             identifier
             for identifier in self.entity.identifiers
-            if identifier.value not in self.view.counts
-            or not carried_by(identifier, origins.get(identifier.value) if origins else None)
+            if not (identifier.kind == DESCRIPTION and identifier.value in self.kept_shapes)
+            and (
+                identifier.value not in self.view.counts
+                or not carried_by(identifier, origins.get(identifier.value) if origins else None)
+            )
         )
 
 
@@ -1716,9 +1822,11 @@ def entity_page_of(
     covers: Mapping[str, tuple[Covered, ...]],
     origins: Mapping[str, NameOrigin] | None = None,
     labels: Mapping[str, str] | None = None,
+    links: Mapping[str, Alias] | None = None,
 ) -> EntityPage | None:
     """The page of one entity, or None where no entity not removed has that id. `entities` are
-    resolved (`with_rules`) and `rules` are the live rules of all of them."""
+    resolved (`with_rules`) and `rules` are the live rules of all of them; `links` are the
+    learned links (`name_rows`), from which the page's learned lines are worked out each time."""
     found = next((e for e in entities if e.id == entity_id), None)
     if found is None:
         return None
@@ -1740,6 +1848,7 @@ def entity_page_of(
             origins=origins or {},
             labels=labels or {},
         ),
+        learned=learned_lines(found, links or {}),
     )
 
 

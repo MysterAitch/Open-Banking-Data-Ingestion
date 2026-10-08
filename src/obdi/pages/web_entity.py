@@ -22,9 +22,11 @@ from ..analysis.entities import (
     IDENTIFIER_HEADINGS,
     RULE,
     EntityPage,
+    LearnedLine,
     RuleLine,
     RuleTrial,
     clean_rule,
+    learned_sentence,
     name_shown,
     rule_parts,
     rule_phrase,
@@ -35,6 +37,7 @@ from ..ingest.entity_records import (
     BEGINS,
     CONTAINS,
     DECLARED,
+    DESCRIPTION,
     OWNER_ROLE,
     EntityRefused,
     Identifier,
@@ -67,6 +70,8 @@ RULE_REMOVE_ROUTE = "/entity-rule-remove"
 RENAME_ROUTE = "/entity-rename"
 SPLIT_ROUTE = "/entity-split"
 PARENT_ROUTE = "/entity-parent"
+KEEP_LINK_ROUTE = "/entity-link-keep"
+REFUSE_LINK_ROUTE = "/entity-link-refuse"
 
 _KIND_CHOICES = {BEGINS: "begins with", CONTAINS: "contains, in any order"}
 
@@ -130,10 +135,55 @@ def _basis_tag(identifier: Identifier | None) -> str:
     return f'<span class="muted">{said}{source}</span>'
 
 
+def _link_form(route: str, entity_id: int, shape: str, press: str, *, secondary: bool) -> str:
+    """The press on a learned line: it names the entity and the description-shape, and the
+    analysis checks that the rows still teach the line before it does anything."""
+    style = "tap secondary" if secondary else "tap"
+    return (
+        f'<form method="post" action="{route}">{_hidden(entity_id)}'
+        f'<input type="hidden" name="shape" value="{_esc(shape)}">'
+        f'<button class="{style}" type="submit">{_esc(press)}</button></form>'
+    )
+
+
+def _learned_block(lines: Iterable[LearnedLine], page: EntityPage) -> str:
+    """The descriptions learned for one identifier, each with how it was learned and the presses
+    that settle it: Keep stores it as a declared description of the entity, Not this says the
+    link is not so. A line already kept offers to split it apart again."""
+    items = []
+    for line in lines:
+        if line.kept:
+            presses = split_form(
+                line.shape, page.entity, page.view, SPLIT_ROUTE,
+                extra=_hidden(page.entity.id), kind=DESCRIPTION,
+            )
+        else:
+            presses = _link_form(
+                KEEP_LINK_ROUTE, page.entity.id, line.shape, "Keep", secondary=False
+            ) + _link_form(
+                REFUSE_LINK_ROUTE, page.entity.id, line.shape, "Not this", secondary=True
+            )
+        items.append(
+            f'<li><span class="txt">{_esc(line.shape)}</span>'
+            f'<span class="muted">{_esc(learned_sentence(line))}</span>{presses}</li>'
+        )
+    return f'<div class="ent-learned"><ul class="ent-names">{"".join(items)}</ul></div>'
+
+
+def _learned_counts(page: EntityPage) -> str:
+    """How many descriptions the rows teach for the entity and how many are kept: counts only, so
+    the masked page says it too."""
+    if not page.learned:
+        return ""
+    kept = sum(line.kept for line in page.learned)
+    said = f" {plural(len(page.learned), 'description')} learned for it"
+    return said + (f", {kept:,} kept." if kept else ".")
+
+
 def _names(page: EntityPage, *, unmasked: bool) -> str:
     entity = page.entity
     view = page.view
-    across = _across(len(entity.shapes), page.transactions)
+    across = _across(len(page.names), page.transactions)
     if not entity.shapes:
         return (
             "<h3>Names</h3><p class=\"ent-why\">No name is under it yet. A name joins it when "
@@ -142,14 +192,23 @@ def _names(page: EntityPage, *, unmasked: bool) -> str:
     orphaned = page.orphaned_identifiers
     gone = {(i.kind, i.value) for i in orphaned}
     by_identifier = {(i.kind, i.value): i for i in entity.identifiers}
-    live = [(i.kind, i.value) for i in entity.identifiers if (i.kind, i.value) not in gone]
+    kept = page.kept_shapes
+    live = [
+        (i.kind, i.value)
+        for i in entity.identifiers
+        if (i.kind, i.value) not in gone and not (i.kind == DESCRIPTION and i.value in kept)
+    ]
     live += [(RULE, name) for name in entity.by_rule if name in view.counts]
+    said = f'<p class="ent-why">{across}.{_linked_sentence(view)}{_learned_counts(page)}</p>'
     if not unmasked:
         names = list(dict.fromkeys(value for _kind, value in live))
         return (
-            f'<h3>Names</h3><p class="ent-why">{across}.{_linked_sentence(view)}</p>'
+            f"<h3>Names</h3>{said}"
             f"{_masked_days(names, view)}{_orphans(orphaned, unmasked=False)}"
         )
+    learned: dict[str, list[LearnedLine]] = {}
+    for line in page.learned:
+        learned.setdefault(line.target, []).append(line)
     sections = []
     for kind, values in _by_kind(live):
         lines = "".join(
@@ -157,6 +216,7 @@ def _names(page: EntityPage, *, unmasked: bool) -> str:
             f"{_by_rule_tag(value, entity)}{_basis_tag(by_identifier.get((kind, value)))}"
             f"{_count_or_rows(value, view)}"
             f"{split_form(value, entity, view, SPLIT_ROUTE, extra=_hidden(entity.id), kind=kind)}"
+            f"{_learned_block(learned.pop(value), page) if value in learned else ''}"
             "</li>"
             for value in values
         )
@@ -164,10 +224,7 @@ def _names(page: EntityPage, *, unmasked: bool) -> str:
             f"<h4>{_esc(IDENTIFIER_HEADINGS[kind])}</h4>"
             f'<ul class="ent-names">{lines}</ul>'
         )
-    return (
-        f'<h3>Names</h3><p class="ent-why">{across}.{_linked_sentence(view)}</p>'
-        f"{''.join(sections)}{_orphans(orphaned, unmasked=True)}"
-    )
+    return f"<h3>Names</h3>{said}{''.join(sections)}{_orphans(orphaned, unmasked=True)}"
 
 
 def _orphans(orphaned: tuple[Identifier, ...], *, unmasked: bool) -> str:
