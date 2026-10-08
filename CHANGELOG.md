@@ -26,7 +26,7 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
-## [Unreleased]
+## [0.4.390] - 2026-10-08
 
 ### Changed
 - **The Learned rules section is read at a glance on a phone.** It listed every rule, 118 of them
@@ -62,11 +62,6 @@ transcription would add no reasoning that the subjects do not already carry.
   identifier arrives: agreement is counted and shown on the Entities page as "confirmed by N
   later-identified rows" (shown at zero too), and one disagreement withdraws the rule and says
   so. The check runs when rows have landed, never on a page read.
-- **A company gathered from its locations can be split back into them.** Merging a retailer's
-  branch ids into one entity was the only way to join its series, with no way back short of
-  detaching each id by hand. An entity holding two or more of the bank's own ids now offers
-  "Split into locations": one child entity per id under it, named "<company> location N" by how many
-  payments each has, the commonest staying with the company where it would otherwise hold nothing.
 
 ## [0.4.389] - 2026-10-08
 
