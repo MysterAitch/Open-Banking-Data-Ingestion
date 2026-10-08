@@ -26,6 +26,46 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.378] - 2026-10-08
+
+### Added
+- **An account obdi does not hold can be declared the owner's, and its
+  payments become transfers.** The owner, 2026-10-07: "if the other
+  account (or space) isn't in OBDI then that's a viable reason to have the
+  other party be 'me'" - by a declaration on the account, never by the
+  owner's name in a description. A declared account may now carry its own
+  identifier and be marked external (schema 28; kept across the rebuild,
+  left out of the readers that assume evidence behind an account). The
+  Entities page lists "Payments to accounts not held here" - each account
+  number a source states that no held account owns and no confirmed pair
+  ties, as a count and the number's last four characters only, six rows
+  leading and the rest folded - with "This account is mine" (a one-field
+  label) declaring it, "Not mine" dismissing it (kept as a preference, so
+  the row does not return after every press), and "Offer them again". After
+  the declaration those rows are "your <label>", a transfer, with no
+  proposal; an unpaired leg to a held or external account is now a transfer
+  series rather than a payee series, so an incoming one no longer reads as
+  income. A confirmed pair always outranks a declaration. On the invented
+  store rebuilt from raw, 54 rows state an account, one account is unheld,
+  and declaring it moves 108 rows (its 54, and 54 export rows the stated
+  name links). Predicted for the real store, unmeasured: tens of rows,
+  because the section lists every payee paid by bank transfer, with the
+  owner's own accounts at other banks among the most paid; the refinement
+  is to lead with identifiers that receive money both ways or recur, which
+  is what an account of one's own looks like. Not done: a third press for
+  "this is a held account" that would set that account's identifier; the
+  declared-layer export does not list external accounts; nothing renames
+  or removes one. Three page budgets allow the one select the declared
+  accounts add.
+- **A richer source arriving later fills the party fields.** The owner,
+  2026-10-08, checking the changelog's "identity does not move": that is
+  the row's identity - the content key - and not the party; when a CSV
+  sighting folds onto a payment a PDF row holds, the CSV's counterparty and
+  account fill the row, since each party field takes the first sighting
+  that states it. The refinement recorded for the next build: that is by
+  arrival, not by fidelity, and the fold should let a higher source tier
+  replace a lower one for those fields.
+
 ## [0.4.377] - 2026-10-08
 
 ### Fixed
