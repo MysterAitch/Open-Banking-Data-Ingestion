@@ -26,6 +26,38 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.374] - 2026-10-08
+
+### Changed
+- **An entity holds identifiers with a kind, not bare strings.** Item 3 of
+  `entities.md`: `entity_identifiers` (schema 26) replaces `entity_shapes`,
+  each row a kind from the ladder - a stated name with its source, a
+  description-shape, and (once the rows carry them) an account identifier
+  or a source's own id - with whether the owner declared it or obdi learned
+  it, and its support. Every attachment made before kinds moves across as a
+  declared description identifier. A row links to an entity through the
+  strongest kind it carries that the entity holds, and a row named through
+  a learned, matched, or truncated link links through the party it
+  resolved to; every link says by which kind, from one table of sentences.
+  A merge attaches the kind the ticked name resolved to, never a string of
+  unknown kind; gather, split, fold, and "could belong to" speak
+  identifiers; the series are keyed on name and kind. The entity page lists
+  what an entity is known by under headings by kind, with support and
+  basis, and an account identifier appears only as its ending - a form
+  carries a digest the press resolves, so the number is in no text or
+  attribute. Not done: nothing is written as learned yet, and proposals do
+  not yet say which kind of evidence they rest on (item 4).
+
+### Fixed
+- **Bring in's page went past its budget with the party wants.** 0.4.372
+  listed an export wanted only to state the party like any other file,
+  which gave an account that wanted nothing else a section of its own with
+  a trust line and a strip; on the invented household the page went from
+  3.15 to 3.74 screens. Such exports now sit in one closed fold at the foot,
+  "N exports would state the party for M transactions across K accounts",
+  each row led by the account's name; the heading's count still includes
+  them.
+
 ## [0.4.373] - 2026-10-07
 
 ### Fixed

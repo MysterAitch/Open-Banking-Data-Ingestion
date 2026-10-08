@@ -361,6 +361,9 @@ def _axis_html(today: date) -> str:
 
 
 def _file_html(item: WantedFile, today: date, *, who: str = "") -> str:
+    """`who` is MARKUP already escaped - the account's `as_name()`, which the section headings
+    interpolate the same way - and leads the row where the file is listed away from its
+    account's section."""
     what = "Export" if item.export else "Statement"
     if who:
         what = f"{who} &middot; {what}"
