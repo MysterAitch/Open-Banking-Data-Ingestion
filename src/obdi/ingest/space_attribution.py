@@ -25,7 +25,7 @@ A main-account row is FOLDED into a Space row, and stops counting, when all of:
     whatever else resembles it;
   - it is the same movement as a settled Space row that a source feeding the
     Space sighted, by the cross-source report's own rule
-    (`coverage.same_movement_days`), which is only fit for this because the
+    (`same_movement_days`, below), which is only fit for this because the
     target set is positively known;
   - the rows that could pair up are balanced and can be paired one to one.
     Where candidates cannot be told apart, such as two identical bills in the
@@ -63,9 +63,37 @@ from dataclasses import dataclass
 from datetime import date
 
 from ..core.models import Transaction, TransactionStatus
-from ..verify.coverage import same_movement_days
 from .accounts import AccountMap
 from .store import Store
+
+#: A row the other source filed under a SIBLING account with the same sign is
+#: the same movement seen through a door that disagrees about where it belongs
+#: - a bill paid directly from a savings space appears on the statement as the
+#: main account's spending while the feed holds it in the space.
+SIBLING_SAME_SIGN_WINDOW_DAYS = 2
+
+
+def same_movement_days(
+    amount_minor: int, on: date, other_amount_minor: int, other_on: date
+) -> int | None:
+    """Days apart when two sightings are one movement filed under sibling accounts.
+
+    The single statement of "same payment" across sibling accounts: an equal,
+    same-signed amount within `SIBLING_SAME_SIGN_WINDOW_DAYS`. The report's
+    attribution and the Space fold both call it, so what the report calls
+    explained and what the store counts once cannot drift apart.
+    Description is deliberately not compared: the sources word one payment
+    differently, and the feed's reference is rarely the aggregator's.
+    That is fit for deciding ownership between a main account and its OWN
+    Space, where one-to-one pairing backs it up. It would not be fit across
+    unrelated accounts - two payments of one round figure at two banks on one
+    day match - which is why the fold's target set must be positively known.
+    """
+    if amount_minor != other_amount_minor:
+        return None
+    distance = abs((other_on - on).days)
+    return distance if distance <= SIBLING_SAME_SIGN_WINDOW_DAYS else None
+
 
 _FOLDABLE = (TransactionStatus.BOOKED, TransactionStatus.FOLDED)
 

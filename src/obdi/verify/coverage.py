@@ -30,6 +30,7 @@ from itertools import combinations
 from ..core.models import Transaction
 from ..core.money import format_amount
 from ..core.plural import plural
+from ..ingest.space_attribution import same_movement_days
 
 #: Two sources describing the SAME account may date one movement a day or two
 #: apart (statement value date versus feed settlement). Row matching within the
@@ -42,38 +43,10 @@ WITHIN_ACCOUNT_WINDOW_DAYS = 2
 #: is +/-7), so the display matcher cannot disagree with its own import.
 SETTLEMENT_SKEW_WINDOW_DAYS = 7
 
-#: A row the other source filed under a SIBLING account with the same sign is
-#: the same movement seen through a door that disagrees about where it belongs
-#: - a bill paid directly from a savings space appears on the statement as the
-#: main account's spending while the feed holds it in the space.
-SIBLING_SAME_SIGN_WINDOW_DAYS = 2
-
 #: The statement's main leg of a space top-up pairs with the space's OPPOSITE
 #: leg. Internal moves land same-day, so the window mirrors transfer pairing:
 #: a distant opposite-signed row is coincidence, not evidence.
 SIBLING_OPPOSITE_SIGN_WINDOW_DAYS = 1
-
-
-def same_movement_days(
-    amount_minor: int, on: date, other_amount_minor: int, other_on: date
-) -> int | None:
-    """Days apart when two sightings are one movement filed under sibling accounts.
-
-    The single statement of "same payment" across sibling accounts: an equal,
-    same-signed amount within `SIBLING_SAME_SIGN_WINDOW_DAYS`. The report's
-    attribution and the Space fold both call it, so what the report calls
-    explained and what the store counts once cannot drift apart.
-    Description is deliberately not compared: the sources word one payment
-    differently, and the feed's reference is rarely the aggregator's.
-    That is fit for deciding ownership between a main account and its OWN
-    Space, where one-to-one pairing backs it up. It would not be fit across
-    unrelated accounts - two payments of one round figure at two banks on one
-    day match - which is why the fold's target set must be positively known.
-    """
-    if amount_minor != other_amount_minor:
-        return None
-    distance = abs((other_on - on).days)
-    return distance if distance <= SIBLING_SAME_SIGN_WINDOW_DAYS else None
 
 
 #: How many unexplained rows the flat description prints before summarising.
