@@ -21,6 +21,7 @@ from ..ingest.accounts import (
     LimitWindow,
     RateWindow,
 )
+from ..ingest.ownership_records import OwnerShare
 from ..ingest.statement_terms import AccountReading, account_readings
 from ..ingest.store import Store
 from .account_names import AccountShown, AccountsShown
@@ -90,6 +91,8 @@ class AccountAbout:
     #: read what is declared never looks like one with nothing declared.
     unread: str = ""
     facts: SourceFacts = SourceFacts()
+    #: Who owns the account, as declared (`Store.account_owners`); empty for the owner alone.
+    owners: tuple[OwnerShare, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -139,11 +142,12 @@ def read_about(store: Store, ref: str, names: AccountsShown) -> AccountAbout:
     try:
         record = store.declared_account(AccountRef(ref))
         facts = facts_from_readings(account_readings(store, ref))
+        owners = store.account_owners().get(ref, ())
     except Exception as fault:
         say("account_about.fault", kind=type(fault).__name__)
         return AccountAbout(None, unread="What is declared could not be read just now.")
     parent = names.of(str(record.parent)) if record is not None and record.parent else None
-    return AccountAbout(record, parent, facts=facts)
+    return AccountAbout(record, parent, facts=facts, owners=owners)
 
 
 def _same_rate(first: float, second: float) -> bool:

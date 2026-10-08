@@ -24,6 +24,7 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from ..analysis.ownership import owners_sentence
 from ..core.addresses import account_address
 from ..core.errors import DataError
 from ..core.logs import say
@@ -2975,7 +2976,42 @@ def _archive_html(view: Any, *, archive_wired: bool) -> str:
     return _disclosure("Rename or archive", rename + archive, css="ledger-danger")
 
 
-def _about_html(about: AccountAbout | None, today: date, *, unmasked: bool) -> str:
+def _ownership_html(about: AccountAbout, view: Any, *, unmasked: bool) -> str:
+    """Who owns the account, and the press that shares it or makes it the owner's alone.
+
+    The shares are percentages and so are said on the masked page; the co-owner's name is a
+    person's and is masked there. The form asks for the co-owner's name and the owner's share, the
+    rest being the other's, and carries no value of its own."""
+    said = owners_sentence(about.owners, hide_names=not unmasked)
+    scope = f'<input type="hidden" name="month" value="{_esc(_scope(view))}">'
+    ref = f'<input type="hidden" name="ref" value="{_esc(view.ref)}">'
+    joint = (
+        f'<form method="post" action="/account-ownership">{ref}{scope}'
+        '<input type="hidden" name="action" value="joint">'
+        '<p><label>Shared with <input name="partner" maxlength="120" required></label></p>'
+        '<p><label>Your share, in percent <input name="share" inputmode="numeric" '
+        'size="3" value="50" required></label></p>'
+        + submit_button("Share this account", secondary=True)
+        + "</form>"
+    )
+    sole = (
+        f'<form method="post" action="/account-ownership">{ref}{scope}'
+        '<input type="hidden" name="action" value="sole">'
+        + submit_button("Make it yours alone", secondary=True)
+        + "</form>"
+        if about.owners
+        else ""
+    )
+    return (
+        f'<details class="own-fold"><summary>Owned by {_esc(said)}</summary>'
+        '<p class="muted">Position counts only your share of a shared account: of its balance, '
+        f"and of what leaves it.</p>{joint}{sole}</details>"
+    )
+
+
+def _about_html(
+    about: AccountAbout | None, today: date, *, unmasked: bool, view: Any | None = None
+) -> str:
     """The fold of what is declared of the account and what its sources state; not drawn for a
     page that was given nothing to say it from."""
     if about is None:
@@ -2987,6 +3023,8 @@ def _about_html(about: AccountAbout | None, today: date, *, unmasked: bool) -> s
         if stated
         else declared
     )
+    if view is not None and about.unread == "":
+        body += _ownership_html(about, view, unmasked=unmasked)
     return _disclosure("About this account", body, css="about")
 
 
@@ -3245,7 +3283,7 @@ def render_ledger(
             state_form=not confirming,
             held_said=hold_is_said(reading, hold),
         )
-        + _about_html(about, end, unmasked=unmasked)
+        + _about_html(about, end, unmasked=unmasked, view=view)
         + _locking_html(view, unmasked, all_balances)
         + _how_checked_html(
             view, unmasked, with_counts=view.state == "ok", kept_statements=kept_statements
@@ -3438,6 +3476,35 @@ class LedgerPages(AnswerPages):
             notice=f"Saved: a known balance for the end of {day}. Nothing else changed.",
             no_store=True,
         )
+
+    def _ownership_post(self, form: dict[str, list[str]]) -> None:
+        """Declare an account shared, or the owner's alone, then answer with the MASKED ledger.
+
+        The co-owner's name goes to the hook and no further: the answer says only the share, and
+        the page that follows is the masked one."""
+        hook = self.bound_config.ownership_act
+        if hook is None:
+            self._respond(404, _page("Not available", "Declaring ownership is not wired."))
+            return
+        ref = (form.get("ref", [""])[0] or "").strip()
+        month = (form.get("month", [""])[0] or "").strip()
+        try:
+            said = hook((form.get("action", [""])[0] or "").strip(), form)
+        except DataError as exc:
+            self._anchor_refusal(
+                400, "Ownership not changed", f"Nothing was changed. {exc}", ref=ref
+            )
+            return
+        except Exception as fault:
+            say("ledger.ownership.fault", kind=type(fault).__name__)
+            self._anchor_refusal(
+                500,
+                "Ownership not changed",
+                "Nothing was changed, because of an unexpected fault.",
+                ref=ref,
+            )
+            return
+        self._ledger(ref, month, unmasked=False, notice=said, no_store=True)
 
     def _anchor_remove_post(self, form: dict[str, list[str]]) -> None:
         hook = self.bound_config.anchor_remove

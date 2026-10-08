@@ -3976,14 +3976,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         on = date.fromisoformat(position.as_of)
         with Store(db_path) as store:
             commitments = store.commitments()
+            owners = store.account_owners()
         asks = wants_detector(position, commitments, today=on)
         detected = recurring_data().series if asks else []
-        return build_free(position, commitments, detected, today=on)
+        return build_free(position, commitments, detected, today=on, owners=owners)
 
     def month_inputs_key(store: Store) -> tuple[object, ...]:
         # What the calendar reads beyond the position: the commitments, whose windows the owner
-        # edits, and the transactions the position's own key already follows.
-        return (*position_memo_key(store), repr(store.commitments()))
+        # edits, who owns each account, and the transactions the position's own key already
+        # follows.
+        return (*position_memo_key(store), repr(store.commitments()), repr(store.account_owners()))
 
     def month_inputs() -> tuple[Position, list[Commitment], list[Series], FreeFigures]:
         from .analysis.free_position import build_free
@@ -3992,8 +3994,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         on = date.fromisoformat(position.as_of)
         with Store(db_path) as store:
             commitments = store.commitments()
+            owners = store.account_owners()
         found = recurring_data().series if commitments else []
-        return position, commitments, found, build_free(position, commitments, found, today=on)
+        return (
+            position,
+            commitments,
+            found,
+            build_free(position, commitments, found, today=on, owners=owners),
+        )
 
     month_memo: KeyedMemo[tuple[Position, list[Commitment], list[Series], FreeFigures]] = (
         KeyedMemo(month_inputs_key, name="this month", epoch=rebuild_epoch)
@@ -4026,6 +4034,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 return None
         note = note_of(this_month_data(False))
         return note if note.worth_saying() else None
+
+    def ownership_act(action: str, form: dict[str, list[str]]) -> str:
+        """One press on an account's ownership. The account is checked against the references the
+        store holds, so a press cannot declare ownership of a name nothing holds."""
+        from .analysis.ownership import apply_press
+
+        with Store(db_path) as store:
+            held = [str(record.ref) for record in store.declared_accounts()]
+            return apply_press(store, action, form, accounts=held)
 
     def recurring_act(action: str, form: dict[str, list[str]]) -> str:
         """One press on the Recurring page: the series it names is found again from the
@@ -5071,6 +5088,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         this_month_note=this_month_note,
         home_position=home_position,
         anchor_save=anchor_save,
+        ownership_act=ownership_act,
         anchor_remove=anchor_remove,
         balance_disregard=balance_disregard,
         balance_use_again=balance_use_again,

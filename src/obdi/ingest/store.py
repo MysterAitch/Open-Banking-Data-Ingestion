@@ -70,12 +70,14 @@ from .entity_records import (
     DESCRIPTION,
     IDENTIFIER_BASES,
     IDENTIFIER_KINDS,
+    OWNER_ROLE,
     RULE_KINDS,
     Entity,
     EntityRefused,
     EntityRule,
     Identifier,
 )
+from .ownership_records import WHOLE, OwnerShare, OwnershipRefused
 from .payment_links import stated_link_of
 from .stated_times import recorded_for
 from .stated_words import recorded_words
@@ -173,7 +175,11 @@ from .stated_words import recorded_words
 #: commitments. Declared state, kept across the rebuild from raw.
 #: All are new tables, which `CREATE TABLE IF NOT EXISTS` makes on open, so there is no column
 #: migration; a store stamped 28 would never have grown them.
-SCHEMA_VERSION = 29
+#:
+#: 29 -> 30: the `account_owners` table: which entities own an account and in what shares.
+#: Declared state, kept across the rebuild from raw, and a new table only, so a store stamped 29
+#: would never have grown it.
+SCHEMA_VERSION = 30
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -868,6 +874,20 @@ CREATE TABLE IF NOT EXISTS series_dismissals (
     removed_at   TEXT
 );
 
+-- DECLARED: who owns an account and in what share (`ownership_records.OwnerShare`). One row per
+-- owning entity, `percent` a whole number from 1 to 100, the live rows of an account adding up to
+-- 100. An account with no live row is the owner's alone, so that default is never written.
+-- Replacing an account's ownership stamps the old rows and writes new ones, so what was declared
+-- before stays.
+CREATE TABLE IF NOT EXISTS account_owners (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account     TEXT NOT NULL,
+    entity_id   INTEGER NOT NULL,
+    percent     INTEGER NOT NULL,
+    declared_at TEXT NOT NULL,
+    removed_at  TEXT
+);
+
 -- One row, moved by a trigger on every table whose writes can change an account's standing
 -- (EPOCH_TABLES). The pages that hold a standing between requests key it on this number.
 CREATE TABLE IF NOT EXISTS standing_epoch (
@@ -943,6 +963,11 @@ NOT_STANDING_TABLES: dict[str, str] = {
     "series_dismissals": (
         "the series the owner said are not commitments, read where `commitments` is and for the "
         "same reason"
+    ),
+    "account_owners": (
+        "which entities own an account and in what shares, read by Position to count the owner's "
+        "share of a balance; the balance and what it agrees through are the account's whole, "
+        "whoever owns it"
     ),
     "events": "the outbox of changes to publish, written after the change it describes",
     "fetch_attempts": (
@@ -1038,6 +1063,7 @@ def schema_shape() -> dict[str, list[str]]:
 #: store runs its migrations at all. Derived automatically it would agree with
 #: itself for ever and catch nothing.
 SCHEMA_SHAPE: dict[str, list[str]] = {
+    'account_owners': ['account', 'declared_at', 'entity_id', 'id', 'percent', 'removed_at'],
     'annotations': ['annotated_at', 'entity_id', 'kind', 'provenance', 'value'],
     'artefact_origins': ['account_ref', 'digest', 'first_seen_at', 'origin', 'source'],
     'declared_account_limits': [
@@ -5613,6 +5639,129 @@ class Store:
         )
         self.connection.commit()
 
+    # --- ownership: declared, and kept across the rebuild from raw ---------------------------
+
+    def owner_entity(self, *, now: datetime | None = None) -> int:
+        """The id of the entity that stands for the household owner, made (called "Me") if none
+        exists, and committed. An entity another has the name "Me" is not mistaken for it: only the
+        role says which is the owner."""
+        found = self.connection.execute(
+            "SELECT id FROM entities WHERE role = ? AND removed_at IS NULL ORDER BY id LIMIT 1",
+            (OWNER_ROLE,),
+        ).fetchone()
+        if found is not None:
+            return int(found["id"])
+        name = "Me"
+        taken = {
+            str(row["name"]).casefold()
+            for row in self.connection.execute("SELECT name FROM entities WHERE removed_at IS NULL")
+        }
+        while name.casefold() in taken:
+            name += " (owner)"
+        cursor = self.connection.execute(
+            "INSERT INTO entities (name, created_at, role) VALUES (?, ?, ?)",
+            (name, (now or datetime.now(UTC)).isoformat(), OWNER_ROLE),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid or 0)
+
+    def declare_ownership(
+        self,
+        account: str,
+        shares: Sequence[tuple[int, int]],
+        *,
+        now: datetime | None = None,
+    ) -> None:
+        """Replace who owns `account` with `shares`, (entity id, whole percent) pairs, and commit.
+        Earlier rows are stamped, not deleted.
+
+        Refused, with nothing written, for no account, no shares, an entity that is missing or
+        removed or named twice, a share under 1 or over 100, shares that do not add up to 100, a
+        share of less than 100 held alone, and an ownership the owner entity has no part in (the
+        accounts held here are the household owner's; an account he does not own is not one of
+        them). A sole owner is declared by `clear_ownership`, which writes no row."""
+        if not account:
+            raise OwnershipRefused("Ownership is declared for an account.")
+        if not shares:
+            raise OwnershipRefused("An account has at least one owner.")
+        entities = [entity for entity, _percent in shares]
+        if len(set(entities)) != len(entities):
+            raise OwnershipRefused("An owner is named once; give each owner a single share.")
+        for entity, percent in shares:
+            if not 1 <= percent <= WHOLE:
+                raise OwnershipRefused(
+                    "A share is a whole percentage from 1 to 100; "
+                    "an owner with none is not an owner."
+                )
+            found = self.connection.execute(
+                "SELECT role FROM entities WHERE id = ? AND removed_at IS NULL", (entity,)
+            ).fetchone()
+            if found is None:
+                raise OwnershipRefused("There is no such entity; it may have been removed.")
+        if sum(percent for _entity, percent in shares) != WHOLE:
+            raise OwnershipRefused(f"The shares must add up to {WHOLE} percent.")
+        owner = self.connection.execute(
+            "SELECT id FROM entities WHERE role = ? AND removed_at IS NULL", (OWNER_ROLE,)
+        ).fetchone()
+        if owner is None or int(owner["id"]) not in entities:
+            raise OwnershipRefused("You must be one of an account's owners to hold it here.")
+        stamp = (now or datetime.now(UTC)).isoformat()
+        try:
+            self.connection.execute(
+                "UPDATE account_owners SET removed_at = ? WHERE account = ? AND removed_at IS NULL",
+                (stamp, account),
+            )
+            self.connection.executemany(
+                "INSERT INTO account_owners (account, entity_id, percent, declared_at) "
+                "VALUES (?, ?, ?, ?)",
+                [(account, entity, percent, stamp) for entity, percent in shares],
+            )
+        except BaseException:
+            self.connection.rollback()
+            raise
+        self.connection.commit()
+
+    def entity_named(self, name: str) -> int | None:
+        """The id of the live entity called `name` (case and spacing aside), or None."""
+        wanted = " ".join(name.split()).casefold()
+        if not wanted:
+            return None
+        for row in self.connection.execute(
+            "SELECT id, name FROM entities WHERE removed_at IS NULL ORDER BY id"
+        ):
+            if " ".join(str(row["name"]).split()).casefold() == wanted:
+                return int(row["id"])
+        return None
+
+    def clear_ownership(self, account: str, *, now: datetime | None = None) -> None:
+        """Make `account` the owner's alone again (the default, which is no row), and commit.
+        Nothing is said where nothing was declared."""
+        self.connection.execute(
+            "UPDATE account_owners SET removed_at = ? WHERE account = ? AND removed_at IS NULL",
+            ((now or datetime.now(UTC)).isoformat(), account),
+        )
+        self.connection.commit()
+
+    def account_owners(self) -> dict[str, tuple[OwnerShare, ...]]:
+        """The declared owners of every account that has any, largest share first: one select. An
+        account absent from the answer is the owner's alone."""
+        found: dict[str, list[OwnerShare]] = {}
+        for row in self.connection.execute(
+            "SELECT o.account, o.entity_id, o.percent, e.name, e.role "
+            "FROM account_owners o JOIN entities e ON e.id = o.entity_id "
+            "WHERE o.removed_at IS NULL AND e.removed_at IS NULL "
+            "ORDER BY o.account, o.percent DESC, o.entity_id"
+        ):
+            found.setdefault(str(row["account"]), []).append(
+                OwnerShare(
+                    int(row["entity_id"]),
+                    str(row["name"]),
+                    int(row["percent"]),
+                    row["role"] == OWNER_ROLE,
+                )
+            )
+        return {account: tuple(owners) for account, owners in found.items()}
+
     def _refuse_missing_commitment(self, commitment: int) -> None:
         found = self.connection.execute(
             "SELECT 1 FROM commitments WHERE id = ? AND removed_at IS NULL", (commitment,)
@@ -6037,8 +6186,12 @@ class Store:
         dismissed = self.connection.execute(
             "SELECT COUNT(*) FROM series_dismissals WHERE removed_at IS NULL"
         ).fetchone()[0]
+        owned = self.connection.execute(
+            "SELECT COUNT(DISTINCT account) FROM account_owners WHERE removed_at IS NULL"
+        ).fetchone()[0]
         return {
             "counterparty identifiers gathered into entities": int(gathered),
+            "accounts with a declared ownership": int(owned),
             "entity rules and names split from them": int(ruled),
             "recurring payments confirmed as commitments": int(confirmed),
             "recurring payments said not to be commitments": int(dismissed),

@@ -77,6 +77,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/edit-account": "today",
     "/spaces": "today",
     "/ledger-anchor": "today",
+    "/account-ownership": "today",
     "/ledger-anchor-remove": "today",
     "/ledger-balance-disregard": "today",
     "/ledger-balance-use-again": "today",

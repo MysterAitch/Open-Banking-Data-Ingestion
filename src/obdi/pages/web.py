@@ -839,6 +839,9 @@ class WebConfig:
     #: What Today says of the month - days overdue, accounts short - or None where there is
     #: nothing to say or no commitment is confirmed. Never read for a page other than Today.
     this_month_note: Callable[[], MonthNote | None] | None = None
+    #: One press on an account's ownership (`analysis.ownership.apply_press`): the action and the
+    #: form, answered by a sentence that holds no name; a refusal is an `OwnershipRefused`.
+    ownership_act: Callable[[str, dict[str, list[str]]], str] | None = None
     #: The same position for the home page's masked status line, held while nothing it reads has
     #: changed, so opening the home page does not re-walk every account (`position_data` costs
     #: several statements per account).
@@ -6366,6 +6369,9 @@ class ConnectionHandler(
         if route == "/this-month":
             # A POST because showing values is a decision, not a link.
             self._this_month_post(self._read_form())
+            return
+        if route == "/account-ownership":
+            self._ownership_post(self._read_form())
             return
         if route == "/ledger-anchor":
             self._anchor_save_post(self._read_form())
