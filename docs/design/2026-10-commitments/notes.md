@@ -590,3 +590,9 @@ The rung is `analysis/learned_rules.py` (learning, state, sentences, the setting
    the shape as a description identifier, as Keep does for an alias (it freezes one shape, not the
    claim). Not proven: a kept rule's later behaviour when the rule it came from is withdrawn; it
    stays, being the owner's.
+3. RECURRING BASIS. `Series.inferred` counts the payments named by `LEARNED_RULE`
+   (`_Leg.inferred`); the Recurring line adds ", 8 payments, 4 of them inferred from the
+   description" only when it is non-zero. Found while testing: two sources' rows of the same
+   amount a week apart are folded into one payment by the matcher, so the constructed world uses a
+   penny's difference; a real statement and feed with equal amounts a week apart would fold too,
+   which the rule never sees.

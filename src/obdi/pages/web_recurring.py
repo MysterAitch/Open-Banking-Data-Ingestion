@@ -281,6 +281,11 @@ def _row(line: _Line, names: AccountsShown, today: date, *, unmasked: bool) -> s
     else:
         rhythm = f"{_esc(cadence_words(series))} &middot; {plural(series.count, 'time')} {ending}"
     kind = f"{_esc(series.kind)}, {_esc(series.basis)}"
+    if series.inferred:
+        kind += (
+            f", {plural(series.count, 'payment')}, {series.inferred:,} of them inferred "
+            "from the description"
+        )
     if series.dated_on == DATED_POSTED:
         # Said only where it is not what the reader would assume: a rhythm that is the bank's
         # posting day because that is the one date the source states.

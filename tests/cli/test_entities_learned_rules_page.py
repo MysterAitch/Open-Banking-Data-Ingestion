@@ -21,7 +21,7 @@ two rows) and one printing "MARLOW BAKERY HIGH STREET YORK GB 1".
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
@@ -105,6 +105,65 @@ def counts_line(page: str) -> str:
         for p in elements(parse(page), "p")
         if "At these settings" in p.text()
     )
+
+
+def weekly_world() -> list[Transaction]:
+    """Eight weekly payments at Marlow from 2026-06-01: even weeks by its uid, odd weeks printed
+    by a statement with no identifier, plus the forty other identified rows."""
+    rows = []
+    for week in range(8):
+        day = date(2026, 6, 1) + timedelta(weeks=week)
+        if week % 2 == 0:
+            rows.append(row(day, -450, f"MARLOW BAKERY HIGH STREET {week}", MARLOW))
+        else:
+            # A penny apart: the same amount a week away from a feed row would be folded into it
+            # as one payment seen by two sources, which is not the case being built.
+            rows.append(row(day, -451, f"MARLOW BAKERY HIGH STREET LONDON GB {week}"))
+    rows += [
+        row(date(2026, 2, 1 + n % 27), -1000 - n, f"ZEPHYR WATER BOARD {n}", f"starling:uid-z{n}")
+        for n in range(40)
+    ]
+    return rows
+
+
+@pytest.fixture
+def served_weekly(tmp_path, monkeypatch):
+    db = tmp_path / "store.sqlite3"
+    with Store(db) as store:
+        reconcile_batch(store, weekly_world(), digest="feed")
+    environment(monkeypatch, tmp_path)
+    config = build_web_config(db)
+    assert config is not None
+    base, stop = serve_config(config)
+    yield base
+    stop()
+
+
+def kinds_on_recurring(base: str) -> list[str]:
+    page = httpx.get(f"{base}/recurring", timeout=60).text
+    return [
+        " ".join(n.text().split())
+        for n in elements(parse(page), "span")
+        if "recur-kind" in n.classes
+    ]
+
+
+class TestARecurringSeriesBuiltOnInferredRows:
+    def test_WhenTheRuleIsOnlyOffered_TheSeriesIsNotJoinedAndSaysNothingInferred(
+        self, served_weekly
+    ):
+        kinds = kinds_on_recurring(served_weekly)
+
+        assert not any("inferred" in kind for kind in kinds)
+
+    def test_WhenTheRuleApplies_TheEightPaymentsAreOneSeriesAndFourAreSaidToBeInferred(
+        self, served_weekly
+    ):
+        press(served_weekly, "/entities-rule-settings", support="2", confidence="40")
+
+        kinds = kinds_on_recurring(served_weekly)
+
+        assert any("8 payments, 4 of them inferred from the description" in k for k in kinds), kinds
 
 
 class TestAnOfferedRule:

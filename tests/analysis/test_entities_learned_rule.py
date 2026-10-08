@@ -338,6 +338,8 @@ class TestTheSeries:
         marlow = [s for s in found if s.count > 4]
         assert [n.kind for n in named[4:8]] == [LEARNED_RULE] * 4
         assert [(s.cadence, s.count) for s in marlow] == [("weekly", 8)]
+        assert [s.inferred for s in marlow] == [4], "four of the eight rest on the inference"
+        assert all(s.inferred == 0 for s in found if s.count <= 4)
 
     def test_SeriesBuiltOnInferredRows_WhenTheRuleIsOnlyOffered_StaysTwoHalves(self):
         today = date(2026, 10, 7)
