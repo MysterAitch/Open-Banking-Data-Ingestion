@@ -31,7 +31,9 @@ PLAIN_HELD_STATEMENTS = 20
 #: A first GET with one outgoing commitment confirmed: the position, the commitments, and the
 #: detector once. Measured 839 (1.4 s), fifteen more than the plain page, which does not grow
 #: with the commitments or the series.
-DETECTED_FIRST_STATEMENTS = 850
+#: Measured 852 once the declared ownerships and receivables were read too (two selects, again not
+#: growing with either), so the bound is 855.
+DETECTED_FIRST_STATEMENTS = 855
 #: The same GET again, everything held. Measured 14; the month ahead is the same 14, since it is
 #: built from the held inputs.
 DETECTED_HELD_STATEMENTS = 20

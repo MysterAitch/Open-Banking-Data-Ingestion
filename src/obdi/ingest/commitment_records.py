@@ -81,6 +81,70 @@ class Dismissal:
 
 
 @dataclass(frozen=True)
+class Leg:
+    """One step of how a commitment's money moves: from one end to the other, an amount or a share
+    of the window's amount, by a day of the month.
+
+    An END is a held account (`*_account`, a reference the registry holds) or an entity
+    (`*_entity`), or both are empty. A leg with a held account at one end only is CHECKED against
+    that account's transactions, the entity at the other end being who the money was paid to or
+    came from; a leg with a held account at both ends is a move between the household's own
+    accounts (money stashed in a space); a leg with no held account at either end is EXTERNAL
+    (a partner paying the landlord directly) and is a fact declared, never checked and never
+    reported. A leg whose money arrives in a held account from somewhere else is INCOMING: a
+    receivable until it arrives.
+
+    The leg is due by `day` of the month `months_before` (0 or 1) before the one the commitment's
+    occurrence falls in, and may arrive up to `tolerance_days` after it before it is missing. Its
+    amount is `amount_minor` or `share_percent` of the window's, whichever is declared."""
+
+    id: int
+    commitment_id: int
+    position: int
+    from_account: str
+    to_account: str
+    from_entity: int | None
+    to_entity: int | None
+    amount_minor: int | None
+    share_percent: int | None
+    day: int
+    months_before: int
+    tolerance_days: int
+    label: str
+
+    @property
+    def incoming(self) -> bool:
+        """Money arriving in a held account from outside the household's accounts."""
+        return bool(self.to_account) and not self.from_account
+
+    @property
+    def external(self) -> bool:
+        """Neither end is a held account: declared, never checked."""
+        return not self.from_account and not self.to_account
+
+    @property
+    def between_accounts(self) -> bool:
+        """Both ends are held accounts: a move within the household (a stash in a space)."""
+        return bool(self.from_account) and bool(self.to_account)
+
+    @property
+    def held_account(self) -> str:
+        """The held account whose transactions show the leg: where the money leaves if it leaves
+        a held account, else where it arrives. Empty for an external leg."""
+        return self.from_account or self.to_account
+
+    @property
+    def party(self) -> int | None:
+        """The entity at the end that is not a held account, whose payments (or receipts) the
+        leg is matched by; None where there is none (a move between two held accounts)."""
+        return self.from_entity if self.incoming else self.to_entity
+
+
+#: The most days after its day a leg may be declared to arrive before it is missing.
+LEG_TOLERANCE_MAX = 14
+
+
+@dataclass(frozen=True)
 class Commitment:
     """One commitment not removed, with all its windows, oldest first.
 
@@ -98,6 +162,9 @@ class Commitment:
     direction: str
     created_at: str
     windows: tuple[Window, ...]
+    #: How the money moves, step by step (`Leg`), in the order declared; empty for a commitment
+    #: that is one payment from its account.
+    legs: tuple[Leg, ...] = ()
 
     @property
     def current(self) -> Window | None:

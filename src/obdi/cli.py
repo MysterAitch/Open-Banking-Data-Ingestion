@@ -34,15 +34,17 @@ from .analysis.entities import (
     NameOrigin,
     RuleTrial,
     display_names,
+    entity_of,
     name_origins,
     name_rows,
     refused_links,
 )
 from .analysis.external_accounts import dismissed_keys, unheld_accounts
+from .analysis.flows import FlowReading
 from .analysis.free_position import DeclaredLimit, FreeFigures
 from .analysis.goals import GoalsView
 from .analysis.learned_rules import rule_policy
-from .analysis.recurring import RecurringFindings, Series
+from .analysis.recurring import Mover, RecurringFindings, Series
 from .analysis.rule_confirmation import confirm_inferred
 from .analysis.this_month import MonthNote, ThisMonth
 from .core.errors import DataError
@@ -110,7 +112,7 @@ from .ingest.store import Store, StoreIsNewer, request_meta_and_provenance
 from .ingest.valuations import Asset, AssetKind, record_observation
 from .pages.web import ExtendableAccount, WebConfig
 from .pages.web import serve as serve_web
-from .read.account_about import facts_from_readings, read_about
+from .read.account_about import AccountAbout, facts_from_readings, read_about
 from .read.account_names import AccountsShown, accounts_shown
 from .read.alerts import Finding
 from .read.balance_chart import BalanceChart
@@ -3382,6 +3384,18 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
         return held[key]
 
+    def about_account(store: Store, ref: str, names: AccountsShown) -> AccountAbout:
+        """What the account's About fold says, with what the flows expect of it where a commitment
+        declares a leg that starts or ends there. The flows are read from the month's held inputs
+        (`month_memo`), so an account no leg touches pays one select for the question."""
+        from .analysis.flows import expected_for
+
+        about = read_about(store, ref, names)
+        if not store.account_has_legs(ref):
+            return about
+        flows = month_memo.get(store, month_inputs)[4]
+        return replace(about, expected=expected_for(ref, flows))
+
     def ledger_data(ref: str, month: str, window: LedgerWindow | None = None) -> Ledger:
         from .read.ledger import build_ledger
 
@@ -3411,7 +3425,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     standing=None,
                     protection=None,
                     rebuilding=hold.sentence(),
-                    about=read_about(store, ref, names) if built.state != "unknown" else None,
+                    about=about_account(store, ref, names) if built.state != "unknown" else None,
                 )
             built = build_ledger(
                 store,
@@ -3429,7 +3443,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
             if built.state == "unknown":
                 return built
-            return replace(built, about=read_about(store, ref, names))
+            return replace(built, about=about_account(store, ref, names))
 
     def balance_chart_data(ref: str) -> BalanceChart:
         from .read.balance_chart import build_balance_chart  # deferred like the other data hooks
@@ -3957,7 +3971,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
             occurrences = [t for t in transactions if counts_as_occurrence(t)]
             external = store.external_identifiers()
-            _fields, links, named = name_rows(
+            row_fields, links, named = name_rows(
                 occurrences,
                 pairs,
                 refused=refused_links(store),
@@ -3971,6 +3985,22 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             external_labels = store.external_labels() if external else {}
             commitments = store.commitments()
             dismissals = store.dismissals()
+            # Every live entity, not only those holding a name: an organisation made to be owed
+            # money has none until payments from it are gathered.
+            entity_names = store.entity_names()
+        movers: list[Mover] = []
+        for row, item, stated in zip(occurrences, named, row_fields, strict=True):
+            linked = entity_of(held_entities, item.kind, item.name) if item.name else None
+            movers.append(
+                Mover(
+                    row.entity_id,
+                    row.account_id,
+                    row.value_date,
+                    row.amount_minor,
+                    linked[1][0] if linked is not None else 0,
+                    stated.held,
+                )
+            )
         closings: dict[str, list[tuple[date, int]]] = {}
         for closing in held:
             owed = (closing.day, closing.balance_minor)
@@ -3986,7 +4016,15 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             external=external,
             entity_ids=entity_ids,
         )
-        return RecurringFindings(found, today, external_labels, commitments, dismissals)
+        return RecurringFindings(
+            found,
+            today,
+            external_labels,
+            commitments,
+            dismissals,
+            movers,
+            entity_names,
+        )
 
     def free_data(position: Position) -> FreeFigures:
         """The Position page's four figures per account. The detector runs only when a confirmed
@@ -3996,20 +4034,44 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .analysis.free_position import build_free, wants_detector
 
         on = date.fromisoformat(position.as_of)
+        from .analysis.flows import has_checked_legs, read_flows
+
         with Store(db_path) as store:
             commitments = store.commitments()
+            owners = store.account_owners()
+            receivables = store.receivables()
             limits = limits_in_force(store, on)
             goals = goals_of(store, position, on)
         asks = wants_detector(position, commitments, today=on)
-        detected = recurring_data().series if asks else []
-        return build_free(
+        # What is owed to the household needs the transactions read once more, for the matcher; a
+        # household with no incoming leg and nothing declared owed pays nothing for it.
+        owes = bool(receivables) or any(
+            leg.incoming for c in commitments for leg in c.legs if not leg.external
+        )
+        findings = recurring_data() if asks or owes else None
+        detected = findings.series if findings is not None and asks else []
+        figures = build_free(
             position,
             commitments,
             detected,
             today=on,
             limits=limits,
+            owners=owners,
             goals_share=goals.share_total if goals else None,
             goals_sharing=goals.sharing if goals else 0,
+        )
+        if findings is None or not (has_checked_legs(commitments) or receivables):
+            return figures
+        flows = read_flows(
+            commitments,
+            findings.movers,
+            findings.entity_names,
+            {str(a.ref): a for a in figures.accounts},
+            on,
+            receivables,
+        )
+        return replace(
+            figures, owed_to_you=flows.owed, owed_to_you_total=flows.owed_total
         )
 
     def goals_of(store: Store, position: Position, on: date) -> GoalsView | None:
@@ -4031,40 +4093,58 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
     def month_inputs_key(store: Store) -> tuple[object, ...]:
         # What the calendar reads beyond the position: the commitments, whose windows the owner
-        # edits, the declared limits a card's free figure is made from, and the transactions the
-        # position's own key already follows.
+        # edits, who owns each account, what is owed back, the declared limits a card's free
+        # figure is made from, the goals, and the transactions the position's own key already
+        # follows.
         return (
             *position_memo_key(store),
             repr(store.commitments()),
+            repr(store.account_owners()),
+            repr(store.receivables()),
             repr(store.declared_limit_windows()),
             repr(store.goals()),
         )
 
-    def month_inputs() -> (
-        tuple[Position, list[Commitment], list[Series], FreeFigures, GoalsView | None]
-    ):
+    def month_inputs() -> tuple[
+        Position, list[Commitment], list[Series], FreeFigures, FlowReading, GoalsView | None
+    ]:
+        from .analysis.flows import NOTHING, has_checked_legs, read_flows
         from .analysis.free_position import build_free
 
         position = home_position()
         on = date.fromisoformat(position.as_of)
         with Store(db_path) as store:
             commitments = store.commitments()
+            owners = store.account_owners()
+            receivables = store.receivables()
             limits = limits_in_force(store, on)
             goals = goals_of(store, position, on)
-        found = recurring_data().series if commitments else []
+        findings = recurring_data() if commitments or receivables else None
+        found = findings.series if findings is not None else []
         free = build_free(
             position,
             commitments,
             found,
             today=on,
             limits=limits,
+            owners=owners,
             goals_share=goals.share_total if goals else None,
             goals_sharing=goals.sharing if goals else 0,
         )
-        return position, commitments, found, free, goals
+        flows = NOTHING
+        if findings is not None and (has_checked_legs(commitments) or receivables):
+            flows = read_flows(
+                commitments,
+                findings.movers,
+                findings.entity_names,
+                {str(a.ref): a for a in free.accounts},
+                on,
+                receivables,
+            )
+        return position, commitments, found, free, flows, goals
 
     month_memo: KeyedMemo[
-        tuple[Position, list[Commitment], list[Series], FreeFigures, GoalsView | None]
+        tuple[Position, list[Commitment], list[Series], FreeFigures, FlowReading, GoalsView | None]
     ] = KeyedMemo(month_inputs_key, name="this month", epoch=rebuild_epoch)
 
     def this_month_data(ahead: bool) -> ThisMonth:
@@ -4074,7 +4154,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .analysis.this_month import build_this_month
 
         with Store(db_path) as store:
-            position, commitments, found, free, goals = month_memo.get(store, month_inputs)
+            position, commitments, found, free, flows, goals = month_memo.get(
+                store, month_inputs
+            )
         return build_this_month(
             position,
             commitments,
@@ -4082,6 +4164,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             free,
             today=date.fromisoformat(position.as_of),
             ahead=ahead,
+            flows=flows,
             goals=goals,
         )
 
@@ -4091,10 +4174,28 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .analysis.this_month import note_of
 
         with Store(db_path) as store:
-            if not store.commitments():
+            if not store.commitments() and not store.receivables():
                 return None
         note = note_of(this_month_data(False))
         return note if note.worth_saying() else None
+
+    def ownership_act(action: str, form: dict[str, list[str]]) -> str:
+        """One press on an account's ownership. The account is checked against the references the
+        store holds, so a press cannot declare ownership of a name nothing holds."""
+        from .analysis.ownership import apply_press
+
+        with Store(db_path) as store:
+            held = [str(record.ref) for record in store.declared_accounts()]
+            return apply_press(store, action, form, accounts=held)
+
+    def receivable_act(action: str, form: dict[str, list[str]]) -> tuple[str, str, str]:
+        """One press on what is owed back. A declaration finds its transaction again among those
+        held, so a press on a page that has gone stale is refused and never applied to another."""
+        from .analysis.receivable_press import ACT_DECLARE, apply_press
+
+        with Store(db_path) as store:
+            rows = store.all_transactions() if action == ACT_DECLARE else []
+            return apply_press(store, action, form, rows)
 
     def goals_data() -> GoalsView:
         """Where each goal stands against the held position, for the Goals page."""
@@ -5188,6 +5289,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         this_month_note=this_month_note,
         home_position=home_position,
         anchor_save=anchor_save,
+        ownership_act=ownership_act,
+        receivable_act=receivable_act,
         anchor_remove=anchor_remove,
         balance_disregard=balance_disregard,
         balance_use_again=balance_use_again,

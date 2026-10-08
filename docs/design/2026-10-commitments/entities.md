@@ -113,6 +113,26 @@ record with an identifier and an owner), after which those rows are transfers "t
 <name>". The same press serves a space or pot not fed, and a joint account declared later.
 What it must never do is decide from the owner's name being printed in a description.
 
+The owner, 2026-10-08, reading the section on live: the accounts listed as "not held here"
+include accounts obdi already holds, and the page offered only a text field. A held account's
+identifier was known only where a transfer PAIR had shown it; an account whose own source never
+states its number was never recognised. So the section also offers "It is this account" over
+the held accounts, which stores the identifier against that account, and every row stating it
+is then a transfer to it, paired or not. Two consequences he named the same day:
+
+- An account carries MANY identifiers over time - a sort-code migration or a merger gives one
+  balance history a second number ("an account is its numbers, not its brand") - so the store
+  holds one row per identifier per account with first and last seen dates, never one column,
+  and a second press adds rather than refuses. The same number on two accounts is the refusal.
+- Accounts of unequal history give one-legged transfers: X reaching back five years and Y
+  twelve months means a transfer between them in year three has X's leg only. The identifier
+  route names it a transfer to Y regardless (the backfill: once Y's number is known from any
+  later pair or press, every earlier row stating it is named), and the row says why the other
+  leg is absent - "Y's rows begin <date>, so the other leg is not held". obdi never creates the
+  missing leg: Y's balance before its rows begin is unknown, and an invented row would be a
+  claim with no source. A row stating no number at all (a statement printing "Transfer to
+  Savings") is reached only by the learned rule of section 4a, as an inference labelled so.
+
 ### 3b. A richer source arriving later is taken
 
 The owner, 2026-10-08: "where a new data source is introduced with higher credibility/fidelity

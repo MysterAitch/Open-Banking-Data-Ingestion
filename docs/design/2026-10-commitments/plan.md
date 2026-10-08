@@ -829,7 +829,9 @@ how many rows gain a name from how many presses (shapes per entity). Tests: nami
 names its siblings; a source's text is never altered; the masked page shows neither name nor
 variant; a merge of two shapes into one entity joins two series into one history.
 
-**R3. Flows and shares, with the bills space's sum on Today.**
+**R3. Flows and shares, with the bills space's sum on Today.** (**Built 2026-10-08**, see "R3 as
+built" in `notes.md`; the measurement against what the owner actually transfers is NOT yet made, and
+no form declares legs.)
 Build: the entity's OWNS and IS PARTY TO roles - an account's ownership as a declared fact
 (which entities, in what shares; `me` solely by default) and a leg's entities - built here so
 a joint account fits when it arrives (question 7); a commitment's share and its flow as legs,

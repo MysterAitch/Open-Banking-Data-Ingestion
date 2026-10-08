@@ -275,6 +275,22 @@ class _Fit:
 
 
 @dataclass(frozen=True)
+class Mover:
+    """One counted transaction as the leg matcher (`flows`) sees it: where, which day, how much
+    (signed: negative leaves), the entity its other party was gathered under (0 where none), and
+    the household account its other side is where it is a transfer between the household's own
+    accounts (`entities.held_counterparts`, "" otherwise). Read once with the detector's own
+    naming, so the matcher and the detector cannot name one payment two ways."""
+
+    row: str
+    account: str
+    day: date
+    amount_minor: int
+    party: int = 0
+    other: str = ""
+
+
+@dataclass(frozen=True)
 class RecurringFindings:
     """What the detector found, and the day it judged "stopped" against."""
 
@@ -288,6 +304,10 @@ class RecurringFindings:
     commitments: Sequence[Commitment] = ()
     #: The series the owner said are not commitments, which the page folds away and counts.
     dismissals: Sequence[Dismissal] = ()
+    #: Every counted transaction as the leg matcher reads it (`Mover`), and the name of each
+    #: entity by id, so what the detector read once is not read again for the legs.
+    movers: Sequence[Mover] = ()
+    entity_names: Mapping[int, str] = field(default_factory=dict)
 
 
 def tolerance_days(cadence: str) -> int:

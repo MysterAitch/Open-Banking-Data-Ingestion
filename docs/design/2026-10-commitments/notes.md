@@ -392,6 +392,74 @@ reads the held month, so it is as fresh as the position's memo key; the recurrin
 whole-table on the first GET after any change (about 15 statements and a little time on the large
 store, not the 800 of the position); no weekly commitment's phase was tried across a window change.
 
+## R3 as built: ownership, legs, the bills space, and money owed back (schema 31)
+
+Three commits, each gated: A ownership, B legs and the space's sum, C receivables.
+
+**A. Ownership** (`ingest/ownership_records.py`, `analysis/ownership.py`, table `account_owners`). An
+account's owners are declared as whole percentages adding to 100 with the owner entity (role
+`owner`, made on first use, called "Me") among them. No row is the default of "mine alone"
+(`ownership.share_of` is the one place that is decided). `free_position` scales held, owed,
+committed, and free by the owner's share and the held basis leads with "your half of the balance"
+(`share_words`: half, quarter, three quarters, else "40%"). The form is the About fold of the
+account page, posting `/account-ownership`; it declares the owner and one co-owner by name (an
+entity made empty if the name is new). Percentages are not money, so the masked page says them; the
+co-owner's name is masked there. Refused: 0 or 100 for a joint account, shares not adding to 100,
+the owner not among the owners, an account the store does not hold.
+
+**B. Legs** (`commitment_records.Leg`, `analysis/flows.py`, table `commitment_legs`). A leg has an end
+each (a held account or an entity), an amount or a share of the window, a day and whether it falls in
+the month before, and a tolerance (default nil: "by the 30th"). Held at one end only: incoming or
+outgoing; at both: a move between accounts (a stash into a space); at neither: external, never an
+instance, so never checked or reported. The matcher reuses `due_days`, the detector's
+`CHANGE_PERCENT` as the amount window, and the detector's own naming (`recurring.Mover`, built
+beside the series in `recurring_data`): the transaction is on the leg's held account, moves the
+leg's way, and is to or from the leg's entity (or, for a stash, is the confirmed transfer to the
+other account). It may be up to 14 days early and up to 7 after the tolerance; one transaction meets
+one leg, the nearest in time first. A leg is pending until its day and tolerance pass and missing
+after, but only where the account's rows reach past that day; an entity the detector has never
+gathered a name under (or that is gone) is said, not a crash.
+The space's need is the stash of the draw-downs still to come: this month until the 25th, then
+NEXT month alone (the first run of worked example C showed that adding this month's remainder asks
+the space for two months at once). Today's line (sealed amounts, silent when funded), This month's
+"Spaces to fund" and "Not happened", and the account page's Expected fold with the surplus all read
+`FlowReading`, made once with the month inputs (`month_memo`).
+
+**C. Money owed back** (`ingest/receivable_records.py`, `analysis/receivable_press.py`, table
+`receivables`). One press on a ledger row declares "owed by <name>" with an optional label, an amount
+smaller than the payment, and a day; the fields are typed once in a fold above the rows and every
+eligible row's button submits them (a form per row would have added a form to every row of a month).
+The entity is looked up by name and made empty if new, with the answer saying a transfer cannot
+close it until payments from it are gathered under it. It is met by money IN from that entity within
+the amount window on or after the expense, oldest first (`settle_receivables`), never by a
+transaction a leg already used. Closing by hand takes "written off" or "received elsewhere" and a
+reason, both kept. Whether a transfer met it is DERIVED on every read and not stored (the repository's
+rule for derived state: a stored match goes stale under a rebuild); the stored closing is the owner's
+only. "Owed to you" is on This month and Position (all open, legs and transactions alike) and on
+Today only once past the expected day. The label's year is reported as "<label> this year: £N, of
+which £M reimbursed, £K owed" (and written off, when any).
+
+Measured on the large invented store (6,969 transactions, one commitment with two legs and one
+receivable declared): /this-month first GET 848 statements in 3.0 s, held 17; the one incoming leg
+read as missing once and the receivable stayed open; the other leg instances were pending because the
+account's rows do not reach past their days. The account page gained two selects (130 -> 132 on the
+card page). The worked examples (the three-leg rent, the reclaimable coffee) are tests with answers
+written before the first run.
+
+NOT DONE OR NOT PROVEN: no form declares legs, so they exist only through the store; no real store
+was read and the space's computed need has not been set against what the owner actually transfers
+(the plan's measurement); an unpaired stash between two held accounts is never met (a pair or a stated
+account identifier is needed) and reads as missing; a leg has no end date of its own and follows its
+commitment; the surplus is shown above the month's need, not above a month of float (plan question 8);
+a transaction on a joint account is not attributed to either owner; the ledger row says what was
+declared, never that it is still open (the matcher is not run on a ledger page); the label is on the
+receivable only, there is no label on a transaction in general (R6a); only two owners can be declared
+from the page; the owner's share of a card's limit and of a space's balance is scaled like any
+account's but no case of either was tried.
+
+Rejected: a second detector for legs; storing the match of a receivable; a form per ledger row; an
+amount in the answer to a press; counting a space's need for two months at once.
+
 ## Goals as built: debts to clear, funds to build, savings (roadmap item 5, schema 30)
 
 Built 2026-10-08. A declared `goals` table (`ingest/goal_records.py`, `Store.declare_goal`,
@@ -462,11 +530,17 @@ something never agreed to).
 | 0.4.371 (exact-match rung; both dates; per-kind fit) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 866 (777 stated, 89 description, 34 linked, 17 exact) / 99 / 297 / 0 |
 | 0.4.382 (party account and id on the row; the ladder reads them) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 972 (45 account, 651 source id, 207 stated, 69 description, 210 linked, 54 exact) |
 | 0.4.383 (learned-rule rung, SUPPORT 2, CONFIDENCE 300; branches grouped) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 967 (45 account, 651 source id, 207 stated, 64 description; 9,195 transactions identified and 7 inferred; 210 linked) |
+| 0.4.386 (the rules shown with their settings) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 967 (as 383; 7 inferred); at the defaults 118 rules apply, 0 offered unticked, 49 openings shared by two parties |
 | Next release (party account and id on the row; the ladder reads them; own accounts named "your <account>"): PREDICTED, NOT MEASURED | about 62 | 54 / 8 / 0 to 1 | about 47 / 7 / 8 | about 36 (17), falling if the habit returns | 4 | names fall where one person was paid under several spellings and rise where people share a stated name; the net on mostly card spending is small |
 
 0.4.383 on the real store: the learned rule reached 7 transactions and retired 5 description
 names (69 to 64); nothing on Recurring moved, so the habit is still not reached by this rung at
-the default settings. Whether raising CONFIDENCE's population or lowering it changes that is
+the default settings. 0.4.386 showed why: 118 rules are learned and every one clears CONFIDENCE
+300 (the store holds some 9,000 identified rows to test against), yet only 7 description-only
+rows open as any rule does. The rules are plentiful and the statement descriptions do not share
+their openings; raising or lowering the thresholds cannot change that. The join the habit needs
+is between two vocabularies, which only the owner's Keep with the right opening, a declared
+"begins with" rule, or a merge supplies. Whether raising CONFIDENCE's population or lowering it changes that is
 for the owner to try on the settings form once it lands (0.4.384 or after); the page's counts
 line will say how many rules are applied and how many offered. The rung's other measurement -
 rows a later identifier confirms or refutes - is not yet built.
@@ -668,7 +742,7 @@ The rung is `analysis/learned_rules.py` (learning, state, sentences, the setting
    no name is removed). Not built: naming a location from its town; a series test of the split
    (no constructed world was found where the split changes a series, which merging, not splitting,
    is for).
-4. DATA CONFIRMATION (schema 32; 31 is reserved for the ownership tables). `inferred_links`
+4. DATA CONFIRMATION (schema 32, on top of 31's ownership tables). `inferred_links`
    (entity id, party, opening, decided, outcome) is written by `rule_confirmation.confirm_inferred`
    after rows land (the command line's `landing_finishers` wraps `settle`; the `verify` finishers
    cannot reach `analysis`), never on a GET. A pending record whose row has since an identifier OF

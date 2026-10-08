@@ -217,6 +217,8 @@ class TestUnknownRowKindsFallBackToThePlainRow:
             amount="1", review_reason="", send_refusal="", category="", payee="",
             cleared_by=(), feed_at=None, sightings=(), anchor="", balance_after="", booked=None,
             transfer_other_anchor="", transfer_other_month="", transfer_other_label="",
+            owed_state="", owed_expected="", owed_by="", owed_label="", owed_reason="",
+            owed_amount=None,
         )
 
         drawn = _row_html(row, unmasked=False)

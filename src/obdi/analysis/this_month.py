@@ -51,7 +51,8 @@ from ..ingest.commitment_records import Commitment, Window
 from ..read.ledger import Money
 from ..read.position import Position
 from .commitments import match_series
-from .free_position import CURRENCY, AccountFigures, FreeFigures, due_days
+from .flows import MISSING, NOTHING, FlowReading, LegInstance, SpaceNeed
+from .free_position import CURRENCY, AccountFigures, FreeFigures, OwedLine, due_days
 from .goals import GoalsView
 from .recurring import PULLED, Series
 
@@ -110,6 +111,9 @@ class ThisMonth:
     #: The accounts whose funding is judged: those leaving a confirmed outgoing commitment, and
     #: the cards with a declared limit.
     judged: Structural[tuple[str, ...]]
+    #: How the money of commitments with legs moves: the legs that did not happen, the spaces'
+    #: needs, and what is owed to the household (`flows`). Empty where no leg is declared.
+    flows: Structural[FlowReading] = NOTHING
     #: Where each goal stands (`analysis.goals`), or None where none is read. A goal is the
     #: owner's choice and is never added to what is committed.
     goals: Structural[GoalsView | None] = None
@@ -131,9 +135,17 @@ class MonthNote:
     overdue: Structural[int]
     short: Structural[tuple[ShortAccount, ...]]
     unjudged: Structural[int]
+    #: The spaces that do not yet hold what the month asks of them (`flows.SpaceNeed`); a funded
+    #: space is not here, so Today is silent about it.
+    spaces: Structural[tuple[SpaceNeed, ...]] = ()
+    #: The legs that did not happen (`flows.LegInstance`, state missing).
+    missing: Structural[tuple[LegInstance, ...]] = ()
+    #: What is owed to the household and past its day (a thing to do), and what it comes to.
+    owed: Structural[tuple[OwedLine, ...]] = ()
+    owed_total: Total[Money] = NOTHING.owed_total
 
     def worth_saying(self) -> bool:
-        return bool(self.overdue or self.short)
+        return bool(self.overdue or self.short or self.spaces or self.missing or self.owed)
 
 
 def month_bounds(day: date, *, ahead: bool) -> tuple[date, date]:
@@ -261,6 +273,7 @@ def build_this_month(
     *,
     today: date,
     ahead: bool = False,
+    flows: FlowReading = NOTHING,
     goals: GoalsView | None = None,
 ) -> ThisMonth:
     """The calendar of the month of `today` (or the month after, where `ahead`), with Position's
@@ -304,6 +317,7 @@ def build_this_month(
         counts=counts,
         free=free,
         judged=_judged(free, commitments),
+        flows=flows,
         goals=None if ahead else goals,
     )
 
@@ -326,10 +340,16 @@ def is_unjudgeable(account: AccountFigures) -> bool:
 def note_of(month: ThisMonth) -> MonthNote:
     """What Today says of the month, from the same record the page is made from."""
     judged = judged_accounts(month)
+    # Today asks for what has gone past its day; what is merely owed is on the page and Position.
+    late = tuple(line for line in month.flows.owed if line.overdue)
     return MonthNote(
         overdue=month.counts.overdue,
         short=tuple(
             ShortAccount(a.ref, a.label, a.income_on) for a in judged if is_short(a)
         ),
         unjudged=sum(is_unjudgeable(a) for a in judged),
+        spaces=tuple(s for s in month.flows.spaces if not s.funded),
+        missing=tuple(leg for leg in month.flows.legs if leg.state == MISSING),
+        owed=late,
+        owed_total=Money(sum(line.amount.minor for line in late), CURRENCY),
     )
