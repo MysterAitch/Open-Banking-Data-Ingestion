@@ -26,6 +26,56 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.383] - 2026-10-08
+
+### Added
+- **A description-only row can be named by a rule learned from one party's
+  identified rows, as an inference with its evidence stated.** The exact and
+  truncation rungs reached only a statement description that equalled or
+  truncated a feed row's stated name; the real store's habit stayed at 0
+  because the venue's statement months match neither way. The new rung learns,
+  per source id or account, the longest opening every one of its rows'
+  descriptions shares (SUPPORT rows at least, distinctive, never method or
+  function words), tests it against every OTHER identified row in the store,
+  and names a description-only row opening so with kind `LEARNED_RULE`, below
+  truncation and above the bare description. The statistical direction is kept
+  straight on the page: the identified rows prove only that every row of the
+  party opens so; the reverse is estimated solely by the test against the
+  other identified rows, so each rule's sentence carries both counts, the
+  rule-of-three bound in words ("fewer than 1 in 770 would belong to someone
+  else"), and in the same sentence the caveat that the unidentified rows need
+  not resemble the identified ones. CONFIDENCE (how many other identified
+  rows a rule was tested against) decides only the DEFAULT - applied and
+  ticked above it, offered unticked below it with the words "unable to
+  confirm from the rows held" - because hiding a weak rule hides evidence the
+  owner could weigh. SUPPORT and CONFIDENCE are store preferences (defaults 2
+  and 300) rather than constants, since both are guesses until the real store
+  has been read at them; a tick or refusal the owner has made is never
+  re-decided by a setting. Inferred rows are counted apart from identified
+  ones ("N identified and M inferred") so a series never looks better
+  evidenced than it is. Proved on constructed worlds; on the large invented
+  store it learned nothing, because that corpus's merchants each hold three
+  branch uids whose descriptions open alike - precisely the shared opening it
+  refuses - and the real store may behave the same, so the count line after
+  deploy is the measurement. Not yet built: the settings form and the
+  offered-rule lists on the Entities page, Keep promoting a rule to a declared
+  one, the Recurring basis line, and confirmation by a later-identified row.
+
+### Changed
+- **A retailer's branches are offered as one party, and a source id per
+  merchant location is kept.** 0.4.382's reading showed 651 of 972 names by
+  source id because one bank issues a uid per merchant location; the owner's
+  decision is that this is fine - locations are entities, grouped under the
+  company - so the earlier premise ("a uid identifies a party only for
+  payees") is recorded as false and no provider changes. The SAME_ROWS
+  proposal already groups branches sharing one stated name (three uids, twelve
+  weekly rows: one proposal; a branch seen once is left out; branches stating
+  other names are not offered), and merging them turns payments that each
+  branch sees every third week - no series at all - into one weekly series of
+  twelve. The merge attaches the source ids and not the stated name, so a
+  fourth branch appearing later is a new name until gathered; "Split into
+  locations" is not yet built.
+
 ## [0.4.382] - 2026-10-08
 
 ### Added
