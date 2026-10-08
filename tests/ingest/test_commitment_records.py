@@ -16,8 +16,8 @@ from typing import Any
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.ingest.commitment_records import CommitmentRefused, WindowTerms
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import SCHEMA_VERSION, Store
 
 SNAPSHOT = pathlib.Path(__file__).resolve().parent.parent / "schema_history" / "24-commitments.sql"

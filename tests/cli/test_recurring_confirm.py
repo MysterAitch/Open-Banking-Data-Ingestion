@@ -25,7 +25,7 @@ from datetime import timedelta
 import httpx
 import pytest
 
-from obdi.ingest.rebuild import rebuild_from_raw
+from landing import rebuild_from_raw
 from obdi.ingest.store import Store
 from recurring_press_support import (
     confirm_press,
