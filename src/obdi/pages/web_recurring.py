@@ -1,8 +1,14 @@
 """The page that shows what the detector finds recurring (`recurring`), masked unless asked.
 
-A MEASUREMENT PAGE: nothing here is declared or kept. It lists the series one line each, grouped
-by the account each is usually paid from, so the owner can set what is found against what he
-knows is there.
+A MEASUREMENT PAGE with one declaration on it. It lists the series one line each, grouped by the
+account each is usually paid from, so the owner can set what is found against what he knows is
+there; and each line carries the press that confirms it as a commitment
+(`analysis.commitments`), after which the line says so. Nothing else on the page is kept.
+
+A PRESS CARRIES NO VALUE, so it is on the masked page as on the shown one: it names its series
+by `commitments.series_refs`, which is made from what the masked page shows already, and the
+answer to a press is masked unless the page pressed on was shown (a `shown` field the shown
+page's forms carry, or a sitting).
 
 A GET renders MASKED, as the ledger does: the payee is `masking.mask_text` of its shape, and
 every amount is the sealed total slot. Showing values is a POST answered directly with the
@@ -18,9 +24,11 @@ from __future__ import annotations
 
 import calendar
 import html
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
+from ..analysis.commitments import ENDED, MISSING, Confirmation, match_series, series_refs
 from ..analysis.recurring import (
     DATED_POSTED,
     HABIT,
@@ -33,6 +41,7 @@ from ..core.logs import say
 from ..core.masking import MASKED_TOTAL, mask_text
 from ..core.page_times import date_with_age, percent_text, span_words
 from ..core.plural import plural
+from ..ingest.commitment_records import CommitmentRefused
 from ..read.account_names import AccountShown, AccountsShown
 from ..read.ledger import Money
 from . import values_sitting
@@ -46,6 +55,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for types alone
 _esc = html.escape
 
 ROUTE = "/recurring"
+CONFIRM_ROUTE = "/recurring-confirm"
 
 _WEEKDAYS = ("Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays")
 
@@ -178,7 +188,59 @@ def _name(series: Series, names: AccountsShown, *, unmasked: bool) -> str:
     return f'<span class="txt sealed">{_esc(mask_text(text))}</span>'
 
 
-def _row(series: Series, names: AccountsShown, today: date, *, unmasked: bool) -> str:
+@dataclass(frozen=True)
+class _Line:
+    """A series with what the page needs to set a press beside it: the reference a press names
+    it by and the commitment it was confirmed as, if it was."""
+
+    series: Series
+    ref: str
+    confirmation: Confirmation | None
+
+
+def _press(route: str, ref: str, label: str, *, unmasked: bool, **fields: str) -> str:
+    """One press: a form of hidden fields and a button set as a link. It carries the series'
+    reference and no value, so it is the same on a masked page; `shown` asks for the answer to
+    be unmasked as the page it was pressed on was."""
+    hidden = {"ref": ref, **fields, **({"shown": "1"} if unmasked else {})}
+    inputs = "".join(
+        f'<input type="hidden" name="{_esc(name)}" value="{_esc(value)}">'
+        for name, value in hidden.items()
+    )
+    return (
+        f'<form class="recur-act" method="post" action="{route}">{inputs}'
+        f'<button class="recur-press" type="submit">{_esc(label)}</button></form>'
+    )
+
+
+def _confirmed(confirmation: Confirmation, *, unmasked: bool) -> str:
+    name = confirmation.commitment.name
+    shown = name if unmasked else mask_text(name)
+    ended = confirmation.commitment.ended
+    when = f", ended {ended.isoformat()}" if ended else ""
+    klass = "txt" if unmasked else "txt sealed"
+    return (
+        f'<span class="pill">confirmed as <span class="{klass}">{_esc(shown)}</span>'
+        f"{when}</span>"
+    )
+
+
+def _actions(line: _Line, *, unmasked: bool) -> str:
+    """What the owner can do with a series: nothing more once it is confirmed; for a stopped one,
+    to say once whether it ended or is missing; otherwise to confirm it."""
+    if line.confirmation is not None:
+        return _confirmed(line.confirmation, unmasked=unmasked)
+    if line.series.stopped:
+        return (
+            '<span class="recur-ask">ended, or missing?</span>'
+            + _press(CONFIRM_ROUTE, line.ref, "It ended", unmasked=unmasked, how=ENDED)
+            + _press(CONFIRM_ROUTE, line.ref, "It is missing", unmasked=unmasked, how=MISSING)
+        )
+    return _press(CONFIRM_ROUTE, line.ref, "Confirm", unmasked=unmasked)
+
+
+def _row(line: _Line, names: AccountsShown, today: date, *, unmasked: bool) -> str:
+    series = line.series
     klass = "recur-row recur-attn" if _needs_a_look(series) else "recur-row"
     span = span_words(series.first_seen, series.last_seen)
     # A stopped series says when it was last seen, with its age, in place of how long it ran:
@@ -202,14 +264,15 @@ def _row(series: Series, names: AccountsShown, today: date, *, unmasked: bool) -
         f'<li class="{klass}"><span class="recur-name">'
         f"{_name(series, names, unmasked=unmasked)}</span>"
         f'<span class="recur-fig">{_amount(series, unmasked=unmasked)}</span>'
-        f'<span class="recur-how">{how}{_marks(series, names, today)}</span></li>'
+        f'<span class="recur-how">{how}{_marks(series, names, today)}'
+        f"{_actions(line, unmasked=unmasked)}</span></li>"
     )
 
 
-def _list(rows: list[Series], names: AccountsShown, today: date, *, unmasked: bool) -> str:
+def _list(rows: list[_Line], names: AccountsShown, today: date, *, unmasked: bool) -> str:
     if not rows:
         return ""
-    items = "".join(_row(s, names, today, unmasked=unmasked) for s in rows)
+    items = "".join(_row(line, names, today, unmasked=unmasked) for line in rows)
     return f'<ul class="recur-list">{items}</ul>'
 
 
@@ -231,8 +294,25 @@ def values_mode(route: str, *, unmasked: bool) -> str:
     )
 
 
-def render_recurring(findings: RecurringFindings, names: AccountsShown, *, unmasked: bool) -> bytes:
+def render_recurring(
+    findings: RecurringFindings,
+    names: AccountsShown,
+    *,
+    unmasked: bool,
+    said: str = "",
+    refused: str = "",
+) -> bytes:
+    """The page: `said` leads it as a quiet outcome, or `refused` as what was not done."""
     found = findings.series
+    lines = [
+        _Line(series, ref, confirmation)
+        for series, ref, confirmation in zip(
+            found,
+            series_refs(found),
+            match_series(found, findings.commitments),
+            strict=True,
+        )
+    ]
     if findings.external_labels:
         # An account declared external is named only here: the lists of held accounts never meet
         # it, so a transfer to it is labelled from the findings and not from `names`.
@@ -248,23 +328,23 @@ def render_recurring(findings: RecurringFindings, names: AccountsShown, *, unmas
         lead = ""
     else:
         lead = f'<p class="recur-summary">{_esc(summary_line(findings))}</p>'
-        by_account: dict[str, list[Series]] = {}
-        for series in found:
-            by_account.setdefault(series.account, []).append(series)
+        by_account: dict[str, list[_Line]] = {}
+        for line in lines:
+            by_account.setdefault(line.series.account, []).append(line)
         sections = []
         for ref in sorted(by_account, key=lambda r: names.of(r).label.casefold() or r.casefold()):
             rows = sorted(
                 by_account[ref],
-                key=lambda s: (
-                    s.kind == HABIT,
-                    not _needs_a_look(s),
-                    _ORDER.index(s.cadence),
-                    s.usual_day,
-                    s.shape,
+                key=lambda line: (
+                    line.series.kind == HABIT,
+                    not _needs_a_look(line.series),
+                    _ORDER.index(line.series.cadence),
+                    line.series.usual_day,
+                    line.series.shape,
                 ),
             )
-            old = [s for s in rows if long_stopped(s, findings.today)]
-            live = [s for s in rows if not long_stopped(s, findings.today)]
+            old = [r for r in rows if long_stopped(r.series, findings.today)]
+            live = [r for r in rows if not long_stopped(r.series, findings.today)]
             body = _list(live, names, findings.today, unmasked=unmasked)
             if old:
                 body += (
@@ -275,11 +355,17 @@ def render_recurring(findings: RecurringFindings, names: AccountsShown, *, unmas
                 f'<section class="recur-account"><h2>{names.of(ref).as_name()}</h2>{body}</section>'
             )
         listing = "".join(sections)
+    outcome = ""
+    if said:
+        outcome = f'<p class="ok"><strong>{_esc(said)}</strong></p>'
+    elif refused:
+        outcome = f'<p class="bad">{_esc(refused)}</p>'
     body = (
-        values_mode(ROUTE, unmasked=unmasked)
+        outcome
+        + values_mode(ROUTE, unmasked=unmasked)
         + lead
         + listing
-        + '<p class="muted">Found from the transactions alone; nothing is declared or kept. '
+        + '<p class="muted">Found from the transactions alone; only what you confirm is kept. '
         "Each is listed under the account it is usually paid from.</p>"
     )
     return render_page(page_name(ROUTE), body, body_class="recur-page")
@@ -299,7 +385,12 @@ class RecurringPages:
     def _discard_small_body(self) -> None:
         raise NotImplementedError
 
-    def _recurring_page(self, *, unmasked: bool) -> None:
+    def _read_form(self) -> dict[str, list[str]]:
+        raise NotImplementedError
+
+    def _recurring_page(
+        self, *, unmasked: bool, said: str = "", refused: str = "", status: int = 200
+    ) -> None:
         config = self.bound_config
         hook = config.recurring_data
         if hook is None:
@@ -320,7 +411,8 @@ class RecurringPages:
             names = config.account_names() if config.account_names is not None else AccountsShown()
         except Exception:
             names = AccountsShown()
-        self._respond(200, render_recurring(findings, names, unmasked=unmasked), no_store=unmasked)
+        page = render_recurring(findings, names, unmasked=unmasked, said=said, refused=refused)
+        self._respond(status, page, no_store=unmasked)
 
     def _recurring_get(self) -> None:
         self._recurring_page(unmasked=False)
@@ -328,3 +420,27 @@ class RecurringPages:
     def _recurring_post(self) -> None:
         self._discard_small_body()
         self._recurring_page(unmasked=True)
+
+    def _recurring_press_post(self, action: str) -> None:
+        """A press: answered by the page as it was pressed on, masked unless the form says it was
+        shown (or a sitting shows values), so a press never unmasks a page by itself."""
+        form = self._read_form()
+        unmasked = form.get("shown") == ["1"] or values_sitting.shown()
+        hook = self.bound_config.recurring_act
+        if hook is None:
+            self._respond(404, render_page("Not available", "<p>Recurring is not wired.</p>"))
+            return
+        try:
+            said = hook(action, form)
+        except CommitmentRefused as refusal:
+            self._recurring_page(unmasked=unmasked, refused=str(refusal), status=400)
+            return
+        except Exception as fault:
+            say("recurring.press.fault", kind=type(fault).__name__)
+            self._recurring_page(
+                unmasked=unmasked,
+                refused="Nothing was changed, because of an unexpected fault.",
+                status=500,
+            )
+            return
+        self._recurring_page(unmasked=unmasked, said=said)

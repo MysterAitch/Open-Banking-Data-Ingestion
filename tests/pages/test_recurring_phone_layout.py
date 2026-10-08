@@ -43,8 +43,12 @@ SCREENS = 4
 #: row, which wraps about every other row onto another line: closed, masked 2,683 and shown 2,791;
 #: opened, masked 2,991 and shown 3,099. That is over three screens and under four (3,376), so
 #: the allowance moved to four, a cost the owner is to judge against the kind being on the row.
-MEASURED_CLOSED = 2800
-MEASURED_OPEN = 3110
+#: With the Confirm press on every unconfirmed row (a link-styled button on the row's own line, a
+#: pair of "It ended" and "It is missing" on a stopped one): closed, shown 2,869 (masked within
+#: 2,800); opened, masked 3,148 and shown 3,256, still under four screens. A press styled as the
+#: shared full-width button was 5,907, which is why it is a link on the line.
+MEASURED_CLOSED = 2880
+MEASURED_OPEN = 3270
 SCREENS_OPEN = 4
 
 TODAY = date(2026, 10, 7)

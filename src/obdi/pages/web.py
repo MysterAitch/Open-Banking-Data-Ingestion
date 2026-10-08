@@ -43,6 +43,7 @@ from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from ..analysis import entity_actions
+from ..analysis.commitments import ACT_CONFIRM
 from ..analysis.entities import EntitiesView, EntityPage, RuleTrial
 from ..analysis.recurring import RecurringFindings
 from ..core.classification import redact_summary
@@ -644,6 +645,9 @@ class WebConfig:
     #: What recurs in the transactions held (`recurring.find_recurring` over every account),
     #: judged against today: the Recurring page's one read.
     recurring_data: Callable[[], RecurringFindings] | None = None
+    #: One press on the Recurring page: (the action, the form it sent) to the sentence that says
+    #: what was done. A refusal is a `CommitmentRefused`.
+    recurring_act: Callable[[str, dict[str, list[str]]], str] | None = None
     #: Every counterparty name held with its transactions, and the entities made from them, with
     #: what the rules propose from the names under none: the Entities page's one read.
     entities_data: Callable[[], EntitiesView] | None = None
@@ -6416,6 +6420,9 @@ class ConnectionHandler(
             return
         if route == "/recurring":
             self._recurring_post()
+            return
+        if route == "/recurring-confirm":
+            self._recurring_press_post(ACT_CONFIRM)
             return
         if route == "/entities":
             self._entities_show_post()

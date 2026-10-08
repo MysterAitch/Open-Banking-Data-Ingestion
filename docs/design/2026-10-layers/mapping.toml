@@ -189,6 +189,7 @@ todo = "read.todo"
 
 [analysis]
 categorise = "analysis.categorise"
+commitments = "analysis.commitments"
 entities = "analysis.entities"
 entity_actions = "analysis.entity_actions"
 entity_ties = "analysis.entity_ties"

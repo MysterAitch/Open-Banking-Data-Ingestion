@@ -21,4 +21,12 @@ RECURRING_STYLES = """
  .recur-fig { white-space: nowrap; font-weight: 600; }
  .recur-how { flex: 1 0 100%; font: var(--text-sm)/140% var(--sans); color: var(--ink-2); }
  .recur-how .pill { margin-left: var(--s1); line-height: 130%; white-space: nowrap; }
+ /* A press is a link in a button's clothes, on the line it belongs to, so thirty lines stay four
+    screens; the hit area grows past the text the way a link's does. */
+ .recur-act { display: inline; margin: 0 0 0 var(--s2); }
+ .recur-act button.recur-press { position: relative; display: inline; width: auto; min-height: 0;
+                margin: 0; padding: 0; border: 0; border-radius: 0; background: none;
+                color: var(--act); font: inherit; text-decoration: underline; cursor: pointer; }
+ .recur-press::after { content: ""; position: absolute; inset: -.5rem -.4rem; }
+ .recur-ask { margin-left: var(--s2); color: var(--ink-2); }
 """

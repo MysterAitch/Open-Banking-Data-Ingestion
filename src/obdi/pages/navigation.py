@@ -141,6 +141,7 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/reports": "more",
     "/review-flags": "more",
     "/recurring": "more",
+    "/recurring-confirm": "more",
     "/entities": "more",
     "/entities-merge": "more",
     "/entities-split": "more",

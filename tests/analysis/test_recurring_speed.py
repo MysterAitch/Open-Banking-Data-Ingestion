@@ -27,7 +27,10 @@ from obdi.ingest.store import Store
 #: was; allowing two more. A read per account or per series would add eleven or more.
 #: Measured 29 once the declared external accounts' one select (`Store.external_identifiers`)
 #: joined the learned lines' refusal read; the bound is raised by that one statement.
-RECURRING_STATEMENTS = 29
+#: Measured 30 once the commitments the owner confirmed were read (`Store.commitments`, one select
+#: joining their windows); the bound is raised by that one statement, which does not grow with
+#: the commitments or the series.
+RECURRING_STATEMENTS = 30
 SECONDS = 20.0
 
 

@@ -69,6 +69,7 @@ from itertools import pairwise
 from statistics import median_low
 
 from ..core.models import Transaction, TransactionStatus
+from ..ingest.commitment_records import Commitment
 from ..ingest.stated_words import words_in
 from .entities import HELD_PREFIX, Alias, display_names, entity_of, name_rows
 from .payment_methods import METHODS
@@ -229,6 +230,15 @@ class Series:
     #: leg that states that account's identifier): that account, which a page shows as "your" and
     #: its label. `shape` is "your <account's name>" until a page has the label.
     held_account: str = ""
+    #: The names the series' rows are called by (`name_rows`), which is how a commitment confirmed
+    #: from it finds it again. One name for a series of one payee, several for an entity's, and
+    #: `TRANSFER_NAME` plus the account the money went to for a transfer.
+    name_keys: frozenset[str] = frozenset()
+    #: The id of the entity the owner gathered the series' names under, or 0 where none.
+    party_entity: int = 0
+    #: The first day of the run of newest occurrences at the latest amount (within
+    #: `CHANGE_PERCENT` of it), which is the day a changed price began; None where unknown.
+    latest_from: date | None = None
 
 
 @dataclass(frozen=True)
@@ -261,6 +271,18 @@ class RecurringFindings:
     #: The label of each account declared external, by its canonical name, for the transfers to
     #: accounts no held account stands for (`Series.other_account`, `Series.held_account`).
     external_labels: Mapping[str, str] = field(default_factory=dict)
+    #: The commitments the owner confirmed, which the page sets the series against
+    #: (`commitments.match_series`); the detector itself reads none.
+    commitments: Sequence[Commitment] = ()
+
+
+def tolerance_days(cadence: str) -> int:
+    """How many days off its usual day an occurrence of `cadence` may fall and still be on time:
+    the tolerance the fit allows (a day for the cadences counted in days)."""
+    for name, _months, tolerance in _MONTH_CADENCES:
+        if name == cadence:
+            return tolerance
+    return 1
 
 
 def _month_index(day: date) -> int:
@@ -372,11 +394,18 @@ def _usual_amount(amounts: Sequence[int]) -> tuple[int, bool]:
     return usual, len(biggest) / len(amounts) >= STEADY_SHARE
 
 
+#: What a transfer between two held accounts is called, followed by the account the money went to,
+#: for the commitment confirmed from it to find it again.
+TRANSFER_NAME = "transfer to "
+
+
 @dataclass(frozen=True)
 class _Leg:
     row: Transaction
     #: The account the money went to, where the row is the leaving leg of a proved pair.
     other: str
+    #: The name `name_rows` gave the row, or `TRANSFER_NAME` and the other account for a transfer.
+    name: str = ""
 
 
 #: How long before a slot the statement for its cycle may be dated: a card statement closes some
@@ -524,6 +553,9 @@ def _series_of(
     usual, steady = _usual_amount(magnitudes)
     latest = magnitudes[-1]
     drift = (latest - usual) / usual * 100 if usual else 0.0
+    began = len(legs) - 1
+    while began > 0 and abs(magnitudes[began - 1] - latest) <= latest * CHANGE_PERCENT / 100:
+        began -= 1
     is_transfer = _is_transfer(legs)
     direction = "in" if newest.amount_minor > 0 else "out"
     paid_from = Counter(leg.row.account_id for leg in legs)
@@ -587,6 +619,8 @@ def _series_of(
         stopped=stopped,
         changed=steady and abs(drift) > CHANGE_PERCENT,
         dated_on=_dating(chosen, kind),
+        name_keys=frozenset(leg.name for leg in legs if leg.name),
+        latest_from=_day_of(legs[began].row, chosen),
     )
 
 
@@ -655,6 +689,7 @@ def find_recurring(
     entities: Mapping[tuple[str, str], str] | None = None,
     links: Mapping[str, Alias] | None = None,
     external: Mapping[str, str] | None = None,
+    entity_ids: Mapping[str, int] | None = None,
 ) -> list[Series]:
     """Every series the transactions hold, by account and then by what they are called.
 
@@ -673,6 +708,8 @@ def find_recurring(
     and kind link through (`entities.entity_of`). The names of one entity are one payee here,
     so a subscription that changed the name it prints under, or alternates between two, is one
     series, named by the entity (`Series.shape`). A name under no entity is grouped as it is.
+    `entity_ids` maps an entity's name to its id, which a series of that entity carries
+    (`Series.party_entity`) for a confirmed commitment to find it by.
     Money in and money out stay apart, and a transfer is found by its legs, never by a name.
     `closings` is each account's held statement closings, which explain a pulled series' missed
     slot where the card it pays owed nothing.
@@ -701,6 +738,7 @@ def find_recurring(
     groups: dict[tuple[str, ...], list[_Leg]] = defaultdict(list)
     shapes: dict[tuple[str, ...], str] = {}
     held_of: dict[tuple[str, ...], str] = {}
+    party_of: dict[tuple[str, ...], int] = {}
     for row, item in zip(rows, named, strict=True):
         if row.entity_id in arrivals:
             continue
@@ -709,7 +747,9 @@ def find_recurring(
         if opposite is not None:
             between = ("transfer", row.account_id, opposite.account_id, row.currency, direction)
             shapes[between] = ""
-            groups[between].append(_Leg(row, opposite.account_id))
+            groups[between].append(
+                _Leg(row, opposite.account_id, TRANSFER_NAME + opposite.account_id)
+            )
             continue
         shape = item.name
         if not shape:
@@ -719,6 +759,8 @@ def find_recurring(
         if gathered is not None:
             payee = ("entity", gathered.casefold(), row.currency, direction)
             shapes[payee] = gathered
+            if entity_ids and gathered in entity_ids:
+                party_of[payee] = entity_ids[gathered]
         else:
             payee = ("payee", shape, row.currency, direction)
             # An identifier groups the rows and is never shown (`display_names`).
@@ -729,11 +771,17 @@ def find_recurring(
         # transfer to it: `other` is what makes the series one (`_is_transfer`), not income or a
         # payee, and a transfer to an account declared external (`held_counterparts`) has no
         # opposite leg to pair with at all.
-        groups[payee].append(_Leg(row, held_of.get(payee, "")))
+        groups[payee].append(_Leg(row, held_of.get(payee, ""), shape))
 
     found: list[Series] = []
     for key, legs in groups.items():
         for series in _series_in_group(legs, shapes[key], reach, closings or {}, today):
-            found.append(replace(series, held_account=held_of[key]) if key in held_of else series)
+            found.append(
+                replace(
+                    series,
+                    held_account=held_of.get(key, series.held_account),
+                    party_entity=party_of.get(key, 0),
+                )
+            )
     found.sort(key=lambda s: (s.account, s.label.casefold(), s.cadence, s.usual_minor))
     return found

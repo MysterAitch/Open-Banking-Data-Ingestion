@@ -3940,10 +3940,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 occurrences, pairs, refused=refused_links(store), external=external
             )
             held_names = {n: o.rows for n, o in name_origins(named).items()}
-            gathered = {
-                key: name for key, (_id, name) in shape_entities(store, held_names).items()
-            }
+            held_entities = shape_entities(store, held_names)
+            gathered = {key: name for key, (_id, name) in held_entities.items()}
+            entity_ids = {name: ident for ident, name in held_entities.values()}
             external_labels = store.external_labels() if external else {}
+            commitments = store.commitments()
         closings: dict[str, list[tuple[date, int]]] = {}
         for closing in held:
             owed = (closing.day, closing.balance_minor)
@@ -3957,8 +3958,19 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             entities=gathered,
             links=links,
             external=external,
+            entity_ids=entity_ids,
         )
-        return RecurringFindings(found, today, external_labels)
+        return RecurringFindings(found, today, external_labels, commitments)
+
+    def recurring_act(action: str, form: dict[str, list[str]]) -> str:
+        """One press on the Recurring page: the series it names is found again from the
+        transactions, so that a press made on a page that has gone stale is refused and never
+        applied to a different series. A refusal is a `CommitmentRefused`."""
+        from .analysis.commitments import apply_press
+
+        findings = recurring_data()
+        with Store(db_path) as store:
+            return apply_press(store, findings.series, action, form, today=findings.today)
 
     def _held_labels(
         store: Store,
@@ -4937,6 +4949,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
         ),
         recurring_data=recurring_data,
+        recurring_act=recurring_act,
         entities_data=entities_data,
         entities_act=entities_act,
         entity_page=entity_page,
