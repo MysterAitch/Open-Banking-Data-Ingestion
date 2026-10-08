@@ -42,13 +42,9 @@ import pytest
 
 from landing import rebuild_from_raw
 from obdi.core.models import TransactionStatus
-from obdi.export.replay import (
-    WITHHELD_REVERSED,
-    ActualAccountBinding,
-    build_payload,
-    withheld_reason,
-)
+from obdi.export.replay import ActualAccountBinding, build_payload
 from obdi.ingest.family_anchors import families_of
+from obdi.read.actual_sendable import WITHHELD_REVERSED, withheld_reason
 from obdi.verify.balance_anchors import effective_opening
 from round_up_corpus import (
     card_payment,

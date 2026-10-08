@@ -29,12 +29,12 @@ from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.export.replay import (
     ActualAccountBinding,
     build_payload,
-    withheld_reason,
 )
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import pair_transfers_across_store, reconcile_batch
 from obdi.ingest.store import Store
+from obdi.read.actual_sendable import withheld_reason
 from obdi.read.ledger import (
     ANCHOR_QUERIES,
     QUERIES_PER_PAGE,

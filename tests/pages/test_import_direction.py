@@ -43,7 +43,6 @@ COMPOSITION_ROOT = "cli"
 #: (importing module, imported module), dotted and relative to `obdi`. U1 to U20 of the plan.
 ALLOWED_UPWARD: frozenset[tuple[str, str]] = frozenset(
     {
-        ("read.ledger", "export.replay"),
         ("ingest.same_money_fold", "verify.period_reconciliation"),
         ("ingest.typed_transactions", "verify.balance_anchors"),
     }
@@ -419,7 +418,7 @@ class TestTheAllowedListCanOnlyShrink:
         # the entity record) before the move, and the record moved below the store to remove it.
         # The settle-after-landing group (nine lines: the landing functions take their finishers
         # as a required parameter) is gone. The number only goes down from here.
-        assert len(ALLOWED_UPWARD) == 3
+        assert len(ALLOWED_UPWARD) == 2
 
 
 class TestOverTheRealTree:

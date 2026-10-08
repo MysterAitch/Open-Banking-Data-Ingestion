@@ -18,13 +18,14 @@ import pytest
 
 from obdi.core.models import Transaction
 from obdi.core.money import AmountParseError, parse_amount
-from obdi.export.replay import ReplayError, to_actual_transaction
+from obdi.export.replay import to_actual_transaction
 from obdi.ingest.parsers.base import ParseError
 from obdi.ingest.parsers.uk_banks import StarlingCsvParser
 from obdi.ingest.providers.starling import StarlingError
 from obdi.ingest.providers.starling import to_transaction as starling_txn
 from obdi.ingest.providers.truelayer import TrueLayerError
 from obdi.ingest.providers.truelayer import to_transaction as truelayer_txn
+from obdi.read.actual_sendable import ReplayError
 
 
 class TestMoneyGuard:

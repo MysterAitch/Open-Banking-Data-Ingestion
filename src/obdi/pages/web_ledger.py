@@ -233,8 +233,8 @@ def _words(items: list[str]) -> str:
 
 #: What a folded row is called wherever the page describes one: on the row, in the month's
 #: line, and over the closed list at the foot of the month. A folded row is a copy of money
-#: counted elsewhere, withheld from Actual so it is not counted twice (`replay.WITHHELD_FOLDED`
-#: gives the two cases), so it is history and not a fault.
+#: counted elsewhere, withheld from Actual so it is not counted twice
+#: (`actual_sendable.WITHHELD_FOLDED` gives the two cases), so it is history and not a fault.
 _COPY_CHIP = "counted elsewhere"
 _COPIES_WHY = "held in a Space, or listed by a statement"
 

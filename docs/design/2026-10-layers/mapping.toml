@@ -164,6 +164,7 @@ trust = "verify.trust"
 [read]
 account_about = "read.account_about"
 account_names = "read.account_names"
+actual_sendable = "read.actual_sendable"
 alerts = "read.alerts"
 balance_chart = "read.balance_chart"
 balance_chart_bins = "read.balance_chart_bins"

@@ -5,11 +5,11 @@ import pytest
 from obdi.core.models import Transaction, TransactionStatus
 from obdi.export.replay import (
     ActualAccountBinding,
-    ReplayError,
     build_payload,
     to_actual_transaction,
     unbound_accounts,
 )
+from obdi.read.actual_sendable import ReplayError
 
 BINDINGS = [
     ActualAccountBinding("starling-personal", "actual-acc-1"),

@@ -35,10 +35,7 @@ from datetime import date
 
 from ..core.models import Transaction, TransactionStatus
 from ..core.namespaces import CASH_LEG_SOURCE, UNITEMISED_SOURCE
-
-
-class ReplayError(RuntimeError):
-    """A transaction cannot be replayed safely."""
+from ..read.actual_sendable import ReplayError, unsendable_reason, withheld_reason
 
 
 @dataclass(frozen=True)
@@ -86,21 +83,9 @@ def to_actual_transaction(
     corrections are exactly what a rebuild produces. Actual's reconcile is the owner's own act, made
     in Actual, and obdi's equivalent is protection (`protection`), which alarms and never freezes.
     """
-    if not transaction.content_key:
-        raise ReplayError(
-            "transaction has no content key, so it has no stable imported_id. "
-            "Replaying it would create a duplicate on every run."
-        )
-
-    if transaction.currency != "GBP":
-        # Actual is currency-agnostic but single-currency per budget file, so a
-        # foreign amount has nowhere correct to land. Emitting it unlabelled
-        # would silently book a euro figure as sterling.
-        raise ReplayError(
-            f"transaction {transaction.entity_id} is in {transaction.currency}; "
-            "the budget file is single-currency and there is no correct "
-            "destination for a foreign amount"
-        )
+    refusal = unsendable_reason(transaction)
+    if refusal is not None:
+        raise ReplayError(refusal)
 
     payee = transaction.counterparty or transaction.description
 
@@ -295,44 +280,6 @@ def build_payload(
     for transaction, actual_account in _sendable(transactions, bindings):
         payload[actual_account].append(to_actual_transaction(transaction, cleared=cleared))
     return dict(payload)
-
-
-#: The reasons a row is kept out of the payload, as the words a reader sees.
-WITHHELD_VOID = "void"
-WITHHELD_FOLDED = (
-    "a copy of a payment held under a Space, or the same money a statement itemises"
-)
-WITHHELD_UNBOUND = "no Actual binding"
-WITHHELD_REVERSED = "reversed by the bank"
-
-
-def withheld_reason(transaction: Transaction, *, bound: bool) -> str | None:
-    """Why this row is NOT sent to Actual, or None when it is.
-
-    The single statement of what the payload leaves out, shared by the
-    payload builder and by anything that must say what the builder would do
-    without building it. A copy of this rule elsewhere would agree until the
-    day somebody changed one.
-
-    A movement between your own accounts is NOT a reason.
-    Withholding those left every account's balance in Actual out by the sum
-    of its transfers; they are sent as rows and linked afterwards.
-    """
-    # A voided pending row is history, not money: it either settled as
-    # a different row (already in the payload) or never happened.
-    if transaction.status is TransactionStatus.VOID:
-        return WITHHELD_VOID
-    # A main-account copy of a payment held under a Space (the Space's row is
-    # the one sent), or a feed row that is the same money as a statement's rows
-    # (the statement's are the ones sent): either way the payment reaches the
-    # budget once.
-    if transaction.status is TransactionStatus.FOLDED:
-        return WITHHELD_FOLDED
-    if transaction.status is TransactionStatus.REVERSED:
-        return WITHHELD_REVERSED
-    if not bound:
-        return WITHHELD_UNBOUND
-    return None
 
 
 def build_transfer_pairs(

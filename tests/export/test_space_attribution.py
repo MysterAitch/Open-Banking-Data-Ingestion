@@ -29,7 +29,7 @@ import pytest
 
 from landing import import_file, rebuild_from_raw
 from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
-from obdi.export.replay import ActualAccountBinding, build_payload, withheld_reason
+from obdi.export.replay import ActualAccountBinding, build_payload
 from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.identity import artefact_digest, content_key
 from obdi.ingest.identity_health import identity_health
@@ -45,6 +45,7 @@ from obdi.ingest.rebuild import (
 )
 from obdi.ingest.space_attribution import fold_space_copies, plan_folds, space_parents
 from obdi.ingest.store import Store
+from obdi.read.actual_sendable import withheld_reason
 from obdi.read.ledger import build_ledger
 from obdi.read.overview import held_by_account
 from obdi.read.position import read_position

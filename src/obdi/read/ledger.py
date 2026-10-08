@@ -12,7 +12,7 @@ field is a value unless its type is `Structural[...]`. That is the whole
 privacy design, so a new field belongs in the structural group only when a
 reader who must not see the money may still see it.
 
-DATED BY VALUE DATE, the date Actual is sent (`to_actual_transaction`) and the
+DATED BY VALUE DATE, the date Actual is sent (`replay.to_actual_transaction`) and the
 date coverage and the merged key use. A row's sightings may have dated it
 differently; that is reported per row, not used to place it.
 
@@ -52,7 +52,6 @@ from ..core.masking import Structural, Total
 from ..core.models import Transaction
 from ..core.namespaces import CASH_LEG_SOURCE, MANUAL_SOURCE, UNITEMISED_SOURCE
 from ..core.page_times import instant_of
-from ..export.replay import ReplayError, to_actual_transaction, withheld_reason
 from ..ingest.accounts import AccountRef
 from ..ingest.family_anchors import OPENED, Families
 from ..ingest.feed_statuses import FeedStatuses
@@ -92,6 +91,7 @@ from ..verify.standing_data import statement_checks_for
 from ..verify.statement_checks import StatementChecks
 from .account_about import AccountAbout
 from .account_names import AccountsShown
+from .actual_sendable import unsendable_reason, withheld_reason
 from .row_balances import balances_after
 
 if TYPE_CHECKING:  # pragma: no cover - imported for the annotation alone
@@ -351,7 +351,7 @@ class MonthSummary:
     pending: Structural[int]
     void: Structural[int]
     #: Rows that copy a payment counted elsewhere: held under a Space, or the same
-    #: money a statement itemises (`replay.WITHHELD_FOLDED` says both).
+    #: money a statement itemises (`actual_sendable.WITHHELD_FOLDED` says both).
     folded: Structural[int]
     transfers_confirmed: Structural[int]
     transfers_claimed: Structural[int]
@@ -1168,10 +1168,9 @@ def _ledger_for(
         withheld = withheld_reason(t, bound=bound) or ""
         unsendable, refusal = False, ""
         if not withheld:
-            try:
-                to_actual_transaction(t)
-            except ReplayError as refused:
-                unsendable, refusal = True, str(refused)
+            reason = unsendable_reason(t)
+            if reason is not None:
+                unsendable, refusal = True, reason
         category = categories.get(t.entity_id)
         payee = payees.get(t.entity_id)
         by = {
