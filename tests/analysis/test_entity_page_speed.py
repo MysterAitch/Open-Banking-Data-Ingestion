@@ -23,7 +23,9 @@ from obdi.ingest.store import Store
 #: or entity would add dozens); the time is loose so a slow machine does not flake.
 #: Measured 26 after the declared external accounts' one select (`Store.external_identifiers`)
 #: joined the learned lines' refusal read; the bound is raised by that one statement.
-ENTITY_STATEMENTS = 26
+#: Measured 27 once the learned rules' settings and ticks were read
+#: (`Store.preferences_with_prefix`, one select, not growing with the rules).
+ENTITY_STATEMENTS = 27
 SECONDS = 5.0
 
 

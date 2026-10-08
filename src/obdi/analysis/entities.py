@@ -42,6 +42,15 @@ from .entity_tokens import (
     is_method_only,
     tokens_of,
 )
+from .learned_rules import (
+    APPLIED,
+    Learning,
+    Rule,
+    RulePolicy,
+    decide,
+    learn_rules,
+    opens,
+)
 from .payment_methods import strip_leading_methods
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
@@ -241,7 +250,13 @@ def derivation_of(
                     linked.linked_by or STATED_NAME,
                     plural(support, "payment"),
                 )
-            return KIND_SENTENCES[kind].format(payments=plural(support, "payment"), name=shape)
+            inferred = next((r for r in covered if r.kind == LEARNED_RULE), None)
+            return KIND_SENTENCES[kind].format(
+                payments=plural(support, "payment"),
+                name=shape,
+                taught=f"{inferred.support:,}" if inferred else 0,
+                tested=f"{inferred.tested:,}" if inferred else 0,
+            )
 
         source = ", and from the ".join(said(kind) for kind in kinds)
     return Derivation(
@@ -287,8 +302,14 @@ MATCHED_NAME = "matched name"
 #: exactly one stated party's name (`_truncation_parties` states the rule): a statement column
 #: that cuts a merchant at a fixed width. Weaker than MATCHED_NAME, which is exact.
 TRUNCATED_NAME = "truncated name"
+#: A description-only row whose description opens as every row of one identifier does and as no
+#: other identified row does (`learned_rules`): an INFERENCE from rows that carry the identifier,
+#: held as a hypothesis whose evidence is stated, and the weakest link before the bare description.
+LEARNED_RULE = "learned rule"
 RULE = "rule"
-LADDER = (ACCOUNT, SOURCE_ID, STATED_NAME, ALIAS, MATCHED_NAME, TRUNCATED_NAME, DESCRIPTION)
+LADDER = (
+    ACCOUNT, SOURCE_ID, STATED_NAME, ALIAS, MATCHED_NAME, TRUNCATED_NAME, LEARNED_RULE, DESCRIPTION
+)
 #: The kinds whose name is an identifier, not text: shown by a label (`display_names`).
 _STRONG = (ACCOUNT, SOURCE_ID)
 
@@ -303,6 +324,10 @@ KIND_SENTENCES: dict[str, str] = {
         "description, which matches the bank's merchant name “{name}” exactly"
     ),
     TRUNCATED_NAME: "description, a truncation of the bank's merchant name “{name}”",
+    LEARNED_RULE: (
+        "description, inferred (not stated): it opens as every one of this party's {taught} "
+        "identified rows does and none of the other {tested} identified rows does"
+    ),
     DESCRIPTION: "description",
     RULE: "rule",
 }
@@ -362,7 +387,7 @@ def identifier_kind(kind: str) -> str:
     """The kind of identifier a row named by `kind` (`LADDER`) links to an entity through: a row
     named through a learned, matched, or truncated link links through the party it resolved to,
     whose name is a stated name, so those three are `STATED_NAME`."""
-    return STATED_NAME if kind in (ALIAS, MATCHED_NAME, TRUNCATED_NAME) else kind
+    return STATED_NAME if kind in (ALIAS, MATCHED_NAME, TRUNCATED_NAME, LEARNED_RULE) else kind
 
 
 def link_keys(kind: str, name: str) -> tuple[tuple[str, str], ...]:
@@ -371,6 +396,10 @@ def link_keys(kind: str, name: str) -> tuple[tuple[str, str], ...]:
     (`LEGACY_KIND`), then a rule matching the name (`RULE`)."""
     own = identifier_kind(kind)
     keys = [(own, name)]
+    if kind == LEARNED_RULE:
+        # The party an inferred row resolves to is named by an identifier (an account, a source's
+        # id), which is how an entity holds it.
+        keys.extend(((SOURCE_ID, name), (ACCOUNT, name)))
     if own != LEGACY_KIND:
         keys.append((LEGACY_KIND, name))
     keys.append((RULE, name))
@@ -496,9 +525,12 @@ class Alias:
     rows: int
     kind: str = STATED_NAME
     #: How the shape came to stand for the name: `ALIAS` (rows seen by two sources say so) or
-    #: `MATCHED_NAME` (the text matches) or `TRUNCATED_NAME` (the text is an opening of the name);
-    #: `rows` is 0 for the two, since no row says so.
+    #: `MATCHED_NAME` (the text matches) or `TRUNCATED_NAME` (the text is an opening of the name)
+    #: or `LEARNED_RULE` (the identified rows open so, and no other does); `rows` is 0 for the
+    #: two text matches, since no row says so, and for a `LEARNED_RULE` the rows that taught it.
     by: str = ALIAS
+    #: For a `LEARNED_RULE`: how many other identified rows the rule was tested against.
+    tested: int = 0
 
 
 @dataclass(frozen=True)
@@ -513,6 +545,8 @@ class Named:
     via: str = ""
     support: int = 0
     linked_by: str = ""
+    #: For a `LEARNED_RULE` name: the other identified rows the rule was tested against.
+    tested: int = 0
 
     @property
     def is_key(self) -> bool:
@@ -606,7 +640,12 @@ def name_of(
     learned = (aliases or {}).get(shape)
     if shape and learned is not None:
         return Named(
-            learned.name, learned.by, via=shape, support=learned.rows, linked_by=learned.kind
+            learned.name,
+            learned.by,
+            via=shape,
+            support=learned.rows,
+            linked_by=learned.kind,
+            tested=learned.tested,
         )
     return Named(shape, DESCRIPTION)
 
@@ -663,7 +702,109 @@ def identifiers_of(row: Fields) -> tuple[tuple[str, str], ...]:
     return tuple(found)
 
 
-def learned_links(rows: Iterable[Fields | tuple[str, str]]) -> dict[str, Alias]:
+def _words_of(text: str, cache: dict[str, tuple[str, ...]]) -> tuple[str, ...]:
+    """The comparable words of a printed description's reading: what an opening is made of."""
+    found = cache.get(text)
+    if found is None:
+        found = tuple(token.norm for token in tokens_of(reading_of(text)))
+        cache[text] = found
+    return found
+
+
+@dataclass(frozen=True)
+class RuleInputs:
+    """What the learned-rule rung reads from the rows: the form of each identified row's
+    description by party, how many identified rows each party has, the party kinds, and the
+    forms of the description-only rows by shape."""
+
+    forms: dict[str, list[tuple[str, ...]]]
+    rows: dict[str, int]
+    kinds: dict[str, str]
+    bare: dict[str, Counter[tuple[str, ...]]]
+
+
+def rule_inputs(held: Sequence[Fields]) -> RuleInputs:
+    """Sort the rows into those that carry a definitive identifier (an account or a source's id;
+    a transfer between the household's own accounts is neither) and those that carry nothing, no
+    stated name either: the second kind are the rows a rule may be applied to."""
+    cache: dict[str, tuple[str, ...]] = {}
+    forms: dict[str, list[tuple[str, ...]]] = {}
+    counts: Counter[str] = Counter()
+    kinds: dict[str, str] = {}
+    bare: dict[str, Counter[tuple[str, ...]]] = {}
+    for fields in held:
+        if fields.held:
+            continue
+        strong = _strong_name(fields)
+        if strong is not None:
+            counts[strong.name] += 1
+            kinds[strong.name] = strong.kind
+            forms.setdefault(strong.name, [])
+            if _shape(fields.description):
+                forms[strong.name].append(_words_of(fields.description, cache))
+        elif not counterparty_name(fields.counterparty):
+            shape = _shape(fields.description)
+            if shape:
+                bare.setdefault(shape, Counter())[_words_of(fields.description, cache)] += 1
+    return RuleInputs(forms, dict(counts), kinds, bare)
+
+
+def learned_rules(
+    held: Sequence[Fields],
+    policy: RulePolicy | None = None,
+    refused: Collection[tuple[str, str]] = (),
+    inputs: RuleInputs | None = None,
+) -> tuple[Learning, dict[str, str]]:
+    """The rules the identified rows teach (`learned_rules.learn_rules`) and the state of each by
+    `Rule.key`: applied, offered, or withdrawn. A rule is withdrawn by ONE refusal: a link the
+    owner said is not so (`refused`, the pairs `refused_links` reads) whose party is the rule's and
+    whose description opens as the rule does."""
+    chosen = policy or RulePolicy()
+    seen = inputs or rule_inputs(held)
+    learning = learn_rules(seen.forms, seen.rows, chosen.settings.support)
+    cache: dict[str, tuple[str, ...]] = {}
+    withdrawn = {
+        rule.key
+        for rule in learning.rules
+        for shape, name in refused
+        if name == rule.party and opens(_words_of(shape, cache), rule.opening)
+    }
+    return learning, {rule.key: decide(rule, chosen, withdrawn) for rule in learning.rules}
+
+
+def _rule_links(
+    held: Sequence[Fields],
+    taken: Mapping[str, Alias],
+    policy: RulePolicy | None,
+    refused: Collection[tuple[str, str]],
+) -> dict[str, Alias]:
+    """The `LEARNED_RULE` links: each description-only shape that no other rung linked, that
+    opens as exactly one party's applied rule does. A shape two parties' rules both open is
+    linked to neither."""
+    seen = rule_inputs(held)
+    learning, states = learned_rules(held, policy, refused, seen)
+    applied: list[Rule] = [r for r in learning.rules if states[r.key] == APPLIED]
+    if not applied:
+        return {}
+    links: dict[str, Alias] = {}
+    for shape, forms in seen.bare.items():
+        if shape in taken:
+            continue
+        form = min(forms, key=lambda f: (-forms[f], len(f), f))
+        parties = {r.party: r for r in applied if opens(form, r.opening)}
+        if len(parties) == 1:
+            ((party, rule),) = parties.items()
+            links[shape] = Alias(
+                party, rule.taught, seen.kinds[party], LEARNED_RULE, tested=rule.tested
+            )
+    return links
+
+
+def learned_links(
+    rows: Iterable[Fields | tuple[str, str]],
+    policy: RulePolicy | None = None,
+    refused: Collection[tuple[str, str]] = (),
+) -> dict[str, Alias]:
     """For each description-shape, the one stronger identifier the rows that carry both say it
     stands for, with how many rows say so; from `Fields` rows (a bare (description,
     counterparty) pair is read as one that states no account or id).
@@ -690,6 +831,11 @@ def learned_links(rows: Iterable[Fields | tuple[str, str]]) -> dict[str, Alias]:
     A statement and a feed print one party's name in different shapes (a country code, a town),
     so a party's months from the feed and from the statement alone were two names, and a weekly
     habit of 38 weeks in 52 was whole in neither (measured on the real store after R2c).
+
+    A final rung (`LEARNED_RULE`, `learned_rules`) is an INFERENCE for a description-only shape no
+    other rung linked: it opens as every row of one identifier does and as no other identified row
+    does. It is applied only where the rule's confidence meets the owner's setting or the owner
+    ticked it (`policy`), and a rule the owner refused (`refused`) is withdrawn whole.
 
     A last link (`TRUNCATED_NAME`, `_truncation_parties`) is for a description that is not any
     stated party's form but a cut-off opening of exactly one: a statement column that stops a
@@ -768,6 +914,7 @@ def learned_links(rows: Iterable[Fields | tuple[str, str]]) -> dict[str, Alias]:
         if len(parties) == 1:
             (party,) = parties
             links[shape] = Alias(party, 0, kind_of.get(party, STATED_NAME), by)
+    links.update(_rule_links(held, links, policy, refused))
     return links
 
 
@@ -936,6 +1083,7 @@ LEARNED_SENTENCES: dict[str, str] = {
     ALIAS: "through {payments} seen by both",
     MATCHED_NAME: "the description matches exactly",
     TRUNCATED_NAME: "a truncation",
+    LEARNED_RULE: "inferred from an opening this party's identified rows share",
 }
 
 
@@ -993,6 +1141,7 @@ def name_rows(
     links: Mapping[str, Alias] | None = None,
     refused: Collection[tuple[str, str]] = (),
     external: Mapping[str, str] | None = None,
+    policy: RulePolicy | None = None,
 ) -> tuple[list[Fields], Mapping[str, Alias], list[Named]]:
     """What each held row states about its other party, the links learned from all of them, and
     the name of each: the one place a row becomes a name, so the Entities page and the detector
@@ -1002,7 +1151,8 @@ def name_rows(
     already, else they are learned here less those the owner `refused` (`refused_links`), whose
     rows are named by their description again. A caller that names rows without passing what the
     store refused or declared would disagree with the pages, so every caller that has a store
-    passes both."""
+    passes both. `policy` is the owner's settings and ticks for the learned rules
+    (`learned_rules.rule_policy`); the defaults where a caller gives none."""
     held = held_counterparts(rows, pairs, external)
     fields = [
         Fields(r.description, r.counterparty, r.party_account, r.party_source_id, account)
@@ -1011,7 +1161,7 @@ def name_rows(
     if links is None:
         learned: Mapping[str, Alias] = {
             shape: alias
-            for shape, alias in learned_links(fields).items()
+            for shape, alias in learned_links(fields, policy, refused).items()
             if (shape, alias.name) not in refused
         }
     else:
@@ -1106,13 +1256,21 @@ class NameOrigin:
     #: The first source (alphabetically) that stated this name or the source's id, "" where none
     #: did or the name is an account number, which is not per source.
     source: str = ""
+    #: Rows named by an INFERENCE (`LEARNED_RULE`): counted in `rows` and apart from every
+    #: identified count, so a name never looks better evidenced than it is.
+    inferred: int = 0
 
     @property
     def rows(self) -> int:
         return (
             self.stated + self.linked + self.described + self.matched + self.truncated
-            + self.account + self.source_id
+            + self.account + self.source_id + self.inferred
         )
+
+    @property
+    def identified(self) -> int:
+        """Rows that state or are linked to the party by something other than an inference."""
+        return self.rows - self.inferred
 
     @property
     def kind(self) -> str:
@@ -1127,7 +1285,9 @@ class NameOrigin:
             return ALIAS
         if self.matched:
             return MATCHED_NAME
-        return TRUNCATED_NAME if self.truncated else DESCRIPTION
+        if self.truncated:
+            return TRUNCATED_NAME
+        return LEARNED_RULE if self.inferred else DESCRIPTION
 
 
 def name_origins(
@@ -1142,6 +1302,7 @@ def name_origins(
     described: Counter[str] = Counter()
     matched: Counter[str] = Counter()
     truncated: Counter[str] = Counter()
+    inferred: Counter[str] = Counter()
     accounts: Counter[str] = Counter()
     source_ids: Counter[str] = Counter()
     supports: dict[str, dict[str, int]] = {}
@@ -1157,6 +1318,8 @@ def name_origins(
             matched[item.name] += 1
         elif item.kind == TRUNCATED_NAME:
             truncated[item.name] += 1
+        elif item.kind == LEARNED_RULE:
+            inferred[item.name] += 1
         elif item.kind == ALIAS:
             linked[item.name] += 1
             supports.setdefault(item.name, {})[item.via] = item.support
@@ -1180,9 +1343,10 @@ def name_origins(
             accounts[name],
             source_ids[name],
             first_source.get(name, ""),
+            inferred[name],
         )
         for name in {
-            *stated, *linked, *described, *matched, *truncated, *accounts, *source_ids
+            *stated, *linked, *described, *matched, *truncated, *accounts, *source_ids, *inferred
         }
     }
 
@@ -1223,6 +1387,7 @@ def _origin_has(origin: NameOrigin, kind: str) -> bool:
             ALIAS: origin.linked,
             MATCHED_NAME: origin.matched,
             TRUNCATED_NAME: origin.truncated,
+            LEARNED_RULE: origin.inferred,
             DESCRIPTION: origin.described,
         }[kind]
     )
@@ -1238,7 +1403,9 @@ def name_readings(
     seen: dict[str, Counter[str]] = {}
     for row, item in zip(rows, named, strict=True):
         description, counterparty = row[0], row[1]
-        if not item.name or item.kind in (ALIAS, MATCHED_NAME, TRUNCATED_NAME, ACCOUNT, SOURCE_ID):
+        if not item.name or item.kind in (
+            ALIAS, MATCHED_NAME, TRUNCATED_NAME, LEARNED_RULE, ACCOUNT, SOURCE_ID
+        ):
             continue
         if item.kind == DESCRIPTION:
             read = reading_of(description)
@@ -1724,6 +1891,8 @@ class Covered:
     support: int = 0
     #: For a row named through a link: the kind of identifier (`LADDER`) the link leads to.
     linked_by: str = ""
+    #: For a `LEARNED_RULE` row: the other identified rows the rule was tested against.
+    tested: int = 0
 
 
 @dataclass(frozen=True)

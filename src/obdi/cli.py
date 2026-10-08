@@ -40,6 +40,7 @@ from .analysis.entities import (
 )
 from .analysis.external_accounts import dismissed_keys, unheld_accounts
 from .analysis.free_position import FreeFigures
+from .analysis.learned_rules import rule_policy
 from .analysis.recurring import RecurringFindings, Series
 from .analysis.this_month import MonthNote, ThisMonth
 from .core.errors import DataError
@@ -3940,7 +3941,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             occurrences = [t for t in transactions if counts_as_occurrence(t)]
             external = store.external_identifiers()
             _fields, links, named = name_rows(
-                occurrences, pairs, refused=refused_links(store), external=external
+                occurrences,
+                pairs,
+                refused=refused_links(store),
+                policy=rule_policy(store),
+                external=external,
             )
             held_names = {n: o.rows for n, o in name_origins(named).items()}
             held_entities = shape_entities(store, held_names)
@@ -4072,7 +4077,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         _fields, _links, named = name_rows(
             rows,
             store.confirmed_transfer_pairs(),
-            refused=refused_links(store),
+            refused=refused_links(store), policy=rule_policy(store),
             external=store.external_identifiers(),
         )
         return name_origins(named, [t.source for t in rows])
@@ -4086,7 +4091,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         _fields, links, _named = name_rows(
             rows,
             store.confirmed_transfer_pairs(),
-            refused=refused_links(store),
+            refused=refused_links(store), policy=rule_policy(store),
             external=store.external_identifiers(),
         )
         return links
@@ -4110,6 +4115,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             via=item.via,
             support=item.support,
             linked_by=item.linked_by,
+            tested=item.tested,
         )
 
     def entities_data() -> EntitiesView:
@@ -4130,7 +4136,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             fields, _links, named = name_rows(
                 rows,
                 store.confirmed_transfer_pairs(),
-                refused=refused_links(store),
+                refused=refused_links(store), policy=rule_policy(store),
                 external=store.external_identifiers(),
             )
             listed: dict[str, list[Covered]] = {}
@@ -4178,7 +4184,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 _fields, _links, named = name_rows(
                     rows,
                     store.confirmed_transfer_pairs(),
-                    refused=refused_links(store),
+                    refused=refused_links(store), policy=rule_policy(store),
                     external=store.external_identifiers(),
                 )
                 return apply_external_action(store, rows, named, action, form)
@@ -4198,7 +4204,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             fields, links, named = name_rows(
                 rows,
                 store.confirmed_transfer_pairs(),
-                refused=refused_links(store),
+                refused=refused_links(store), policy=rule_policy(store),
                 external=store.external_identifiers(),
             )
             origins = name_origins(named, [t.source for t in rows])

@@ -27,6 +27,7 @@ from ..analysis.entities import (
     COVERED_SHOWN,
     KIND_SENTENCES,
     LADDER,
+    LEARNED_RULE,
     LINK_SENTENCES,
     MATCHED_NAME,
     OPENING_WORDS,
@@ -103,8 +104,16 @@ def _sources_sentence(view: EntitiesView) -> str:
     parts = [
         f"{by_kind[kind]:,} from the {KIND_SENTENCES[kind]}"
         for kind in LADDER
-        if by_kind[kind] and kind not in (ALIAS, MATCHED_NAME, TRUNCATED_NAME)
+        if by_kind[kind] and kind not in (ALIAS, MATCHED_NAME, TRUNCATED_NAME, LEARNED_RULE)
     ]
+    inferred = sum(origin.inferred for origin in view.origins.values())
+    identified = sum(origin.identified for origin in view.origins.values())
+    if inferred:
+        parts.append(
+            f"{identified:,} transactions identified and {inferred:,} inferred (named by a "
+            "description that opens as one party's identified rows do, which is a guess and "
+            "not a statement)"
+        )
     linked = sum(origin.linked for origin in view.origins.values())
     if linked:
         parts.append(f"{plural(linked, 'transaction')} named through payments seen by both")

@@ -32,6 +32,7 @@ from obdi.analysis.entities import (
     DESCRIPTION,
     KIND_SENTENCES,
     LADDER,
+    LEARNED_RULE,
     MATCHED_NAME,
     SHAPE_STEPS,
     SOURCE_ID,
@@ -141,6 +142,7 @@ class TestTheLadderNamesARowByTheStrongestRungItCarries:
             ALIAS,
             MATCHED_NAME,
             TRUNCATED_NAME,
+            LEARNED_RULE,
             DESCRIPTION,
         )
         assert set(LADDER) <= set(KIND_SENTENCES)

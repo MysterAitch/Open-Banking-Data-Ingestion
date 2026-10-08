@@ -32,7 +32,9 @@ from obdi.ingest.store import Store
 #: the commitments or the series.
 #: Measured 31 once the series set aside as not commitments were read as well
 #: (`Store.dismissals`, one select), again not growing with either.
-RECURRING_STATEMENTS = 31
+#: Measured 32 once the learned rules' settings and ticks were read
+#: (`Store.preferences_with_prefix`, one select, not growing with the rules or the store).
+RECURRING_STATEMENTS = 32
 SECONDS = 20.0
 
 

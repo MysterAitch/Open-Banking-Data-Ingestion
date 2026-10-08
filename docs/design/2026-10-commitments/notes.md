@@ -421,6 +421,19 @@ Prediction for the real store: the groups on the page include the multi-branch r
 owner merges one, its series join. Not measured on the real store; the habit's absence is not
 explained by this and is not claimed to be.
 
+The learned-rule rung (`LEARNED_RULE`, `analysis/learned_rules.py`, entities.md section 4a) takes
+its two settings from the store with these defaults: SUPPORT 2 (one row is a description and
+teaches no pattern) and CONFIDENCE 300 (with none of N other identified rows matching, the 95%
+bound on the share that would is about 3/N, so 300 is "fewer than 1 in 100"; the strictest
+reading a household's few thousand rows can still meet). Both are guesses until the real store is
+read. Measured on the faithful large invented store, rebuilt from raw, at confidence off / 300 /
+30: the rung found NO rule and linked no row (names 127, series 14, stopped 3, habit 3 each time),
+because eight openings are shared by two or more parties and teach nothing - the corpus's
+merchants each have three branch uids opening alike, which is the case the rule is built to
+refuse. So the rung is proved on constructed worlds only
+(`tests/analysis/test_entities_learned_rule.py`) and the large store neither confirms nor
+refutes it; the real store is the first place it can show.
+
 The predicted row above is a prediction and not a result, written before any real store was read,
 in the words of the build that makes it (invented stores, counts only: the faithful large store
 went from 40 names to 51, 3 proposals, 14 series, 6 stopped, with the same proposals, series, and
