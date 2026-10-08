@@ -567,3 +567,17 @@ aggregator and a statement may carry either's meaning.
   27th, within four days".
 - **Joining payees by shared words**: a dental practice and an energy supplier share a trading
   name; they must stay apart.
+
+## Learned rules as built (entities.md section 4a)
+
+The rung is `analysis/learned_rules.py` (learning, state, sentences, the settings) read by
+`entities.learned_links`; the steps below were cut in order, one commit each.
+
+1. PAGE. `/entities` lists the rules (`entities.rule_views`, `EntitiesView.rules`), with the counts
+   line (`summary_sentence`), a settings form posting to `/entities-rule-settings` (shown only on
+   the unmasked page), and per rule its sentence, applied or offered state, and for an offered rule
+   a Tick (`/entities-rule-tick`, `keep_rule`) and the descriptions it would link under a closed
+   fold. Not this is the existing `/entity-link-refuse` on the entity page; the end-to-end
+   withdrawal is `tests/cli/test_entities_learned_rules_page.py`. One preference select was added
+   to the Entity, Entities, and Recurring page budgets earlier; this step adds none.
+   Rejected: a floor that hides a weak rule (the owner's decision: show it, unticked).

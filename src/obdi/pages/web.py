@@ -6486,6 +6486,12 @@ class ConnectionHandler(
         if route == "/entities-not-external":
             self._entities_press_post(entity_actions.NOT_EXTERNAL)
             return
+        if route == "/entities-rule-settings":
+            self._entities_press_post(entity_actions.RULE_SETTINGS)
+            return
+        if route == "/entities-rule-tick":
+            self._entities_press_post(entity_actions.RULE_TICK)
+            return
         if route == "/entities-offer-again":
             self._entities_press_post(entity_actions.OFFER_AGAIN)
             return

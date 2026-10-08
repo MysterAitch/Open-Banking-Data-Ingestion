@@ -4125,6 +4125,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             COVERED_SHOWN,
             entities_of,
             name_readings,
+            rule_views,
             view_of,
         )
         from .analysis.entity_ties import row_ties
@@ -4133,12 +4134,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
             names = account_names(store)
-            fields, _links, named = name_rows(
+            refusals = refused_links(store)
+            policy = rule_policy(store)
+            fields, links, named = name_rows(
                 rows,
                 store.confirmed_transfer_pairs(),
-                refused=refused_links(store), policy=rule_policy(store),
+                refused=refusals,
+                policy=policy,
                 external=store.external_identifiers(),
             )
+            rule_lines, learning = rule_views(fields, links, policy, refusals)
             listed: dict[str, list[Covered]] = {}
             order = sorted(
                 range(len(rows)),
@@ -4163,6 +4168,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 row_ties(fields, named),
                 unheld,
                 declined,
+                rule_lines,
+                learning.shared,
+                policy.settings,
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
@@ -4172,13 +4180,25 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             KEEP_LINK,
             MERGE,
             REFUSE_LINK,
+            RULE_ACTIONS,
             SPLIT,
             apply_action,
             apply_external_action,
+            apply_rule_action,
         )
         from .analysis.recurring import counts_as_occurrence
 
         with Store(db_path) as store:
+            if action in RULE_ACTIONS:
+                rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+                fields, _links, _named = name_rows(
+                    rows,
+                    store.confirmed_transfer_pairs(),
+                    refused=refused_links(store),
+                    policy=rule_policy(store),
+                    external=store.external_identifiers(),
+                )
+                return apply_rule_action(store, fields, action, form)
             if action in EXTERNAL_ACTIONS:
                 rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
                 _fields, _links, named = name_rows(
