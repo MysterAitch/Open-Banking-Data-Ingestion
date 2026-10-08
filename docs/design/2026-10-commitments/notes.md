@@ -403,7 +403,23 @@ store, not the 800 of the position); no weekly commitment's phase was tried acro
 | 0.4.367 (key reverted; common by position; function words) | 63 | 54 / 8 / 1 | 51 / 7 / 5 | 31 (19) | 5 | 1,297 / 185 / 776 / 2 groups of 20 |
 | 0.4.369 (R2c: the stated party names a row; the learned link joins) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 867 (777 stated, 90 description, 34 rows linked) / 99 / 298 / 0 |
 | 0.4.371 (exact-match rung; both dates; per-kind fit) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 866 (777 stated, 89 description, 34 linked, 17 exact) / 99 / 297 / 0 |
+| 0.4.382 (party account and id on the row; the ladder reads them) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 972 (45 account, 651 source id, 207 stated, 69 description, 210 linked, 54 exact) |
 | Next release (party account and id on the row; the ladder reads them; own accounts named "your <account>"): PREDICTED, NOT MEASURED | about 62 | 54 / 8 / 0 to 1 | about 47 / 7 / 8 | about 36 (17), falling if the habit returns | 4 | names fall where one person was paid under several spellings and rise where people share a stated name; the net on mostly card spending is small |
+
+0.4.382's rise (867 to 972 names, Recurring-stopped 31 to 38) was a false premise, not a fault in
+the ladder: Starling's counterparty uid is per merchant LOCATION for card payments. The owner
+decided (2026-10-08) that it stays an identity and the locations are gathered into the company.
+Measured on the faithful large invented store, rebuilt from raw, with the corpus stating one uid
+per merchant against three per merchant (a uid per branch, `tests/large_store_corpus.py`): names
+51 (13 account, 25 source id, 2 stated, 11 description) -> 127 (13, 75, 27, 12); proposals 3 -> 28,
+of which evidence (`SAME_ROWS`) groups 0 -> 25, each the three branches of one retailer; series 14
+(3 stopped, 3 habit) -> 14 (3, 3), unchanged because the branch uids rotate within a payee the
+corpus pays at irregular intervals. The constructed world in
+`tests/analysis/test_entities_merchant_locations.py` is the case where it matters: twelve weekly
+payments over three uids are no series before the merge and one weekly series of twelve after.
+Prediction for the real store: the groups on the page include the multi-branch retailers; once the
+owner merges one, its series join. Not measured on the real store; the habit's absence is not
+explained by this and is not claimed to be.
 
 The predicted row above is a prediction and not a result, written before any real store was read,
 in the words of the build that makes it (invented stores, counts only: the faithful large store
