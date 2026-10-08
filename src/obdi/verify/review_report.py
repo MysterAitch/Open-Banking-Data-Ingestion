@@ -20,11 +20,11 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from enum import StrEnum
 
 from ..core.models import SourceTier, TransactionStatus
 from ..core.plural import agree, plural
 from ..ingest.accounts import is_balance_only
+from ..ingest.finishers import FlagClass
 from ..ingest.identity_health import PENDING_SNAPSHOT_SOURCES
 from ..ingest.matching import (
     EXACT_RULE_DOUBT,
@@ -35,87 +35,6 @@ from ..ingest.matching import (
 from ..ingest.store import FOLDED_SIGHTING_PREFIX, Store
 from .agreement import DEFINES, MET, UNMET, Known, known_of_opening
 from .balance_anchors import effective_opening
-
-
-class FlagClass(StrEnum):
-    """Why an open flag is, or is not, still a question. Strongest proof first."""
-
-    #: The flagged row no longer exists.
-    ROW_GONE = "row-gone"
-    #: The flagged row is void or folded: history, not a payment to confirm.
-    ROW_IS_HISTORY = "row-is-history"
-    #: No neighbour the matcher would have weighed is still live.
-    NO_LIVE_NEIGHBOUR = "no-live-neighbour"
-    #: Every live neighbour was reported under a different provider id in one
-    #: response, which is the provider saying two payments.
-    LISTED_TOGETHER = "listed-together"
-    #: Every live neighbour carries a different id from a source that names a
-    #: payment by one id for life. Also holds where the neighbours are a mix of
-    #: this proof and `LISTED_TOGETHER`: the weaker of the two names the class.
-    IDS_KEPT_FOR_LIFE = "ids-kept-for-life"
-    #: The rows reproduce a known balance before every row of the pair and one on or after
-    #: every row, with both counted, so dropping either would put the later balance out.
-    #: THE PROOF'S CONDITIONS ARE STATED ONCE, here, and `balance_proof` enforces them:
-    #:
-    #:   - Some source LISTS both rows as separate lines in one response (`_listed_in_one`),
-    #:     for every neighbour that no id proof has already separated. A statement reader can
-    #:     read one line twice at a page boundary, and the balance is what rules that out; where
-    #:     no source lists both, the rows may be one payment seen by two sources and the
-    #:     balance is not independent of either, so the flag stays open however it looks.
-    #:   - Every row of the set (the flagged row and all its live neighbours) is BOOKED, in one
-    #:     account, with a non-nil amount. A pending row is not in a bank's or a statement's
-    #:     booked balance, so its being counted proves nothing.
-    #:   - K1 is the latest known balance dated strictly BEFORE the earliest row, and K2 the
-    #:     earliest dated on or after the latest row. A known balance is a figure for the END
-    #:     of its day and includes that day's rows (`balance_anchors.derive_opening`), so a
-    #:     statement dated on the rows' own day closes them and cannot open them.
-    #:   - K2 must be TESTED: the rows reproduce it. K1 may be tested or may be the one that
-    #:     DEFINES the opening, because the proof is the difference between the two, which the
-    #:     opening cancels out of. A nil opening is a premise rather than a known balance and
-    #:     never serves, so a pair before the first known balance is open: the opening is
-    #:     worked out backwards from that balance and absorbs any error.
-    #:   - Every known balance from K1 to K2, whichever source states it, is reproduced, and no
-    #:     two sources state different figures for one day in that span. A balance stated for a
-    #:     moment is never K1 or K2 but is still held to this.
-    #:   - The account is not tracked by its stated balances alone (those are followed: a row is
-    #:     derived to make each agree, so nothing is tested) and has no known Space (its
-    #:     balances may be the whole family's, which needs the account map that this report is
-    #:     not given). An account fed by the bank's own feed counts as possibly having Spaces.
-    #:
-    #: THE HONEST LIMIT. A duplicate offset by a MISSING row of the same size in the same span
-    #: would also reproduce K2. The money is then still right and no row changes, so the flag
-    #: is closed in name only; that is accepted because the balance is what the flag protects.
-    #: Rows are placed by their stored dates: a source whose own dating moves a row across a
-    #: known balance is not separately checked, and nor are the movement checks that the
-    #: account's agreement also reads.
-    #:
-    #: WHEN IT STOPS HOLDING it behaves as the other settled classes do: the flag is already
-    #: deleted and stays so until a rebuild, which raises it again and closes it only if the
-    #: proof still holds.
-    BALANCES_NEED_BOTH = "balances-need-both"
-    #: The flagged row is of nil amount, and so is every neighbour, since a neighbour is a row
-    #: of the same amount. A flag asks whether a sum is counted once or twice, and nil counted
-    #: twice is nil: no balance, total, or budget figure depends on the answer, so there is
-    #: nothing for a person to decide and no balance that could decide it (the balance proof
-    #: above refuses a nil amount for that reason). Both rows are kept, as every line a source
-    #: lists is. Found on a card whose statements each list two lines of 0.00 under different
-    #: descriptions on the statement's date: nine of the eleven flags open on the real store
-    #: were these, one raised by every statement.
-    NIL_AMOUNT = "nil-amount"
-    #: Everything else: a real question for a person.
-    OPEN = "open"
-
-
-#: The classes whose flag asks a question the evidence has answered.
-SETTLED_CLASSES: tuple[FlagClass, ...] = (
-    FlagClass.ROW_GONE,
-    FlagClass.ROW_IS_HISTORY,
-    FlagClass.NO_LIVE_NEIGHBOUR,
-    FlagClass.LISTED_TOGETHER,
-    FlagClass.IDS_KEPT_FOR_LIFE,
-    FlagClass.BALANCES_NEED_BOTH,
-    FlagClass.NIL_AMOUNT,
-)
 
 #: What a class proved, in words, for the report. Only the proofs that are not obvious from
 #: their names are said.

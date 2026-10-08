@@ -15,9 +15,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.analysis.entities import detach_shape
 from obdi.ingest.entity_records import EntityRefused
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import SCHEMA_VERSION, Store
 
 GROCER = ("fernhollow grocers", "fernhollow grocers express", "fernhollow metro")

@@ -16,6 +16,7 @@ from datetime import UTC, date, datetime, timedelta
 import httpx
 import pytest
 
+from landing import import_file
 from obdi.analysis.recurring import (
     DATED_MADE,
     DATED_POSTED,
@@ -26,7 +27,6 @@ from obdi.analysis.recurring import (
     Series,
 )
 from obdi.cli import build_web_config
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from obdi.pages import values_sitting
 from obdi.pages.web_recurring import render_recurring

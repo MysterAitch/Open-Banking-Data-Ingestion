@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import pytest
 
+from landing import import_file
 from obdi.core.errors import DataError
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from test_statement_shape import build_pdf
 
@@ -122,7 +122,7 @@ class TestAStatementAsARealWriterMakesIt:
             assert import_file(store, path, account_id="santander-cc").inserted == 7
 
     def test_Rebuild_ReplaysItWithoutAProblem_AndKeepsItsRows(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         path = tmp_path / "statement.pdf"
         path.write_bytes(SANTANDER_AS_WRITTEN)
@@ -138,7 +138,7 @@ class TestAStatementAsARealWriterMakesIt:
     ):
         """The rebuild's line must name the situation, since "cannot decode
         byte" sends the reader looking for a corrupt file."""
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         with Store(tmp_path / "s.sqlite3") as store:
             _keep(store, UNKNOWN_BANK, account="some-card")
@@ -183,7 +183,7 @@ class TestAKeptStatementWithNoAccountAddsNoRows:
     """
 
     def test_Rebuild_WhenAParserCouldReadIt_StillAddsNoRows_AndCountsIt(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         with Store(tmp_path / "s.sqlite3") as store:
             _keep(store, SANTANDER_AS_WRITTEN)
@@ -195,7 +195,7 @@ class TestAKeptStatementWithNoAccountAddsNoRows:
         assert "1 kept statement" in report.describe()
 
     def test_Rebuild_WhenNoParserReadsIt_AddsNoRows_AndIsNotAProblem(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         with Store(tmp_path / "s.sqlite3") as store:
             _keep(store, UNKNOWN_BANK)
@@ -207,7 +207,7 @@ class TestAKeptStatementWithNoAccountAddsNoRows:
         assert "no parser yet" in report.describe()
 
     def test_Rebuild_WithOneOfEach_CountsBothAndSaysHowManyAParserCanRead(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         with Store(tmp_path / "s.sqlite3") as store:
             _keep(store, SANTANDER_AS_WRITTEN)
@@ -221,7 +221,7 @@ class TestAKeptStatementWithNoAccountAddsNoRows:
         assert "1 with no parser yet" in described
 
     def test_Rebuild_WithNoKeptStatements_SaysNothingAboutThem(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         path = tmp_path / "statement.pdf"
         path.write_bytes(SANTANDER_AS_WRITTEN)

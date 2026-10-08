@@ -45,9 +45,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
-from obdi.ingest.pipeline import import_file
+from landing import import_file, rebuild_from_raw
 from obdi.ingest.providers import starling
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from test_export_cuts import Row, export_lines
 from test_family_anchors import FEED_ORIGIN, land_evidence

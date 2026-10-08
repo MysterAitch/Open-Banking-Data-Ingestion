@@ -45,7 +45,7 @@ def land(store_path, path, account: str):
     app can actually hold, and it is what makes test_TheCorpus_SurvivesARebuild
     meaningful rather than tautological.
     """
-    from obdi.ingest.pipeline import import_file
+    from landing import import_file
 
     with Store(store_path) as store:
         return import_file(store, Path(path), account_id=account)
@@ -195,7 +195,7 @@ class TestWhatTheApplicationDerivesFromIt:
         asserts the survival directly rather than trusting that importing
         through the door is enough - the door could change.
         """
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         directory, world, _manifest = corpus
         store_path = tmp_path / "store.sqlite3"

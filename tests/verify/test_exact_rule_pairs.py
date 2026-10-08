@@ -37,6 +37,7 @@ from datetime import date
 import pytest
 
 from consecutive_days_corpus import consecutive_payments
+from landing import import_file, rebuild_from_raw
 from late_settlement_corpus import (
     HOUSEHOLD_EXPORT,
     LATE_DAY,
@@ -53,8 +54,6 @@ from obdi.ingest.matching import (
     REFUSED_SAME_SOURCE,
     REFUSED_SEVERAL,
 )
-from obdi.ingest.pipeline import import_file
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.exact_rule_measure import NAMED_PAIRS, exact_rule_report
 from test_space_attribution import MAIN, MAP

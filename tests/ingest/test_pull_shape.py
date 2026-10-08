@@ -13,9 +13,9 @@ from datetime import date
 
 import pytest
 
+from landing import pull_truelayer
 from obdi.ingest.accounts import AccountMap
 from obdi.ingest.connections import Connection
-from obdi.ingest.pull import pull_truelayer
 from obdi.ingest.store import Store
 
 

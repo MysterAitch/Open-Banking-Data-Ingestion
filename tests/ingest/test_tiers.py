@@ -98,9 +98,9 @@ class TestTheTierReachesTheProvider:
         the ask carries it, the notes say so, completion stamps it."""
         from datetime import date
 
+        from landing import pull_truelayer
         from obdi.ingest.accounts import AccountMap
         from obdi.ingest.connections import Connection, ConnectionStore
-        from obdi.ingest.pull import pull_truelayer
 
         asked_since: list[date | None] = []
 
@@ -176,9 +176,9 @@ class TestTheTierReachesTheProvider:
     def test_AnExplicitWindow_BypassesTiering(self, tmp_path, monkeypatch):
         from datetime import date
 
+        from landing import pull_truelayer
         from obdi.ingest.accounts import AccountMap
         from obdi.ingest.connections import Connection, ConnectionStore
-        from obdi.ingest.pull import pull_truelayer
 
         asked_since: list[date | None] = []
         monkeypatch.setattr(

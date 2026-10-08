@@ -40,8 +40,9 @@ from datetime import date, datetime
 import pytest
 
 from card_chain_corpus import CARD, CLOSINGS, build_card
+from landing import import_file
 from obdi.core.models import RawArtefact
-from obdi.ingest.pipeline import artefact_digest, import_file
+from obdi.ingest.pipeline import artefact_digest
 from obdi.ingest.store import Store
 from obdi.verify.movement_completeness import (
     COLLAPSED,

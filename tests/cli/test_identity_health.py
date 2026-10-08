@@ -21,12 +21,12 @@ from http.server import HTTPServer
 
 import httpx
 
+from landing import rebuild_from_raw
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.identity_health import ProviderIdTally, SharedIdentity, identity_health
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import starling, truelayer
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.pages.web import AuthorisationSession, ConnectionHandler, WebConfig
 

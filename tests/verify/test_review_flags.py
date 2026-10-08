@@ -25,7 +25,7 @@ from flag_world import (
     add_unsettled_pair,
     build_flag_world,
 )
-from obdi.ingest.rebuild import rebuild_from_raw
+from landing import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.agreement import standing_of
 from obdi.verify.balance_anchors import effective_opening, record_stated_anchor
@@ -223,7 +223,7 @@ class TestTwoPaymentsIsRememberedAcrossARebuild:
 
 class TestTheAnsweredListIsTheLastTwenty:
     def test_AnsweredList_AfterTwentyOneAnswers_ListsTheNewestTwentyAndNotTheFirst(self, tmp_path):
-        from obdi.ingest.pipeline import import_file
+        from landing import import_file
 
         path = tmp_path / "bulk.csv"
         path.write_text(

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 
+from landing import rebuild_from_raw
 from obdi.ingest.providers import starling
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 
 

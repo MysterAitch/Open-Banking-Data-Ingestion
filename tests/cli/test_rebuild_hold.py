@@ -75,7 +75,7 @@ def rebuild_underway(db: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None
 
     reached, release = threading.Event(), threading.Event()
 
-    def paused(store, progress=None, account_map=None) -> RebuildReport:
+    def paused(store, progress=None, account_map=None, *, finishers) -> RebuildReport:
         report = RebuildReport()
         if progress is not None:
             progress(1, 2, report)

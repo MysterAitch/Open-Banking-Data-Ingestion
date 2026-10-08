@@ -16,10 +16,10 @@ from datetime import UTC, date, datetime
 
 import pytest
 
+from landing import record_typed_transaction
 from obdi.cli import build_web_config
 from obdi.ingest.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
 from obdi.ingest.store import Store
-from obdi.ingest.typed_transactions import record_typed_transaction
 from obdi.pages.web import AuthorisationSession, ConnectionHandler
 from obdi.verify.balance_anchors import record_stated_anchor
 from test_phone_layout import (

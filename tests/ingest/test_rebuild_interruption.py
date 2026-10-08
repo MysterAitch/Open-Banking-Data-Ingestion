@@ -23,10 +23,10 @@ from datetime import datetime
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.core.models import RawArtefact
 from obdi.ingest.fingerprint import code_fingerprint, rebuild_needed, stamp_fingerprint
 from obdi.ingest.identity import artefact_digest
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 
 

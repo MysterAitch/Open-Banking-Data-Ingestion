@@ -31,8 +31,8 @@ from pathlib import Path
 import pytest
 
 from credit_union_documents import Move, document, pdf, section
+from landing import rebuild_from_raw
 from obdi.ingest.parsers.credit_union_pdf import section_key
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.balance_anchors import effective_opening
 from section_harness import (

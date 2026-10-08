@@ -19,8 +19,8 @@ from fetch_gaps_world import (
     load_household,
     santander_statements,
 )
+from landing import import_file
 from obdi.ingest.accounts import AccountRecord, AccountRef
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
 from obdi.read.fetch_gaps import GapKind, fetch_report, gather_evidence

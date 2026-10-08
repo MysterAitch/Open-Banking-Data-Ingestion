@@ -44,6 +44,7 @@ from datetime import date
 import pytest
 
 from consecutive_days_corpus import consecutive_payments
+from landing import import_file, rebuild_from_raw
 from late_settlement_corpus import (
     Payment,
     equal_payments,
@@ -52,8 +53,6 @@ from late_settlement_corpus import (
     late_settlement_payments,
 )
 from obdi.ingest import matching
-from obdi.ingest.pipeline import import_file
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.exact_rule_measure import exact_rule_report
 from test_absorbed_rows import second_export

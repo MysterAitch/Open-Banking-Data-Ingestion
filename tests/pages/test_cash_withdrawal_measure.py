@@ -55,6 +55,7 @@ from typing import Any, ClassVar
 
 import pytest
 
+from landing import record_typed_transaction
 from late_settlement_corpus import ORDERS, Payment, household
 from obdi.ingest.accounts import (
     BALANCE_ONLY_KIND,
@@ -81,7 +82,6 @@ from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import truelayer
 from obdi.ingest.rebuild import parse_artefact_transactions
 from obdi.ingest.store import Store
-from obdi.ingest.typed_transactions import record_typed_transaction
 from obdi.pages.web_accounts import account_form, account_from_form
 from obdi.read.account_names import AccountShown, AccountsShown
 from obdi.verify.balance_anchors import effective_opening, record_stated_anchor

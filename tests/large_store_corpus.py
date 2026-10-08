@@ -53,11 +53,12 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from landing import import_file
 from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.identity import content_key
-from obdi.ingest.pipeline import import_file, pair_transfers_across_store, reconcile_batch
+from obdi.ingest.pipeline import pair_transfers_across_store, reconcile_batch
 from obdi.ingest.providers import starling, truelayer
 from obdi.ingest.rebuild import parse_artefact_transactions
 from obdi.ingest.space_attribution import fold_space_copies

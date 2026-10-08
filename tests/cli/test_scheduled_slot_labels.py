@@ -54,7 +54,7 @@ def db(tmp_path) -> Path:
 def _starling_that_writes_its_ledger(monkeypatch, db: Path, when: datetime, seen: list[str]):
     """A stand-in for the Starling pull that ledgers an ask the way the real one does."""
 
-    def fake(store, token, *, account_map, since, trigger):
+    def fake(store, token, *, account_map, since, trigger, finishers):
         seen.append(trigger)
         store.record_attempt(
             source="starling",

@@ -86,7 +86,7 @@ from card_chain_corpus import (
     statement_day,
     text_day,
 )
-from obdi.ingest.pipeline import import_file
+from landing import import_file
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
 

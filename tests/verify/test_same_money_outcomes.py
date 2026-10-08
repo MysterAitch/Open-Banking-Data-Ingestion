@@ -31,8 +31,8 @@ from card_chain_corpus import (
 )
 from card_variant_corpus import CLOSINGS as MINI_CLOSINGS
 from card_variant_corpus import SIBLING_SCOPE, Variant, build_mini_card
+from landing import rebuild_from_raw
 from obdi.core.models import TransactionStatus
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.same_money_fold import (
     _Attempt,
     _Candidate,

@@ -35,8 +35,8 @@ from datetime import date
 
 import pytest
 
+from landing import import_file
 from obdi.core.errors import DataError
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.statement_terms import keep_statement_readings
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf

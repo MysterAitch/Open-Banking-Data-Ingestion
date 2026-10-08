@@ -72,7 +72,7 @@ class TestTheAnnotationStore:
             assert store.annotations("category")[entity] == ("Subscriptions", "rule:v2")
 
     def test_Annotations_SurviveARebuild_AndReattach(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         with Store(tmp_path / "s.sqlite3") as store:
             # Land through a real artefact so the rebuild has raw to replay.

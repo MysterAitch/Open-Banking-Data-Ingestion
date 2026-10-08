@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.ingest.entity_records import (
     ACCOUNT,
     DECLARED,
@@ -28,7 +29,6 @@ from obdi.ingest.entity_records import (
     EntityRefused,
     Identifier,
 )
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import SCHEMA_VERSION, Store
 
 NOW = datetime(2026, 10, 7, 9, 0, tzinfo=UTC)

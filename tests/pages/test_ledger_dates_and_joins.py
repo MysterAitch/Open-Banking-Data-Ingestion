@@ -34,9 +34,9 @@ import re
 
 import pytest
 
+from landing import rebuild_from_raw
 from late_settlement_corpus import Payment, aggregator_item, household, late_settlement_payments
 from obdi.ingest.family_anchors import families_of
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.pages.web_ledger import render_ledger
 from obdi.read.ledger import build_ledger

@@ -30,8 +30,8 @@ from datetime import date
 
 import pytest
 
+from landing import import_file
 from obdi.ingest.accounts import AccountRecord, AccountRef
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.spaces import SPACE_KIND
 from obdi.ingest.statement_terms import keep_statement_readings
 from obdi.ingest.store import Store

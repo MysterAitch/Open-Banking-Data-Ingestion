@@ -20,6 +20,7 @@ import json
 from dataclasses import replace
 from datetime import date
 
+from landing import rebuild_from_raw
 from obdi.core.models import TransactionStatus
 from obdi.export.actual_push import build_audit_envelope, build_envelope, build_prune_envelope
 from obdi.export.replay import (
@@ -30,7 +31,6 @@ from obdi.export.replay import (
 )
 from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.providers import starling
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 
 MAIN = "household-main"

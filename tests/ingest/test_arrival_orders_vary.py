@@ -20,8 +20,8 @@ import pathlib
 import re
 
 import obdi.ingest.rebuild
+from landing import rebuild_from_raw
 from late_settlement_corpus import ARRIVALS, household, late_settlement_payments
-from obdi.ingest.rebuild import rebuild_from_raw
 from round_up_corpus import main_feed, space_feed
 from test_export_cuts import Row
 from test_space_attribution import MAP

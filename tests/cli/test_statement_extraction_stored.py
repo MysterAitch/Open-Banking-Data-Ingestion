@@ -32,10 +32,9 @@ import obdi.ingest.statement_columns as statement_columns
 import obdi.ingest.statement_extraction as statement_extraction
 import obdi.ingest.statement_shape as statement_shape
 import obdi.ingest.statement_terms as statement_terms
+from landing import import_file, rebuild_from_raw
 from obdi.cli import build_web_config
 from obdi.ingest.parsers import pdf_statements
-from obdi.ingest.pipeline import import_file
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import SCHEMA_VERSION, ExtractionRecord, Store, StoreIsNewer
 from served_store import environment_for
 from test_bring_in_assign import (

@@ -23,10 +23,10 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
+from landing import import_file
 from obdi.analysis.entities import detach_shape
 from obdi.cli import build_web_config
 from obdi.ingest.entity_records import BEGINS, CONTAINS
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from obdi.pages import values_sitting
 from page_dom import elements, parse

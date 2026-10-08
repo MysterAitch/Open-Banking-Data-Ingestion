@@ -137,6 +137,7 @@ from .verify.coverage import (
     transpositions,
 )
 from .verify.coverage import report as coverage_report
+from .verify.landing import finishers as landing_finishers
 from .verify.protection import recheck as recheck_protections
 from .verify.review_flags import FlagQueue, Outcome
 from .verify.review_settlement import settle_review_flags
@@ -824,7 +825,10 @@ def start_background_rebuild(db_path: Path) -> str:
             # here it is only renewed (on_progress) and released.
             with Store(db_path) as store:
                 report = rebuild_from_raw(
-                    store, progress=on_progress, account_map=_account_map(store)
+                    store,
+                    progress=on_progress,
+                    account_map=_account_map(store),
+                    finishers=landing_finishers(),
                 )
                 # The stamp says "this data was derived by this code".
                 # Success-only, inside the same Store: a failed rebuild
@@ -2236,6 +2240,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     only_account=provider_ref,
                     psu_ip=psu_ip,
                     trigger=trigger,
+                    finishers=landing_finishers(),
                 )
         except Exception as exc:
             # Half the diagnosis is what was asked: a refused "since
@@ -2616,7 +2621,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             path.write_bytes(payload)
             with Store(db_path) as store:
                 summary = import_file(
-                    store, path, account_id=account, account_map=_account_map(store)
+                    store,
+                    path,
+                    account_id=account,
+                    account_map=_account_map(store),
+                    finishers=landing_finishers(),
                 )
                 recheck_protections(store)
                 # The cross-source verdict at the moment it becomes
@@ -3608,7 +3617,14 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             raise TypedRefused(f"nothing was typed in: {busy}")
         with Store(db_path) as store:
             record_typed_transaction(
-                store, ref, day, direction, amount, description, account_map=_account_map(store)
+                store,
+                ref,
+                day,
+                direction,
+                amount,
+                description,
+                account_map=_account_map(store),
+                finishers=landing_finishers(),
             )
 
     def protect(ref: str, through: str) -> None:
@@ -3650,7 +3666,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         if busy:
             raise TypedRefused(f"nothing was removed: {busy}")
         with Store(db_path) as store:
-            withdraw_typed_transaction(store, ref, entry_id, account_map=_account_map(store))
+            withdraw_typed_transaction(
+                store,
+                ref,
+                entry_id,
+                account_map=_account_map(store),
+                finishers=landing_finishers(),
+            )
 
     def actual_queue() -> list[dict[str, object]]:
         from .export.actual_push import queue_with_progress
@@ -5575,6 +5597,7 @@ def _pull(
                 account_map=account_map,
                 since=since,
                 trigger=pull_trigger_label(trigger, None),
+                finishers=landing_finishers(),
             )
         print(result.describe())
         if on_result is not None:
@@ -5627,6 +5650,7 @@ def _pull(
                 # because no test traversed the CLI wiring between the thread
                 # and the provider.
                 deep=deep,
+                finishers=landing_finishers(),
             )
         except RuntimeError as exc:
             if raise_errors:
@@ -6038,6 +6062,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.path,
                     account_id=args.account,
                     account_map=_account_map(store),
+                    finishers=landing_finishers(),
                 )
             except DataError as exc:
                 print(f"Refused to import: {exc}", file=sys.stderr)
@@ -6301,7 +6326,9 @@ def main(argv: list[str] | None = None) -> int:
 
         cli_started = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         with Store(db_path) as store:
-            cli_report = rebuild_from_raw(store, account_map=_account_map(store))
+            cli_report = rebuild_from_raw(
+                store, account_map=_account_map(store), finishers=landing_finishers()
+            )
             fingerprint.stamp_fingerprint(store, fingerprint.code_fingerprint())
             _record_run(store, cli_report, ok=True, started_at=cli_started)
         print(cli_report.describe())

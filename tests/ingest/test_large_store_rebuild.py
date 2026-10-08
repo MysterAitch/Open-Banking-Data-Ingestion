@@ -36,10 +36,11 @@ from pathlib import Path
 
 import pytest
 
+from landing import rebuild_from_raw
 from large_store_corpus import MAIN, LargeStore, cached_large_store
 from large_store_pages import copy_of
 from obdi.core import instrumentation
-from obdi.ingest.rebuild import RebuildReport, rebuild_from_raw
+from obdi.ingest.rebuild import RebuildReport
 from obdi.ingest.store import Store
 
 

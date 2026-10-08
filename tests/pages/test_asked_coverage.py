@@ -28,6 +28,7 @@ from urllib.parse import urlencode
 
 import pytest
 
+from landing import pull_truelayer
 from obdi.ingest import asked_coverage
 from obdi.ingest.accounts import AccountMap
 from obdi.ingest.asked_coverage import (
@@ -40,7 +41,6 @@ from obdi.ingest.asked_coverage import (
 )
 from obdi.ingest.connections import Connection, ConnectionStore
 from obdi.ingest.providers.truelayer import TrueLayerError
-from obdi.ingest.pull import pull_truelayer
 from obdi.ingest.store import Store
 from obdi.pages.web import ExtendableAccount, _extend_rows
 from obdi.read.account_names import accounts_shown

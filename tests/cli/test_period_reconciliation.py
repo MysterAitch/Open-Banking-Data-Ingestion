@@ -35,11 +35,12 @@ import httpx
 import pytest
 
 from coverage_page_world import repeated_lines
+from landing import import_file
 from obdi.cli import build_web_config
 from obdi.core.models import SourceTier, Transaction
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.identity import content_key
-from obdi.ingest.pipeline import import_file, reconcile_batch
+from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
 from obdi.pages.web import AuthorisationSession, ConnectionHandler, WebConfig

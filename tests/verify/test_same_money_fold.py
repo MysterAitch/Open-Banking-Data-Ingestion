@@ -31,11 +31,11 @@ from pathlib import Path
 
 import pytest
 
+from landing import import_file, rebuild_from_raw
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.ingest.accounts import AccountBinding, AccountMap
 from obdi.ingest.identity import content_key
-from obdi.ingest.pipeline import import_file, reconcile_batch
-from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.same_money_fold import fold_same_money, plan_same_money
 from obdi.ingest.space_attribution import fold_space_copies
 from obdi.ingest.statement_membership import Membership

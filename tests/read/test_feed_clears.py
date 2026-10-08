@@ -25,10 +25,11 @@ import json
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.core.namespaces import API_SOURCES, CLEARING_SOURCES, FILE_SOURCES
 from obdi.ingest.parsers import pdf_statements, qif, uk_banks
 from obdi.ingest.parsers.base import StatementParser
-from obdi.ingest.rebuild import parse_artefact_transactions, rebuild_from_raw
+from obdi.ingest.rebuild import parse_artefact_transactions
 from obdi.ingest.store import Store
 from obdi.read.ledger import build_ledger
 from obdi.verify.clearing import cleared_entity_ids

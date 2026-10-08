@@ -42,7 +42,7 @@ from datetime import date
 
 import pytest
 
-from obdi.ingest.rebuild import rebuild_from_raw
+from landing import rebuild_from_raw
 from obdi.ingest.space_attribution import (
     MORE_COPIES,
     MORE_SPACE_ROWS,

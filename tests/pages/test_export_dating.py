@@ -23,9 +23,9 @@ from datetime import date
 
 import pytest
 
+from landing import import_file
 from obdi.core.models import Transaction, TransactionStatus
 from obdi.ingest.family_anchors import families_of
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from obdi.pages.web_ledger import render_ledger
 from obdi.read.ledger import build_ledger

@@ -163,7 +163,7 @@ class TestThePage:
     def test_Page_AfterTheRebuildTheFlagsAreSettledBy_ListsOnlyTheTwelveAndCountsNone(
         self, served
     ):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         base, db = served
         with Store(db) as store:

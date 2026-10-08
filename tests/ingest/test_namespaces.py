@@ -185,7 +185,7 @@ class TestTheCanonicalRuleHasCallSites:
     ):
         import pytest
 
-        from obdi.ingest.pipeline import import_file
+        from landing import import_file
         from obdi.ingest.store import Store
 
         path = tmp_path / "export.csv"
@@ -199,7 +199,7 @@ class TestTheCanonicalRuleHasCallSites:
     def test_AnImport_RefusesAProviderNameAsAnAccount(self, tmp_path):
         import pytest
 
-        from obdi.ingest.pipeline import import_file
+        from landing import import_file
         from obdi.ingest.store import Store
 
         path = tmp_path / "export.csv"
@@ -211,7 +211,7 @@ class TestTheCanonicalRuleHasCallSites:
             import_file(store, path, account_id="starling")
 
     def test_AnOrdinaryCanonicalName_IsAccepted(self, tmp_path):
-        from obdi.ingest.pipeline import import_file
+        from landing import import_file
         from obdi.ingest.store import Store
 
         path = tmp_path / "export.csv"

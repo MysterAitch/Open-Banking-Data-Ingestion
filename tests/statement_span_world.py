@@ -18,9 +18,10 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from pathlib import Path
 
+from landing import import_file
 from obdi.core.models import RawArtefact, SourceTier, Transaction
 from obdi.ingest.identity import artefact_digest, content_key
-from obdi.ingest.pipeline import import_file, media_type_of, reconcile_batch
+from obdi.ingest.pipeline import media_type_of, reconcile_batch
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
 

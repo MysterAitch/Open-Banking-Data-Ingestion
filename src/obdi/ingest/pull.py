@@ -29,7 +29,6 @@ from ..core.jsontypes import JsonObject, text
 from ..core.jsontypes import rows as json_rows
 from ..core.models import Transaction
 from ..core.plural import plural
-from ..verify.review_settlement import settle_review_flags
 from . import cursor, tiers
 from .accounts import AccountMap
 from .asked_coverage import (
@@ -43,6 +42,7 @@ from .asked_coverage import (
 from .connections import Connection, ConnectionStore, apply_refresh
 from .declined_items import void_declined_items
 from .family_anchors import families_of
+from .finishers import Finishers
 from .pending_lifecycle import resolve_vanished_pending
 from .pipeline import ImportSummary, SpaceBlind, reconcile_batch
 from .providers import starling, truelayer
@@ -168,6 +168,7 @@ def pull_truelayer(
     psu_ip: str | None = None,
     trigger: str = "direct",
     today: date | None = None,
+    finishers: Finishers,
 ) -> PullResult:
     today = today or datetime.now(UTC).date()
     connection = ensure_access_token(
@@ -657,7 +658,7 @@ def pull_truelayer(
     # payments arrive.
     summary.folded += fold_space_copies(store, account_map).newly_folded
     summary.same_money_folded += fold_same_money(store, account_map).newly_folded
-    settle_review_flags(store)
+    finishers.settle(store)
     result.summary = summary
     return result
 
@@ -953,6 +954,7 @@ def pull_starling(
     account_map: AccountMap,
     since: date | None = None,
     trigger: str = "direct",
+    finishers: Finishers,
 ) -> PullResult:
     result = PullResult(provider="starling")
     summary = ImportSummary(artefact_new=True)
@@ -1318,6 +1320,6 @@ def pull_starling(
     # The feed's Space rows may be the other half of a copy already held.
     summary.folded += fold_space_copies(store, account_map).newly_folded
     summary.same_money_folded += fold_same_money(store, account_map).newly_folded
-    settle_review_flags(store)
+    finishers.settle(store)
     result.summary = summary
     return result

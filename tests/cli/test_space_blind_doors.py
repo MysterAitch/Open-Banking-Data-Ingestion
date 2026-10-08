@@ -41,9 +41,9 @@ import obdi.cli as cli
 import obdi.ingest.pipeline as ingest
 import obdi.ingest.pull as pull_module
 import obdi.verify.statement_sections as sections
+from landing import pull_starling, rebuild_from_raw
 from obdi.core.models import Transaction
 from obdi.ingest.providers import truelayer
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.statement_sections import assign_section, check_assignment
 from round_up_corpus import card_payment, land_feed, main_feed
@@ -149,7 +149,7 @@ class TestReplayingOneArtefact:
 
 class TestTypingATransaction:
     def typed_over_a_leg(self, db: Path, *, given_map: bool) -> list[tuple[bool, list[str]]]:
-        from obdi.ingest.typed_transactions import record_typed_transaction
+        from landing import record_typed_transaction
 
         with Store(db) as store:
             land_evidence(store)
@@ -263,8 +263,8 @@ class TestTheAnswerEachDoorIsGiven:
         Provider(monkeypatch, "history")
         calls = recorded(monkeypatch, pull_module, "reconcile_batch")
         with Store(tmp_path / "closed.sqlite3") as store:
-            pull_module.pull_starling(store, "token", account_map=closed_map(bound=False))
-            pull_module.pull_starling(store, "token", account_map=closed_map(bound=True))
+            pull_starling(store, "token", account_map=closed_map(bound=False))
+            pull_starling(store, "token", account_map=closed_map(bound=True))
 
         closed = [
             call

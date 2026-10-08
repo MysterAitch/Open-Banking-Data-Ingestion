@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import pytest
 
+from landing import pull_truelayer
 from obdi.ingest.accounts import AccountMap
 from obdi.ingest.connections import Connection, ConnectionStore
 from obdi.ingest.providers.truelayer import TrueLayerError
-from obdi.ingest.pull import pull_truelayer
 from obdi.ingest.store import Store
 
 
@@ -253,8 +253,8 @@ class TestStarlingInstrumentationParity:
     def test_Pull_LandsEveryPayloadKind_AndLedgersTheFeedAsk(
         self, tmp_path, monkeypatch
     ):
+        from landing import pull_starling
         from obdi.ingest.providers.starling import Category
-        from obdi.ingest.pull import pull_starling
 
         def fake_accounts(_token, **_kwargs):
             return (
@@ -317,8 +317,8 @@ class TestStarlingInstrumentationParity:
 
 class TestOneRefusedCategoryDoesNotStarveTheRest:
     def test_Pull_ContinuesPastARefusedFeed_AndNotesIt(self, tmp_path, monkeypatch):
+        from landing import pull_starling
         from obdi.ingest.providers.starling import Category, StarlingError
-        from obdi.ingest.pull import pull_starling
 
         def fake_accounts(_token, **_kwargs):
             return (

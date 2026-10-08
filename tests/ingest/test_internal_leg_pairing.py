@@ -37,9 +37,9 @@ from dataclasses import replace
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.core.models import Transaction
 from obdi.ingest.matching import pair_transfer_entities
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from round_up_corpus import (
     SPACE_FEED_ORIGIN,

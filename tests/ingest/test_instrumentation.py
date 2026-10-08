@@ -69,8 +69,8 @@ class TestTimingsFlag:
         """
         import json
 
+        from landing import rebuild_from_raw
         from obdi.ingest.providers import starling
-        from obdi.ingest.rebuild import rebuild_from_raw
         from obdi.ingest.store import Store
 
         instrumentation.configure(True)
@@ -106,7 +106,7 @@ class TestTimingsFlag:
         assert "transfer-pairing" in report.timings
 
     def test_Disabled_ARebuildCarriesNoTimings(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         instrumentation.configure(False)

@@ -35,6 +35,7 @@ from datetime import date
 
 import pytest
 
+from landing import import_file
 from obdi.core.errors import DataError
 from obdi.core.namespaces import UK_CARD_STATEMENT_SOURCE
 from obdi.ingest.parsers.base import ParseError
@@ -47,7 +48,6 @@ from obdi.ingest.parsers.pdf_statements import (
     pdf_parser_for,
 )
 from obdi.ingest.parsers.uk_banks import detect
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.statement_terms import StatementBalance, statement_balances
 from obdi.ingest.store import Store
 

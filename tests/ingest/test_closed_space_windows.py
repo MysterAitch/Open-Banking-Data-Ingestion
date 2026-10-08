@@ -33,9 +33,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 import obdi.ingest.pull as pull_module
+from landing import pull_starling
 from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.providers import starling
-from obdi.ingest.pull import STARLING_CONNECTION, pull_starling
+from obdi.ingest.pull import STARLING_CONNECTION
 from obdi.ingest.space_binding import space_states
 from obdi.ingest.space_windows import (
     CLOSED_SPACE_EMPTY,

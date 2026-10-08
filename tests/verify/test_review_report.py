@@ -6,11 +6,12 @@ import json
 from datetime import date
 
 from obdi.core.models import SourceTier, Transaction
+from obdi.ingest.finishers import FlagClass
 from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers.truelayer import artefact_for
 from obdi.ingest.store import Store
-from obdi.verify.review_report import FlagClass, review_report
+from obdi.verify.review_report import review_report
 
 
 def _flagged(land, store, description, reason, category=None):

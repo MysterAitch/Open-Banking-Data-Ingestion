@@ -44,8 +44,8 @@ from __future__ import annotations
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.ingest.arrival_order import in_arrival_order
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.movement_completeness import check_rows
 from round_up_corpus import card_payment, household_store, main_feed, space_feed

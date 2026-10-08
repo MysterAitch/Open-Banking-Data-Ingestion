@@ -23,11 +23,12 @@ from datetime import date, timedelta
 
 import pytest
 
+from landing import import_file
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.identity import content_key
-from obdi.ingest.pipeline import import_file, reconcile_batch
+from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.space_attribution import fold_space_copies
 from obdi.ingest.store import Store
 from obdi.read.ledger import build_ledger

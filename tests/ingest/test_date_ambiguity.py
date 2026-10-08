@@ -44,7 +44,7 @@ class TestTheWarningActuallyReachesTheUser:
         ).encode()
 
     def test_Import_WhenEveryDateIsAmbiguous_WarnsOnStderr(self, tmp_path, capsys):
-        from obdi.ingest.pipeline import import_file
+        from landing import import_file
         from obdi.ingest.store import Store
 
         statement = tmp_path / "ambiguous.csv"
@@ -58,7 +58,7 @@ class TestTheWarningActuallyReachesTheUser:
         assert "ambiguous.csv" in err
 
     def test_Import_WhenADateProvesTheFormat_StaysQuiet(self, tmp_path, capsys):
-        from obdi.ingest.pipeline import import_file
+        from landing import import_file
         from obdi.ingest.store import Store
 
         statement = tmp_path / "provable.csv"

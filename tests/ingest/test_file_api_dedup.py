@@ -14,7 +14,8 @@ from datetime import date
 
 import pytest
 
-from obdi.ingest.pipeline import import_file, reconcile_batch
+from landing import import_file
+from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import starling as starling_provider
 from obdi.ingest.providers import truelayer
 from obdi.ingest.store import Store

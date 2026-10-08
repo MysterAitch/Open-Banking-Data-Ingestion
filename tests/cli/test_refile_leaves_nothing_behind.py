@@ -150,7 +150,7 @@ class TestTheSequenceThePageInstructs:
     """
 
     def test_RefilingThenRebuilding_KeepsTheCategoryOnTheCorrectedRow(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         store_path = tmp_path / "store.sqlite3"
         with Store(store_path) as store:

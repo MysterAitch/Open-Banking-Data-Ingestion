@@ -20,8 +20,8 @@ from datetime import UTC, date, datetime, timedelta
 import httpx
 import pytest
 
+from landing import import_file
 from obdi.cli import build_web_config
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from obdi.pages import values_sitting
 from obdi.verify.balance_anchors import record_stated_anchor

@@ -43,9 +43,9 @@ from datetime import date
 import pytest
 
 from consecutive_days_corpus import AMOUNT, consecutive_payments
+from landing import rebuild_from_raw
 from late_settlement_corpus import Payment, household
 from obdi.ingest.providers import starling
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.movement_completeness import check_rows
 from round_up_corpus import main_feed

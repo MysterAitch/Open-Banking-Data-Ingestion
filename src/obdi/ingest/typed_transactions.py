@@ -46,11 +46,10 @@ from ..core.jsontypes import JsonObject, as_object, text, whole_number
 from ..core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from ..core.namespaces import MANUAL_SOURCE, MANUAL_WITHDRAWAL_SOURCE
 from ..verify.balance_anchors import known_account, parse_calendar_day, parse_pounds_and_pence
-from ..verify.protection import recheck
-from ..verify.review_settlement import settle_review_flags
 from .accounts import AccountMap
 from .arrival_order import in_arrival_order
 from .declined_items import void_declined_items
+from .finishers import Finishers
 from .identity import artefact_digest, content_key
 from .pipeline import pair_transfers_across_store, reconcile_batch
 from .store import Store
@@ -242,6 +241,7 @@ def record_typed_transaction(
     now: datetime | None = None,
     entry_id: str | None = None,
     account_map: AccountMap | None = None,
+    finishers: Finishers,
 ) -> str:
     """Land one typed transaction, resolve it into the account, and return its entry id.
 
@@ -303,9 +303,9 @@ def record_typed_transaction(
         store, [transaction_from_entry(payload, ref, digest)], digest=digest, space_blind=blind
     )
     void_declined_items(store)
-    settle_review_flags(store)
+    finishers.settle(store)
     pair_transfers_across_store(store, account_map)
-    recheck(store)
+    finishers.recheck(store)
     return minted
 
 
@@ -316,6 +316,7 @@ def withdraw_typed_transaction(
     *,
     now: datetime | None = None,
     account_map: AccountMap | None = None,
+    finishers: Finishers,
 ) -> None:
     """Retract one typed transaction by landing a withdrawal, then apply it live.
 
@@ -350,7 +351,7 @@ def withdraw_typed_transaction(
     )
     _retract_live(store, entry.digest)
     pair_transfers_across_store(store, account_map)
-    recheck(store)
+    finishers.recheck(store)
 
 
 def _retract_live(store: Store, entry_digest: str) -> None:

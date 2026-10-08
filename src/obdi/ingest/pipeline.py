@@ -26,8 +26,8 @@ from ..core.models import (
     TransactionStatus,
 )
 from ..core.plural import plural
-from ..verify.review_settlement import settle_review_flags
 from .accounts import AccountMap
+from .finishers import Finishers
 from .identity import artefact_digest, entity_id_for
 from .matching import (
     EXACT_RULE_DOUBT,
@@ -251,9 +251,11 @@ def import_file(
     *,
     account_id: str,
     account_map: AccountMap | None = None,
+    finishers: Finishers,
 ) -> ImportSummary:
     """Land a file, resolve its rows, and - given the account map - fold any
-    main-account row that copies a Space payment."""
+    main-account row that copies a Space payment. `finishers` settles the review flags the
+    landed rows leave answered."""
     # The account becomes a query key across every layer, so it is checked
     # at the door rather than trusted from whoever posted it. The rule
     # existed and had no live call site: every writer invented its own or
@@ -316,7 +318,7 @@ def import_file(
     if account_map is not None:
         summary.folded += fold_space_copies(store, account_map).newly_folded
     summary.same_money_folded += fold_same_money(store, account_map).newly_folded
-    settle_review_flags(store)
+    finishers.settle(store)
     return summary
 
 

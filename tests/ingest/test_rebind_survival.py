@@ -23,10 +23,10 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
+from landing import rebuild_from_raw
 from obdi.core.models import RawArtefact
 from obdi.core.namespaces import ENTITY_KEYED_TABLES
 from obdi.ingest.identity import artefact_digest
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from source_tree import module_text
 

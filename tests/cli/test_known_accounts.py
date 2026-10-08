@@ -29,13 +29,13 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.cli import main as cli_main
 from obdi.core.models import RawArtefact
 from obdi.export.export_declared import export_declared
 from obdi.ingest.accounts import AccountMap, AccountRecord, AccountRef
 from obdi.ingest.identity import artefact_digest
 from obdi.ingest.providers import starling
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.space_attribution import space_parents
 from obdi.ingest.store import Store
 from obdi.pages.navigation import DESTINATIONS

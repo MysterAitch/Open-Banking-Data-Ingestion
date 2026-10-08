@@ -23,6 +23,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.analysis.entities import (
     clean_rule,
     detach_shape,
@@ -34,7 +35,6 @@ from obdi.analysis.entities import (
 )
 from obdi.analysis.entity_actions import SPLIT, apply_action
 from obdi.ingest.entity_records import BEGINS, CONTAINS, EntityRefused, EntityRule
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 
 NOW = datetime(2026, 10, 7, 9, 0, tzinfo=UTC)

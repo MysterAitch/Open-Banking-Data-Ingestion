@@ -42,6 +42,7 @@ from datetime import date
 
 import pytest
 
+from landing import import_file
 from late_settlement_corpus import (
     HOUSEHOLD_EXPORT,
     Payment,
@@ -52,7 +53,7 @@ from late_settlement_corpus import (
 )
 from obdi.core.models import RawArtefact
 from obdi.ingest.family_anchors import families_of
-from obdi.ingest.pipeline import import_file, reconcile_batch
+from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import starling, truelayer
 from obdi.ingest.rebuild import parse_artefact_transactions
 from obdi.ingest.space_attribution import fold_space_copies, plan_folds, space_parents

@@ -15,9 +15,10 @@ from datetime import date
 
 import pytest
 
+from landing import import_file
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.ingest.matching import MatchTier, resolve, supersede
-from obdi.ingest.pipeline import import_file, reconcile_batch
+from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.store import Store
 
 

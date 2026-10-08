@@ -47,8 +47,8 @@ from datetime import date
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.ingest.family_anchors import Families
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.statement_terms import keep_statement_readings
 from obdi.ingest.store import Store
 from obdi.verify.statement_opening_measure import OpeningFigures, statement_opening_report

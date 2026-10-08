@@ -28,8 +28,8 @@ from datetime import UTC, datetime
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi import cli
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.verify.movement_completeness import movement_completeness
 from obdi.verify.standing_data import KeyedMemo
 from round_up_corpus import household_store

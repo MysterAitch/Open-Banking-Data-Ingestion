@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import json
 
+from landing import pull_truelayer, rebuild_from_raw
 from obdi.ingest.accounts import AccountMap
 from obdi.ingest.connections import Connection, ConnectionStore
-from obdi.ingest.pull import pull_truelayer
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 
 
@@ -185,7 +184,7 @@ class TestStarlingReplay:
         }
 
     def test_StarlingFeedArtefacts_ReplayIntoTransactions(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -211,7 +210,7 @@ class TestStarlingReplay:
     def test_PoisonArtefact_IsRecordedAndSkipped_TheRestReplays(self, tmp_path):
         """One non-GBP item once aborted the whole rebuild mid-loop -
         after the wipe. It must cost exactly its own artefact, loudly."""
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -241,8 +240,8 @@ class TestRebuildProgress:
         to anyone watching the page."""
         import json as _json
 
+        from landing import rebuild_from_raw
         from obdi.ingest.providers.starling import artefact_for
-        from obdi.ingest.rebuild import rebuild_from_raw
         from obdi.ingest.store import Store
 
         calls = []
@@ -267,7 +266,7 @@ class TestRebuildProgress:
         assert [c[0] for c in calls] == sorted(c[0] for c in calls)
 
     def test_FailingProgressCallback_NeverBreaksTheRebuild(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         def explode(done, total, report):
@@ -287,8 +286,8 @@ class TestRebuildReconciliation:
     def test_VanishedAndNewAccounts_AreNamedInTheReport(self, tmp_path):
         import json as _json
 
+        from landing import rebuild_from_raw
         from obdi.ingest.providers.starling import artefact_for
-        from obdi.ingest.rebuild import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -336,8 +335,8 @@ class TestRebuildReconciliation:
     def test_FaithfulReplay_SaysSo(self, tmp_path):
         import json as _json
 
+        from landing import rebuild_from_raw
         from obdi.ingest.providers.starling import artefact_for
-        from obdi.ingest.rebuild import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -398,9 +397,9 @@ class TestRebuildAppliesTheMap:
         ).encode("utf-8")
 
     def test_QualifiedRefs_ResolveThroughTheMap(self, tmp_path):
+        from landing import rebuild_from_raw
         from obdi.ingest.accounts import AccountBinding, AccountMap
         from obdi.ingest.providers.starling import artefact_for
-        from obdi.ingest.rebuild import rebuild_from_raw
         from obdi.ingest.store import Store
 
         bound = AccountMap(
@@ -434,9 +433,9 @@ class TestRebuildAppliesTheMap:
         raw ref and once under the canonical. Resolution plus tier-1
         identity must yield ONE row under the canonical, not two rows
         under two names.'''
+        from landing import rebuild_from_raw
         from obdi.ingest.accounts import AccountBinding, AccountMap
         from obdi.ingest.providers.starling import artefact_for
-        from obdi.ingest.rebuild import rebuild_from_raw
         from obdi.ingest.store import Store
 
         bound = AccountMap(
@@ -476,8 +475,8 @@ class TestRebuildAppliesTheMap:
     def test_UnboundRefs_StayQualified_AndKeepTheirBindBoxEligibility(
         self, tmp_path
     ):
+        from landing import rebuild_from_raw
         from obdi.ingest.providers.starling import artefact_for
-        from obdi.ingest.rebuild import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -561,7 +560,7 @@ class TestStarlingFeedIdentityFromOrigin:
     def test_MislabelledBlobArtefact_ReplaysUnderItsTrueAccounts(self, tmp_path):
         '''Two feeds for two different Spaces, both landed under ONE lying
         label. Identity from origin splits them back apart.'''
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -594,8 +593,8 @@ class TestStarlingFeedIdentityFromOrigin:
         ]
 
     def test_MainAccountFeed_KeysByAccountUid_ViaDefaultCategory(self, tmp_path):
+        from landing import rebuild_from_raw
         from obdi.ingest.accounts import AccountBinding, AccountMap
-        from obdi.ingest.rebuild import rebuild_from_raw
         from obdi.ingest.store import Store
 
         bound = AccountMap(
@@ -629,7 +628,7 @@ class TestStarlingFeedIdentityFromOrigin:
         '''The raw-ref artefact and the blob-labelled artefact carry the
         same feed item; origin identity puts both under one account and
         tier-1 identity keeps one row.'''
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -708,7 +707,7 @@ class TestRecordCountMetadata:
         tenth. The per-artefact yield is still landed, as metadata about
         what came OUT rather than as the measure of what went in.
         """
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -759,7 +758,7 @@ class TestCardReplay:
         }
 
     def test_CardRows_ReplayNegated_PurchasesOut_PaymentsIn(self, tmp_path):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -784,7 +783,7 @@ class TestCardReplay:
         '''A DEBIT arriving negative means the statement convention this
         mapping was verified against has changed - the artefact is
         recorded as a problem, never guessed at.'''
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -940,7 +939,7 @@ class TestRebuildKnowsTheSizeOfTheJobBeforeStartingIt:
         )
 
     def _rebuild(self, tmp_path, sizes, capture):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:
@@ -1051,7 +1050,7 @@ class TestProgressMovesWithinAnArtefactNotOnlyBetweenThem:
     def test_ProgressAdvancesRecordByRecord_WhileOneArtefactIsReplaying(
         self, tmp_path
     ):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         seen = []
@@ -1076,7 +1075,7 @@ class TestProgressMovesWithinAnArtefactNotOnlyBetweenThem:
         into the completed total would report progress that a crash takes
         back. records_done moves only when an artefact is finished.
         """
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
         from obdi.ingest.store import Store
 
         pairs = []
@@ -1128,8 +1127,8 @@ class TestEveryApiSourceHasExactlyOneReplayRole:
         """
         import json
 
+        from landing import rebuild_from_raw
         from obdi.ingest.providers import starling
-        from obdi.ingest.rebuild import rebuild_from_raw
         from obdi.ingest.store import Store
 
         with Store(tmp_path / "s.sqlite3") as store:

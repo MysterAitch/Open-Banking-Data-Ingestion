@@ -38,8 +38,8 @@ from typing import Any
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.ingest.family_anchors import families_of
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.verify.balance_anchors import effective_opening
 from obdi.verify.fault_explanation import FEED_STATUS_LEFT_OUT, FEED_STATUS_ROWS
 from round_up_corpus import card_payment, household_store, main_feed, space_feed

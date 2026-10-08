@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import pytest
 
+from landing import import_file
 from obdi.core.errors import DataError
 from obdi.ingest.parsers.uk_banks import ParseError, detect
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from test_statement_shape import build_pdf
 

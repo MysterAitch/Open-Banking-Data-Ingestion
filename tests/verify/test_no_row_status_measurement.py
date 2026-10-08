@@ -31,11 +31,10 @@ from datetime import date
 
 import pytest
 
+from landing import import_file, rebuild_from_raw
 from late_settlement_corpus import export_text
 from obdi.ingest import rebuild
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.providers import starling
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.exact_rule_measure import NAMED_DATES, exact_rule_report
 from round_up_corpus import card_payment

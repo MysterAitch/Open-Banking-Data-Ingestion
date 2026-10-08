@@ -30,11 +30,10 @@ from datetime import date
 
 import pytest
 
+from landing import import_file, rebuild_from_raw
 from late_settlement_corpus import export_text
 from obdi.ingest.parsers.statement_reading import reading_from_json, reading_to_json
 from obdi.ingest.parsers.virgin_money_pdf import read_statement
-from obdi.ingest.pipeline import import_file
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from test_id_tier import aggregator_artefact, arrive
 from test_pdf_import import SANTANDER

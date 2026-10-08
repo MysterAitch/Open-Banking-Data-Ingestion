@@ -27,17 +27,19 @@ offline, so the three answers it can give are each stubbed.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
+import landing
+from landing import import_file, pull_starling, rebuild_from_raw
 from obdi.ingest.accounts import AccountBinding, AccountMap, AccountRecord, AccountRef
 from obdi.ingest.family_anchors import families_of
-from obdi.ingest.pipeline import import_file, pair_transfers_across_store
+from obdi.ingest.pipeline import pair_transfers_across_store
 from obdi.ingest.providers import starling
-from obdi.ingest.pull import STARLING_CONNECTION, pull_starling
-from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.pull import STARLING_CONNECTION
 from obdi.ingest.space_windows import CLOSED_SPACE_EMPTY, CLOSED_SPACE_MARK, CLOSED_SPACE_RETRY_DAYS
 from obdi.ingest.store import Store
 from obdi.verify.balance_anchors import effective_opening
@@ -466,7 +468,8 @@ class TestTheDoorRunsTheSameFoldsAsTheOthers:
         first_pull_names_the_space(store)
         seen: list[tuple[str, int]] = []
         real_same_money = pull_module.fold_same_money
-        real_settle = pull_module.settle_review_flags
+        real_finishers = landing.finishers()
+        real_settle = real_finishers.settle
 
         def same_money(held, mapping=None):
             seen.append(("same-money", len(held.transactions_for_account(RENT))))
@@ -477,7 +480,9 @@ class TestTheDoorRunsTheSameFoldsAsTheOthers:
             return real_settle(held)
 
         monkeypatch.setattr(pull_module, "fold_same_money", same_money)
-        monkeypatch.setattr(pull_module, "settle_review_flags", settle)
+        monkeypatch.setattr(
+            landing, "finishers", lambda: dataclasses.replace(real_finishers, settle=settle)
+        )
 
         pull(store)
 

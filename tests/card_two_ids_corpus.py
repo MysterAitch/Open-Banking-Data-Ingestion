@@ -33,9 +33,10 @@ from datetime import date
 from typing import Any
 
 from card_chain_corpus import printed, statement_day, text_day
-from obdi.ingest.pipeline import import_file, reconcile_batch
+from landing import import_file, rebuild_from_raw
+from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import truelayer
-from obdi.ingest.rebuild import parse_artefact_transactions, rebuild_from_raw
+from obdi.ingest.rebuild import parse_artefact_transactions
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
 

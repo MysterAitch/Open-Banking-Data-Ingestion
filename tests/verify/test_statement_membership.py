@@ -26,8 +26,8 @@ from pathlib import Path
 
 import pytest
 
+from landing import import_file
 from obdi.core.models import SourceTier, Transaction
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.statement_membership import statement_membership
 from obdi.ingest.statement_terms import statement_balances
 from obdi.ingest.store import Store

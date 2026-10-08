@@ -49,6 +49,7 @@ from ..core.errors import DataError
 from ..core.masking import Structural
 from ..core.models import SourceTier, TransactionStatus
 from ..core.page_words import REMOVE_PROTECTION, REMOVE_TYPED_TRANSACTION
+from ..ingest.finishers import FlagClass
 from ..ingest.join_basis import how_words, sighting_views
 from ..ingest.matching import EXACT_RULE_DOUBT
 from ..ingest.payment_links import AGGREGATORS
@@ -57,7 +58,6 @@ from .review_report import (
     GAP_AFTER,
     GAP_BEFORE,
     BalanceGap,
-    FlagClass,
     assess_flags,
     live_neighbours,
     neighbour_proof,
@@ -246,7 +246,7 @@ def evidence_for(
 def settle_evidence(gap: BalanceGap | None) -> tuple[Evidence, ...]:
     """The known balance whose absence stopped the balance proof, as one line of dates and no
     figure, or nothing where the proof was not tried or was tried and the balances disagreed.
-    What the proof needs is on `review_report.FlagClass.BALANCES_NEED_BOTH`."""
+    What the proof needs is on `ingest.finishers.FlagClass.BALANCES_NEED_BOTH`."""
     if gap is None:
         return ()
     day = gap.day.isoformat()

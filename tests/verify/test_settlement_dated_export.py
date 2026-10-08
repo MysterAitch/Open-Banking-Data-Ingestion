@@ -60,6 +60,7 @@ from datetime import date
 
 import pytest
 
+from landing import import_file, rebuild_from_raw
 from late_settlement_corpus import (
     HOUSEHOLD_EXPORT,
     LATE_DAY,
@@ -73,8 +74,6 @@ from late_settlement_corpus import (
     household,
     late_settlement_payments,
 )
-from obdi.ingest.pipeline import import_file
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.movement_completeness import check_rows
 from test_movement_chains import canonical

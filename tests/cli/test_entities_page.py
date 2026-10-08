@@ -21,9 +21,9 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
+from landing import import_file
 from obdi.analysis.entities import EntitiesView, view_of
 from obdi.cli import build_web_config
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from obdi.pages import values_sitting
 from obdi.pages.web_entities import render_entities

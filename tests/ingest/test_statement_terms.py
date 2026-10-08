@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from datetime import date
 
+from landing import import_file
 from obdi.ingest.account_observations import Observation, current_view
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.statement_terms import observations_from_statements, reversion_findings
 from obdi.ingest.store import Store
 from test_statement_shape import build_pdf

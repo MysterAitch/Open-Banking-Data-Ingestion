@@ -23,11 +23,12 @@ import httpx
 import pytest
 
 import test_closed_space_feed as household
+from landing import pull_starling
 from obdi.cli import _account_map, build_web_config
 from obdi.cli import main as cli_main
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.providers import starling
-from obdi.ingest.pull import STARLING_CONNECTION, pull_starling
+from obdi.ingest.pull import STARLING_CONNECTION
 from obdi.ingest.space_windows import CLOSED_SPACE_MARK
 from obdi.ingest.store import Store
 from obdi.pages.web import AuthorisationSession, ConnectionHandler

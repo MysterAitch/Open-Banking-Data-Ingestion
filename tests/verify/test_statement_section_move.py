@@ -17,9 +17,9 @@ import httpx
 import pytest
 
 from credit_union_documents import nine_accounts, pdf
+from landing import rebuild_from_raw
 from obdi.ingest.accounts import AccountRecord, AccountRef
 from obdi.ingest.parsers.credit_union_pdf import section_key
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.statement_sections import section_token
 from page_dom import Node, elements, parse

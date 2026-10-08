@@ -16,7 +16,7 @@ from fetch_marks_world import (
     marks_read,
     report_with,
 )
-from obdi.ingest.rebuild import rebuild_from_raw
+from landing import rebuild_from_raw
 from obdi.ingest.store import SCHEMA_VERSION, Store
 from obdi.read.fetch_gaps import GapKind
 from obdi.read.fetch_marks import (

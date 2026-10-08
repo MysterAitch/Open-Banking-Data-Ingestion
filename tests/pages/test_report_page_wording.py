@@ -255,8 +255,8 @@ class TestARebuildSaysWhichProblemsRepeatedAndWhatTheyCost:
     ):
         import json
 
+        from landing import rebuild_from_raw
         from obdi.ingest.providers.starling import artefact_for
-        from obdi.ingest.rebuild import rebuild_from_raw
         from obdi.ingest.store import Store
 
         def poison(reference: str):

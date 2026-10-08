@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.core.models import TransactionStatus
 from obdi.ingest.family_anchors import (
     families_of,
@@ -23,7 +24,6 @@ from obdi.ingest.family_anchors import (
 )
 from obdi.ingest.pipeline import pair_transfers_across_store
 from obdi.ingest.providers import starling
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.verify.balance_anchors import effective_opening
 from round_up_corpus import (
     MAIN_BALANCE,

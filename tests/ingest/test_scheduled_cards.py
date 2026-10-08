@@ -17,10 +17,10 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from landing import pull_truelayer
 from obdi.ingest.accounts import AccountMap
 from obdi.ingest.connections import Connection, ConnectionStore
 from obdi.ingest.providers.truelayer import TrueLayerError
-from obdi.ingest.pull import pull_truelayer
 from obdi.ingest.store import Store
 
 CARD_RECORD = (

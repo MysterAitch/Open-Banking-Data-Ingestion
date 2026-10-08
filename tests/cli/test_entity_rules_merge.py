@@ -21,10 +21,10 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from landing import import_file
 from obdi.analysis.entities import Proposal, clean_rule, detach_shape, propose_groups
 from obdi.cli import build_web_config
 from obdi.ingest.entity_records import BEGINS, CONTAINS
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.store import Store
 from page_dom import elements, parse
 from section_harness import environment, serve_config

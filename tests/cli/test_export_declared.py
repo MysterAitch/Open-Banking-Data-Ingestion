@@ -127,8 +127,8 @@ class TestExportingWhatCannotBeFetchedAgain:
         """The property the whole design is for. A rebuild re-mints entity ids;
         content identity survives it, so an export taken before still lines up
         with the store afterwards."""
+        from landing import rebuild_from_raw
         from obdi.export.export_declared import export_declared
-        from obdi.ingest.rebuild import rebuild_from_raw
 
         store_path = tmp_path / "store.sqlite3"
         _store_with_hand_work(store_path)

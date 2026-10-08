@@ -159,7 +159,7 @@ class TestSkippedRowsAreCounted:
         assert parser.rows_offered == 3, "the file offered three rows"
 
     def test_AnImportThatSkipsRows_SaysSoWithItsDenominator(self, tmp_path):
-        from obdi.ingest.pipeline import import_file
+        from landing import import_file
         from obdi.ingest.store import Store
 
         path = tmp_path / "monzo.csv"
@@ -174,7 +174,7 @@ class TestSkippedRowsAreCounted:
     def test_AnImportThatSkipsNothing_StaysQuietAboutIt(self, tmp_path):
         # The denominator appears when it differs, so a clean import is not
         # made to look like it has something to answer for.
-        from obdi.ingest.pipeline import import_file
+        from landing import import_file
         from obdi.ingest.store import Store
 
         path = tmp_path / "starling.csv"

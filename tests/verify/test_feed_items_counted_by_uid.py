@@ -48,11 +48,12 @@ from typing import Any
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.core.models import RawArtefact
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import starling
-from obdi.ingest.rebuild import parse_artefact_transactions, rebuild_from_raw
+from obdi.ingest.rebuild import parse_artefact_transactions
 from obdi.ingest.space_attribution import fold_space_copies
 from obdi.ingest.store import Store
 from obdi.verify.movement_completeness import check_rows

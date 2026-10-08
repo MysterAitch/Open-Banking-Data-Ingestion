@@ -71,10 +71,11 @@ from datetime import date
 from pathlib import Path
 
 from flag_balance_world import build_balance_world
+from landing import import_file
 from obdi.core.models import SourceTier, Transaction
 from obdi.ingest.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
 from obdi.ingest.identity import content_key
-from obdi.ingest.pipeline import import_file, reconcile_batch
+from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf
 from obdi.read.fetch_gaps import (

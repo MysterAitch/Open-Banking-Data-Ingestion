@@ -17,8 +17,8 @@ import httpx
 import pytest
 
 import obdi.pages.web_ledger as web_ledger
+from landing import rebuild_from_raw
 from obdi.core.errors import DataError
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import SCHEMA_VERSION, Store
 from obdi.pages.ledger_scope import DEFAULT_KEY, default_key, set_default_key
 from page_dom import elements, parse

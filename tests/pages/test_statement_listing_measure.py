@@ -48,12 +48,13 @@ import httpx
 import pytest
 
 from credit_union_documents import nine_accounts, pdf
+from landing import import_file
 from obdi.core.models import RawArtefact, SourceTier, Transaction, TransactionStatus
 from obdi.ingest.connections import ConnectionStore
 from obdi.ingest.family_anchors import Families
 from obdi.ingest.identity import artefact_digest, content_key
 from obdi.ingest.parsers.credit_union_pdf import section_key
-from obdi.ingest.pipeline import import_file, media_type_of, reconcile_batch
+from obdi.ingest.pipeline import media_type_of, reconcile_batch
 from obdi.ingest.statement_terms import keep_statement_readings
 from obdi.ingest.store import Store
 from obdi.ingest.synthetic_pdf import build_pdf

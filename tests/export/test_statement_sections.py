@@ -32,12 +32,12 @@ from credit_union_documents import (
     pdf,
     section,
 )
+from landing import rebuild_from_raw
 from obdi.export.export_declared import export_declared
 from obdi.ingest.accounts import AccountMap, AccountRecord, AccountRef
 from obdi.ingest.backup import take_backup
 from obdi.ingest.parsers.base import ParseError
 from obdi.ingest.parsers.credit_union_pdf import section_key
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.restore import restore_backup
 from obdi.ingest.statement_terms import statement_balances
 from obdi.ingest.store import SCHEMA_VERSION, Store

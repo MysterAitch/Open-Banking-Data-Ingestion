@@ -18,10 +18,10 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.core.models import RawArtefact
 from obdi.ingest.arrival_order import in_arrival_order
 from obdi.ingest.providers import truelayer
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 
 ACCOUNT = "halifax-current"

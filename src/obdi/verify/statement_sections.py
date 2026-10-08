@@ -27,7 +27,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ..core.errors import DataError
 from ..core.models import Transaction
@@ -35,6 +35,7 @@ from ..core.namespaces import validate_canonical_name
 from ..core.plural import agree, plural
 from ..ingest.accounts import AccountMap
 from ..ingest.declined_items import void_declined_items
+from ..ingest.finishers import SectionBatches
 from ..ingest.parsers.pdf_statements import PdfStatementParser, SectionReading
 from ..ingest.parsers.uk_banks import detect
 from ..ingest.pipeline import ImportSummary, MatcherPreview, preview_reconcile, reconcile_batch
@@ -398,26 +399,6 @@ def move_section(store: Store, *, artefact_id: int, section_key: str, account: s
     if old is None:
         raise DataError("that account of the statement is no longer assigned")
     return old
-
-
-@dataclass
-class SectionBatches:
-    """What a rebuild reads back out of one multi-account statement."""
-
-    #: (account, rows) per assigned section, in document order.
-    batches: list[tuple[str, list[Transaction]]] = field(default_factory=list)
-    #: Sections the document holds that nobody has given an account.
-    unassigned: int = 0
-    #: Sections the document holds, assigned or not; zero for a document that
-    #: reads as a single account or cannot be read.
-    sections: int = 0
-    #: Why an assigned section could not be read back, one line each.
-    problems: list[str] = field(default_factory=list)
-
-    @property
-    def every_section_assigned(self) -> bool:
-        """A several-account document that is waiting for nothing."""
-        return self.sections > 0 and self.unassigned == 0
 
 
 def replay_batches(

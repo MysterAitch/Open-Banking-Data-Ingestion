@@ -19,13 +19,14 @@ from datetime import date
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.core.models import SourceTier, Transaction, TransactionStatus
+from obdi.ingest.finishers import FlagClass
 from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import starling, truelayer
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
-from obdi.verify.review_report import FlagClass, classify_flags
+from obdi.verify.review_report import classify_flags
 from obdi.verify.review_settlement import settle_review_flags
 
 STARLING_ACCOUNT = "starling:cat-1"

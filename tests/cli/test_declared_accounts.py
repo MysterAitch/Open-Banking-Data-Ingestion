@@ -392,7 +392,7 @@ class TestDeclaredAccountsSurviveARebuild:
     """
 
     def test_DeclaredAccounts_WhenTheStoreIsRebuiltFromRaw_AreUntouched(self, store):
-        from obdi.ingest.rebuild import rebuild_from_raw
+        from landing import rebuild_from_raw
 
         store.declare_account(FULL_RECORD)
         store.declare_account(FEEDLESS_RECORD)
@@ -412,9 +412,9 @@ class TestDeclaredAccountsSurviveARebuild:
         An account no artefact accounts for stays, because nothing could
         ever re-derive it.
         """
+        from landing import rebuild_from_raw
         from obdi.core.models import SourceTier, Transaction
         from obdi.ingest.pipeline import reconcile_batch
-        from obdi.ingest.rebuild import rebuild_from_raw
 
         store.declare_account(FULL_RECORD)
         _land_a_statement(store)

@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 import time
 
+from landing import rebuild_from_raw
 from obdi.ingest.providers import starling, truelayer
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 
 

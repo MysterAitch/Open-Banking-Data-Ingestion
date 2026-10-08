@@ -561,7 +561,7 @@ class TestOnlyKeptStatementsAreServedAndAssigned:
     def test_StatementShape_ForAPdfImportedToAnAccount_IsServedButOffersNoAssignForm(
         self, serve, db, tmp_path
     ):
-        from obdi.ingest.pipeline import import_file
+        from landing import import_file
 
         path = tmp_path / "imported.pdf"
         path.write_bytes(SANTANDER_AS_WRITTEN)

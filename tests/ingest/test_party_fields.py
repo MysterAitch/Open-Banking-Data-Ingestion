@@ -16,11 +16,11 @@ from datetime import date
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.core.models import SourceTier, Transaction
 from obdi.ingest.party_fields import iban_account, source_party_id, uk_account
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.providers import starling, truelayer
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 
 ACCOUNT = "current"

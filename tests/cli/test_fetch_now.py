@@ -26,6 +26,7 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
+from landing import pull_truelayer
 from obdi.cli import _pull as cli_pull
 from obdi.cli import pull_trigger_label, rebuild_in_progress_note, standing_trigger_label
 from obdi.ingest import leases
@@ -45,7 +46,7 @@ from obdi.ingest.attended_fetch import (
     write_status,
 )
 from obdi.ingest.connections import ConnectionStore
-from obdi.ingest.pull import PullResult, pull_truelayer
+from obdi.ingest.pull import PullResult
 from obdi.ingest.store import Store
 from obdi.pages.web import AuthorisationSession, ConnectionHandler, ExtendableAccount, WebConfig
 from test_asked_coverage import (
@@ -495,7 +496,7 @@ class TestAPressOnStarling:
     ):
         seen: list[dict] = []
 
-        def fake_pull_starling(store, token, *, account_map, since, trigger):
+        def fake_pull_starling(store, token, *, account_map, since, trigger, finishers):
             seen.append({"token": token, "since": since, "trigger": trigger})
             return PullResult(provider="starling")
 

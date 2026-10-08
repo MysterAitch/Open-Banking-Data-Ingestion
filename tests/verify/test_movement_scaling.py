@@ -19,8 +19,8 @@ import pathlib
 import time
 from datetime import date, timedelta
 
+from landing import rebuild_from_raw
 from obdi.ingest.providers import starling
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.movement_completeness import check_rows, movement_completeness
 from round_up_corpus import SPACE_FEED_ORIGIN

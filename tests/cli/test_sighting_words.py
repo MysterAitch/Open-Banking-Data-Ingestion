@@ -33,9 +33,9 @@ from http.server import HTTPServer
 import httpx
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.cli import build_web_config
 from obdi.ingest.providers import truelayer
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.stated_words import recorded_words, words_in
 from obdi.ingest.store import SCHEMA_VERSION, Store
 from obdi.pages.web import AuthorisationSession, ConnectionHandler

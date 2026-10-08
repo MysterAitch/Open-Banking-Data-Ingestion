@@ -49,12 +49,11 @@ from typing import Any
 
 import pytest
 
+from landing import import_file, rebuild_from_raw
 from obdi.core.models import Transaction, TransactionStatus
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.matching import CandidateIndex, resolve
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.providers import truelayer
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from obdi.verify.balance_anchors import effective_opening
 from round_up_corpus import (

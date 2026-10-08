@@ -21,9 +21,10 @@ from datetime import date
 
 import pytest
 
+from landing import import_file
 from obdi.core.models import Transaction, TransactionStatus
 from obdi.ingest.family_anchors import families_of
-from obdi.ingest.pipeline import import_file, pair_transfers_across_store
+from obdi.ingest.pipeline import pair_transfers_across_store
 from obdi.ingest.sighting_placement import SightingPlacement
 from obdi.ingest.store import Store
 from obdi.verify.balance_anchors import FAMILY, OPENED, effective_opening

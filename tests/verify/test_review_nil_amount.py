@@ -20,18 +20,19 @@ person must still answer: one flag, open, because nothing is stated about its ba
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date
 from pathlib import Path
 
 import pytest
 
-from obdi.ingest import pipeline as ingest
+import landing
+from landing import import_file, rebuild_from_raw
 from obdi.ingest.accounts import AccountRecord, AccountRef
-from obdi.ingest.pipeline import import_file
-from obdi.ingest.rebuild import rebuild_from_raw
+from obdi.ingest.finishers import SETTLED_CLASSES, FlagClass, SettleReport
 from obdi.ingest.store import Store
-from obdi.verify.review_report import SETTLED_CLASSES, FlagClass, assess_flags, review_report
-from obdi.verify.review_settlement import SettleReport, settle_review_flags
+from obdi.verify.review_report import assess_flags, review_report
+from obdi.verify.review_settlement import settle_review_flags
 
 D = date
 NIL_CARD = "nil-lines"
@@ -66,7 +67,12 @@ def unsettled(monkeypatch):
     The door settles what the evidence answers as each file comes in; switched off here, the
     flag a file raises is still there to assess.
     """
-    monkeypatch.setattr(ingest, "settle_review_flags", lambda store: SettleReport())
+    real = landing.finishers()
+    monkeypatch.setattr(
+        landing,
+        "finishers",
+        lambda: dataclasses.replace(real, settle=lambda store: SettleReport()),
+    )
 
 
 def classes(db: Path) -> list[FlagClass]:

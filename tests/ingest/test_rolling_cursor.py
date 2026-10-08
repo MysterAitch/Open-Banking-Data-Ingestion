@@ -14,9 +14,10 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from landing import pull_starling
 from obdi.ingest import cursor
 from obdi.ingest.accounts import AccountMap
-from obdi.ingest.pull import STARLING_CONNECTION, pull_starling
+from obdi.ingest.pull import STARLING_CONNECTION
 from obdi.ingest.store import Store
 
 

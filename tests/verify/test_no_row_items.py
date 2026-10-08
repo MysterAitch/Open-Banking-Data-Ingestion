@@ -40,9 +40,9 @@ from feed_morning_corpus import (
     morning,
     top_up,
 )
+from landing import rebuild_from_raw
 from obdi.ingest import rebuild
 from obdi.ingest.family_anchors import families_of
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.verify.balance_anchors import effective_opening
 from obdi.verify.fault_explanation import NO_ROW_STATUS_ROWS
 from round_up_corpus import (

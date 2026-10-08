@@ -2,12 +2,12 @@
 
 A flag asks whether a row stored as new is a repeated payment or a duplicate
 report. Several kinds of flag ask a question that has an answer on file (see
-`review_report.FlagClass`): the flagged row is gone or is history, every
+`ingest.finishers.FlagClass`): the flagged row is gone or is history, every
 neighbour is history, one response named the row and every neighbour under
 different provider ids, the source never reuses an id, or the known balances on
 both sides are reproduced only with both rows counted. This pass deletes those
 flags and leaves the rest for a person. What a proof needs is stated once, on
-the class, in `review_report.FlagClass`.
+the class, in `ingest.finishers.FlagClass`.
 
 It is a DERIVED pass, like the Space fold: it reads the evidence held now and
 runs after every fold, so a flag the evidence later answers is closed on the
@@ -29,40 +29,9 @@ possible duplicate report, so every live neighbour must be proven.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
-from ..core.plural import plural
+from ..ingest.finishers import SETTLED_CLASSES, SettleReport
 from ..ingest.store import Store
-from .review_report import SETTLED_CLASSES, FlagClass, assess_flags
-
-
-@dataclass
-class SettleReport:
-    #: Flags deleted, by the class of proof that closed them.
-    settled: dict[FlagClass, int] = field(default_factory=dict)
-    #: Open flags left after the pass: the real questions.
-    still_open: int = 0
-
-    @property
-    def total(self) -> int:
-        return sum(self.settled.values())
-
-    def describe(self) -> str:
-        if not self.settled:
-            return (
-                f"no review flag was settled; {self.still_open} "
-                f"{'remains' if self.still_open == 1 else 'remain'} open"
-            )
-        parts = ", ".join(
-            f"{count} {flag_class.value}"
-            for flag_class in SETTLED_CLASSES
-            if (count := self.settled.get(flag_class, 0))
-        )
-        return (
-            f"{plural(self.total, 'review flag')} settled by evidence already held "
-            f"({parts}); {self.still_open} "
-            f"{'remains' if self.still_open == 1 else 'remain'} open"
-        )
+from .review_report import assess_flags
 
 
 def settle_review_flags(store: Store) -> SettleReport:

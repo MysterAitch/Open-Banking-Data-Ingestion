@@ -39,8 +39,8 @@ import json
 import pathlib
 from typing import Any
 
+from landing import import_file
 from obdi.core.models import Transaction, TransactionStatus
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.providers import starling
 from obdi.ingest.store import Store
 from test_export_cuts import Row, export_lines

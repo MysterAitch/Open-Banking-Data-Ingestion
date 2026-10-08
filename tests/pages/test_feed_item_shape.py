@@ -35,9 +35,9 @@ from typing import Any
 import pytest
 
 from feed_morning_corpus import TOP_UP_LISTED, cafe_payment, top_up
+from landing import rebuild_from_raw
 from obdi.ingest.family_anchors import families_of
 from obdi.ingest.feed_item_shape import MIN_COMPARABLE, THRESHOLDS
-from obdi.ingest.rebuild import rebuild_from_raw
 from round_up_corpus import card_payment, household_store, main_feed, space_feed
 from test_export_cuts import Row
 from test_feed_times import plain

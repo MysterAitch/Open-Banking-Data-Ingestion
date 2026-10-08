@@ -23,8 +23,8 @@ from feed_morning_corpus import (
     morning,
     top_up,
 )
+from landing import rebuild_from_raw
 from obdi.ingest.family_anchors import families_of
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.pages.web_ledger import render_ledger
 from obdi.read.ledger import build_ledger
 from obdi.verify.balance_anchors import effective_opening

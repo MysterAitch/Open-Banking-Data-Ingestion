@@ -45,15 +45,11 @@ from ..core.namespaces import (
 )
 from ..core.plural import plural
 from ..verify.period_reconciliation import SAME_MONEY_PHASE
-from ..verify.protection import recheck as recheck_protections
-from ..verify.review_flags import replay_joins
-from ..verify.review_report import FlagClass
-from ..verify.review_settlement import SettleReport, settle_review_flags
-from ..verify.statement_sections import SectionBatches, replay_batches
 from .accounts import AccountMap
 from .arrival_order import in_arrival_order
 from .declined_items import void_declined_items
 from .family_anchors import families_of
+from .finishers import Finishers, FlagClass, SectionBatches, SettleReport
 from .matching import CandidateIndex
 from .parsers.uk_banks import detect
 from .pending_lifecycle import resolve_vanished_pending
@@ -395,6 +391,7 @@ def _replay_sections(
     payload: bytes,
     account_map: AccountMap | None,
     candidate_cache: dict[str, CandidateIndex],
+    finishers: Finishers,
     space_blind: SpaceBlind | None = None,
 ) -> SectionBatches:
     """Read each assigned section of one kept statement back into its account.
@@ -404,7 +401,7 @@ def _replay_sections(
     merge into it occurrence for occurrence rather than being renumbered by
     whatever else the rebuild has seen.
     """
-    replay = replay_batches(
+    replay = finishers.replay_batches(
         store, digest, payload, lambda ref: _resolve_ref(ref, account_map)
     )
     report.kept_sections_unassigned += replay.unassigned
@@ -428,21 +425,26 @@ def rebuild_from_raw(
     store: Store,
     progress: Callable[[int, int, RebuildReport], None] | None = None,
     account_map: AccountMap | None = None,
+    *,
+    finishers: Finishers,
 ) -> RebuildReport:
     """Wipe the derived layers and replay layer 0 in arrival order.
 
     The replay and the passes after it read each held PDF from its stored extraction, so a
     document is read from its file at most once in a rebuild - by the fill that precedes the
-    replay, and only where no extraction made by the current version is held.
+    replay, and only where no extraction made by the current version is held. `finishers` reads
+    the assigned sections of kept statements back mid-replay, then repeats a person's "one
+    payment" answers, settles the review flags, and rechecks the protections once it is done.
     """
     with serving(store, strict=False):
-        return _rebuild_from_raw(store, progress, account_map)
+        return _rebuild_from_raw(store, progress, account_map, finishers)
 
 
 def _rebuild_from_raw(
     store: Store,
     progress: Callable[[int, int, RebuildReport], None] | None,
     account_map: AccountMap | None,
+    finishers: Finishers,
 ) -> RebuildReport:
     """Wipe the derived layers and replay layer 0 in arrival order.
 
@@ -580,6 +582,7 @@ def _rebuild_from_raw(
                         bytes(payload),
                         account_map,
                         candidate_cache,
+                        finishers,
                         space_blind,
                     )
                 waiting = not replay.every_section_assigned
@@ -708,12 +711,12 @@ def _rebuild_from_raw(
     # A person's "one payment" answers (`review_flags`), repeated over the rows just derived.
     # Before the settlement below, so a flag the join answers is gone and not settled by proof.
     with instrumentation.phase("flag-answers"):
-        replay_joins(store)
+        finishers.replay_joins(store)
     # After the fold, because a row folded into a Space row is history and its
     # flag is one of the questions this closes. It runs with or without an
     # account map: most of what it settles has nothing to do with Spaces.
     with instrumentation.phase("review-settlement"):
-        settled = settle_review_flags(store)
+        settled = finishers.settle(store)
     report.review_settled = settled.settled
     report.review_still_open = settled.still_open
     with instrumentation.phase("transfer-pairing"):
@@ -725,7 +728,7 @@ def _rebuild_from_raw(
     # Last, so a protected span is compared with the finished derivation. The check only
     # records; `protection` says why a rebuild is never refused or altered by one.
     with instrumentation.phase("protection"):
-        recheck_protections(store, finished_rebuild=True)
+        finishers.recheck(store, finished_rebuild=True)
     after_counts = {
         str(row[0]): int(row[1])
         for row in store.connection.execute(

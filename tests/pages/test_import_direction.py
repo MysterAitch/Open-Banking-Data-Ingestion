@@ -44,24 +44,15 @@ COMPOSITION_ROOT = "cli"
 ALLOWED_UPWARD: frozenset[tuple[str, str]] = frozenset(
     {
         ("read.ledger", "export.replay"),
-        ("read.scheduler_status", "export.actual_push"),
         ("read.todo", "pages.navigation"),
         ("export.actual_verdict", "pages.web_prune"),
         ("ingest.family_anchors", "verify.balance_reconciliation"),
-        ("ingest.pipeline", "verify.review_settlement"),
-        ("ingest.pull", "verify.review_settlement"),
+        ("read.scheduler_status", "export.actual_push"),
         ("ingest.rebuild", "verify.period_reconciliation"),
-        ("ingest.rebuild", "verify.protection"),
-        ("ingest.rebuild", "verify.review_flags"),
-        ("ingest.rebuild", "verify.review_report"),
-        ("ingest.rebuild", "verify.review_settlement"),
-        ("ingest.rebuild", "verify.statement_sections"),
         ("ingest.same_money_fold", "verify.period_reconciliation"),
         ("ingest.same_money_fold", "verify.same_money_outcome"),
         ("ingest.space_attribution", "verify.coverage"),
         ("ingest.typed_transactions", "verify.balance_anchors"),
-        ("ingest.typed_transactions", "verify.protection"),
-        ("ingest.typed_transactions", "verify.review_settlement"),
         ("verify.protection", "read.ledger"),
     }
 )
@@ -431,11 +422,12 @@ class TestTheAllowedListCanOnlyShrink:
         for importer, target in ALLOWED_UPWARD:
             assert RANK[importer.split(".")[0]] < RANK[target.split(".")[0]], (importer, target)
 
-    def test_AllowedList_Itself_IsTheTwentyTheSplitStartedWith(self):
+    def test_AllowedList_Itself_IsWhatTheSplitStartedWithLessWhatHasBeenRemoved(self):
         # The plan measured twenty; the Entities page added a twenty-first (the store importing
         # the entity record) before the move, and the record moved below the store to remove it.
-        # The number only goes down from here.
-        assert len(ALLOWED_UPWARD) == 20
+        # The settle-after-landing group (nine lines: the landing functions take their finishers
+        # as a required parameter) is gone. The number only goes down from here.
+        assert len(ALLOWED_UPWARD) == 11
 
 
 class TestOverTheRealTree:

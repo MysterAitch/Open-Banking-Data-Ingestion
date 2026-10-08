@@ -24,8 +24,8 @@ import sqlite3
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.ingest.providers import truelayer
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.stated_times import days_of, london_date, settlement_days, stated_times
 from obdi.ingest.store import SCHEMA_VERSION, Store
 from round_up_corpus import SPACE_FEED_ORIGIN, card_payment, land_feed, round_up_of
