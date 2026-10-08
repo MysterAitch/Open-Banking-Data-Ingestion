@@ -2190,6 +2190,25 @@ class Store:
             external=bool(row["external"]),
         )
 
+    def declared_limit_windows(self) -> dict[str, list[LimitWindow]]:
+        """Every declared account's limit windows by canonical name, accounts without one left
+        out: the one statement Position's free figure asks, where `declared_accounts` is three."""
+        found: dict[str, list[LimitWindow]] = {}
+        for row in self.connection.execute(
+            "SELECT a.ref, l.kind, l.window_from, l.window_to, l.amount_minor "
+            "FROM declared_account_limits l JOIN declared_accounts a ON a.stable_id = l.stable_id "
+            "ORDER BY a.ref, l.position"
+        ):
+            found.setdefault(str(row["ref"]), []).append(
+                LimitWindow(
+                    kind=str(row["kind"]),
+                    window_from=_read_date(row["window_from"]),
+                    window_to=_read_date(row["window_to"]),
+                    amount_minor=int(row["amount_minor"]),
+                )
+            )
+        return found
+
     def declared_kind(self, ref: str) -> str:
         """The kind an account is declared with, or "" when it is not declared.
 

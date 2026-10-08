@@ -331,6 +331,8 @@ def _free_account(account: Any) -> str:
             )
         else:
             parts.append(f"<li><strong>Owed</strong> {_esc(account.held_basis)}.</li>")
+        if account.limit:
+            parts.append(f"<li><strong>Limit</strong> {_figure('', account.limit)}.</li>")
     else:
         if account.held_known:
             held = _figure(_balance_word(account.held_direction), account.held)
