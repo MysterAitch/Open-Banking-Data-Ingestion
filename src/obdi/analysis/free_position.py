@@ -215,6 +215,11 @@ class FreeFigures:
     owed: Structural[FigureTotal]
     committed: Structural[FigureTotal]
     free: Structural[FigureTotal]
+    #: This month's share of the goals that have a date (`analysis.goals`), and how many goals it
+    #: is made from. Counted apart from `committed` and never in `free`: a goal is the owner's
+    #: choice and a commitment is an obligation.
+    goals_share: Total[Money | None] = None
+    goals_sharing: Structural[int] = 0
 
 
 def _ago(day: date, today: date) -> str:
@@ -440,11 +445,14 @@ def build_free(
     *,
     today: date,
     limits: Mapping[str, DeclaredLimit] | None = None,
+    goals_share: Money | None = None,
+    goals_sharing: int = 0,
 ) -> FreeFigures:
     """The four figures for every live (not archived) account and their totals.
 
     `detected` are the detector's series, read only where `wants_detector` said so; handing none
-    is the honest answer that no income was detected."""
+    is the honest answer that no income was detected. `goals_share` is this month's share of the
+    dated goals, carried beside the totals and not in them."""
     wanted = limits or {}
     live = _live(position)
     household = _next_income(
@@ -477,4 +485,6 @@ def build_free(
             ],
             len(accounts),
         ),
+        goals_share=goals_share,
+        goals_sharing=goals_sharing,
     )

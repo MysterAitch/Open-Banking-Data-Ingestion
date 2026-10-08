@@ -40,6 +40,7 @@ from .analysis.entities import (
 )
 from .analysis.external_accounts import dismissed_keys, unheld_accounts
 from .analysis.free_position import DeclaredLimit, FreeFigures
+from .analysis.goals import GoalsView
 from .analysis.learned_rules import rule_policy
 from .analysis.recurring import RecurringFindings, Series
 from .analysis.this_month import MonthNote, ThisMonth
@@ -3982,9 +3983,25 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             commitments = store.commitments()
             limits = limits_in_force(store, on)
+            goals = goals_of(store, position, on)
         asks = wants_detector(position, commitments, today=on)
         detected = recurring_data().series if asks else []
-        return build_free(position, commitments, detected, today=on, limits=limits)
+        return build_free(
+            position,
+            commitments,
+            detected,
+            today=on,
+            limits=limits,
+            goals_share=goals.share_total if goals else None,
+            goals_sharing=goals.sharing if goals else 0,
+        )
+
+    def goals_of(store: Store, position: Position, on: date) -> GoalsView | None:
+        """Where each goal stands against `position`, or None where none is declared: one select."""
+        from .analysis.goals import build_goals
+
+        declared = store.goals()
+        return build_goals(declared, position, today=on) if declared else None
 
     def limits_in_force(store: Store, on: date) -> dict[str, DeclaredLimit]:
         """Each account's declared limit in force on `on`: one select."""
@@ -4004,9 +4021,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             *position_memo_key(store),
             repr(store.commitments()),
             repr(store.declared_limit_windows()),
+            repr(store.goals()),
         )
 
-    def month_inputs() -> tuple[Position, list[Commitment], list[Series], FreeFigures]:
+    def month_inputs() -> (
+        tuple[Position, list[Commitment], list[Series], FreeFigures, GoalsView | None]
+    ):
         from .analysis.free_position import build_free
 
         position = home_position()
@@ -4014,17 +4034,22 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             commitments = store.commitments()
             limits = limits_in_force(store, on)
+            goals = goals_of(store, position, on)
         found = recurring_data().series if commitments else []
-        return (
+        free = build_free(
             position,
             commitments,
             found,
-            build_free(position, commitments, found, today=on, limits=limits),
+            today=on,
+            limits=limits,
+            goals_share=goals.share_total if goals else None,
+            goals_sharing=goals.sharing if goals else 0,
         )
+        return position, commitments, found, free, goals
 
-    month_memo: KeyedMemo[tuple[Position, list[Commitment], list[Series], FreeFigures]] = (
-        KeyedMemo(month_inputs_key, name="this month", epoch=rebuild_epoch)
-    )
+    month_memo: KeyedMemo[
+        tuple[Position, list[Commitment], list[Series], FreeFigures, GoalsView | None]
+    ] = KeyedMemo(month_inputs_key, name="this month", epoch=rebuild_epoch)
 
     def this_month_data(ahead: bool) -> ThisMonth:
         """The month's calendar over Position's own figures, read once for Today's note and the
@@ -4033,7 +4058,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .analysis.this_month import build_this_month
 
         with Store(db_path) as store:
-            position, commitments, found, free = month_memo.get(store, month_inputs)
+            position, commitments, found, free, goals = month_memo.get(store, month_inputs)
         return build_this_month(
             position,
             commitments,
@@ -4041,6 +4066,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             free,
             today=date.fromisoformat(position.as_of),
             ahead=ahead,
+            goals=goals,
         )
 
     def this_month_note() -> MonthNote | None:
@@ -4053,6 +4079,25 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 return None
         note = note_of(this_month_data(False))
         return note if note.worth_saying() else None
+
+    def goals_data() -> GoalsView:
+        """Where each goal stands against the held position, for the Goals page."""
+        from .analysis.goals import build_goals
+
+        position = home_position()
+        with Store(db_path) as store:
+            declared = store.goals()
+        return build_goals(declared, position, today=date.fromisoformat(position.as_of))
+
+    def goals_act(action: str, form: dict[str, list[str]]) -> str:
+        """One press on the Goals page. A refusal is a `GoalRefused`, with nothing changed."""
+        from .analysis.goals import apply_press
+
+        position = home_position()
+        with Store(db_path) as store:
+            return apply_press(
+                store, position, action, form, today=date.fromisoformat(position.as_of)
+            )
 
     def recurring_act(action: str, form: dict[str, list[str]]) -> str:
         """One press on the Recurring page: the series it names is found again from the
@@ -5043,6 +5088,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         ),
         recurring_data=recurring_data,
         recurring_act=recurring_act,
+        goals_data=goals_data,
+        goals_act=goals_act,
         entities_data=entities_data,
         entities_act=entities_act,
         entity_page=entity_page,
