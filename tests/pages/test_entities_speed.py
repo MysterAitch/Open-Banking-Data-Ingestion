@@ -29,7 +29,11 @@ from page_dom import parse
 #: statements over the large store with no entity, and 23 with one entity keeping one rule
 #: (`test_entity_page_speed` holds that case). Where the two extra come from was not
 #: investigated. The bound stays two above the larger.
-ENTITIES_STATEMENTS = 25
+#:
+#: Declared external accounts add one select (`Store.external_identifiers`) to every page that
+#: names rows, which took the with-a-rule case to 26 beside the learned lines' refusal read; the
+#: bound is raised by that one statement, not reworked, since it does not grow with the store.
+ENTITIES_STATEMENTS = 26
 SECONDS = 5.0
 
 

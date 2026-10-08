@@ -25,7 +25,9 @@ from obdi.ingest.store import Store
 #: own start-up reads, and the one read of which shapes the owner gathered into entities.
 #: Measured 26 with that read, which is one select and so took the page past the 25 this budget
 #: was; allowing two more. A read per account or per series would add eleven or more.
-RECURRING_STATEMENTS = 28
+#: Measured 29 once the declared external accounts' one select (`Store.external_identifiers`)
+#: joined the learned lines' refusal read; the bound is raised by that one statement.
+RECURRING_STATEMENTS = 29
 SECONDS = 20.0
 
 
