@@ -53,6 +53,9 @@ from .recurring import Series
 
 CURRENCY = "GBP"
 
+#: Nothing, as the default of a total that is not made.
+NO_MONEY = Money(0, CURRENCY)
+
 #: Words in a declared kind that say the balance is owed: a card, a loan, a mortgage.
 _OWING_WORDS = ("card", "loan", "mortgage", "credit")
 
@@ -184,6 +187,23 @@ class FigureTotal:
 
 
 @dataclass(frozen=True)
+class OwedLine:
+    """Money owed to the household: who owes it, for what, by when, and how much. Made by
+    `flows` from a share of a commitment's flow not yet arrived, or from a receivable declared on
+    a transaction; it sits here because Position carries it and `flows` reads Position."""
+
+    who: str
+    what: str
+    due: Structural[str]
+    amount: Total[Money]
+    overdue: Structural[bool]
+    #: "leg" for a share of a commitment, "transaction" for one declared on a transaction.
+    source: Structural[str]
+    #: The receivable's id for the press that closes it by hand; 0 for a leg.
+    receivable: Structural[int] = 0
+
+
+@dataclass(frozen=True)
 class FreeFigures:
     as_of: Structural[str]
     accounts: Structural[tuple[AccountFigures, ...]]
@@ -191,6 +211,10 @@ class FreeFigures:
     owed: Structural[FigureTotal]
     committed: Structural[FigureTotal]
     free: Structural[FigureTotal]
+    #: What other people owe the household and it has not been paid (`flows`): not part of any
+    #: account's balance, and so not in the figures above, but part of the position.
+    owed_to_you: Structural[tuple[OwedLine, ...]] = ()
+    owed_to_you_total: Total[Money] = NO_MONEY
 
 
 def _ago(day: date, today: date) -> str:

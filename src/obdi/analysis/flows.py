@@ -45,9 +45,10 @@ from datetime import date, timedelta
 
 from ..core.masking import Structural, Total
 from ..ingest.commitment_records import Commitment, Leg, Window
+from ..ingest.receivable_records import WRITTEN_OFF, Receivable
 from ..read.account_about import ExpectedFold, ExpectedLine
 from ..read.ledger import Money
-from .free_position import CURRENCY, AccountFigures, due_days
+from .free_position import CURRENCY, AccountFigures, OwedLine, due_days
 from .ownership import scaled, share_words
 from .recurring import CHANGE_PERCENT, Mover
 
@@ -130,19 +131,6 @@ class SpaceNeed:
     lines: Structural[tuple[NeedLine, ...]]
 
 
-@dataclass(frozen=True)
-class OwedLine:
-    """Money owed to the household: who owes it, for what, by when, and how much."""
-
-    who: str
-    what: str
-    due: Structural[str]
-    amount: Total[Money]
-    overdue: Structural[bool]
-    #: `LEG` for a share of a commitment, `TRANSACTION` for one declared on a transaction.
-    source: Structural[str]
-
-
 LEG = "leg"
 TRANSACTION = "transaction"
 
@@ -157,6 +145,9 @@ class FlowReading:
     owed_total: Total[Money]
     #: How many legs are missing; the count is structure and is what Today's rail counts.
     missing: Structural[int]
+    #: What became of each receivable declared on a transaction, and the labels' years.
+    receivables: Structural[tuple[ReceivableState, ...]] = ()
+    labels: Structural[tuple[LabelLine, ...]] = ()
 
 
 NOTHING = FlowReading((), (), (), Money(0, CURRENCY), 0)
@@ -254,9 +245,20 @@ def evaluate_legs(
     """Every checked leg on each of its days near `today`, matched against the transactions.
 
     `names` is each entity's name by id. Instances are returned in the order of their days."""
+    return _evaluate(commitments, movers, names, today)[0]
+
+
+def _evaluate(
+    commitments: Sequence[Commitment],
+    movers: Sequence[Mover],
+    names: Mapping[int, str],
+    today: date,
+) -> tuple[list[LegInstance], set[str]]:
+    """The legs of `evaluate_legs` and the transactions they used, so that a receivable on a
+    transaction is not met by the very payment that met a leg."""
     pending = _instances_of(commitments, today)
     if not pending:
-        return []
+        return [], set()
     by_account: dict[str, list[Mover]] = defaultdict(list)
     reach: dict[str, date] = {}
     seen: set[int] = set()
@@ -327,7 +329,172 @@ def evaluate_legs(
                 said=said,
             )
         )
-    return found
+    return found, used
+
+
+OPEN = "open"
+REIMBURSED = "reimbursed"
+
+
+@dataclass(frozen=True)
+class ReceivableState:
+    """What became of one receivable: open, met by a transfer from the debtor (which one is kept,
+    derived from the transactions on every read), or closed by hand with the owner's reason."""
+
+    id: Structural[int]
+    row_ref: Structural[str]
+    #: `OPEN`, `REIMBURSED`, or a way of closing by hand (`receivable_records.CLOSE_HOWS`).
+    state: Structural[str]
+    #: The transaction that met it and its day, for `REIMBURSED`.
+    closed_by: Structural[str]
+    closed_on: Structural[str]
+    #: The owner's words for closing it by hand: a value.
+    reason: str
+    overdue: Structural[bool]
+    #: Why nothing can meet it yet (the debtor has no payments attributed), or "".
+    why: Structural[str]
+
+
+@dataclass(frozen=True)
+class LabelLine:
+    """What one label comes to this year: the receivables carrying it, what has been reimbursed
+    (by a transfer or received elsewhere), what is still owed, and what was written off."""
+
+    label: str
+    total: Total[Money]
+    reimbursed: Total[Money]
+    owed: Total[Money]
+    written_off: Total[Money]
+    #: Whether anything was written off, which is a fact about the label and not an amount.
+    has_written_off: Structural[bool] = False
+
+
+def settle_receivables(
+    receivables: Sequence[Receivable],
+    movers: Sequence[Mover],
+    names: Mapping[int, str],
+    today: date,
+    *,
+    used: set[str] | None = None,
+) -> list[ReceivableState]:
+    """Whether each receivable has been met, in the order given.
+
+    A receivable is met by money IN, from its debtor (the entity its payments are gathered
+    under), within the detector's tolerance of its amount, on or after the day it was spent. Oldest
+    first, each takes the nearest-priced such transfer not already taken, so one transfer closes
+    the older of two receivables from one entity and never both, and a transfer from another
+    entity closes nothing however well its amount fits. A receivable closed by hand takes no
+    transfer."""
+    taken = set(used or ())
+    seen = {m.party for m in movers if m.party}
+    ordered = sorted(
+        (r for r in receivables if not r.closed_how), key=lambda r: (r.day, r.id)
+    )
+    met: dict[int, Mover] = {}
+    for item in ordered:
+        best: tuple[int, date, str] | None = None
+        chosen: Mover | None = None
+        for mover in movers:
+            if (
+                mover.row in taken
+                or mover.amount_minor <= 0
+                or mover.party != item.debtor
+                or mover.day < item.day
+                or not amount_meets(mover.amount_minor, item.amount_minor)
+            ):
+                continue
+            rank = (abs(mover.amount_minor - item.amount_minor), mover.day, mover.row)
+            if best is None or rank < best:
+                best, chosen = rank, mover
+        if chosen is not None:
+            taken.add(chosen.row)
+            met[item.id] = chosen
+    states = []
+    for item in receivables:
+        paid_by = met.get(item.id)
+        if item.closed_how:
+            states.append(
+                ReceivableState(
+                    id=item.id,
+                    row_ref=item.row_ref,
+                    state=item.closed_how,
+                    closed_by="",
+                    closed_on=item.closed_at[:10],
+                    reason=item.closed_reason,
+                    overdue=False,
+                    why="",
+                )
+            )
+        elif paid_by is not None:
+            states.append(
+                ReceivableState(
+                    id=item.id,
+                    row_ref=item.row_ref,
+                    state=REIMBURSED,
+                    closed_by=paid_by.row,
+                    closed_on=paid_by.day.isoformat(),
+                    reason="",
+                    overdue=False,
+                    why="",
+                )
+            )
+        else:
+            why = ""
+            if item.debtor not in names:
+                why = _NO_SUCH_ENTITY
+            elif item.debtor not in seen:
+                why = _NO_PAYER_YET
+            states.append(
+                ReceivableState(
+                    id=item.id,
+                    row_ref=item.row_ref,
+                    state=OPEN,
+                    closed_by="",
+                    closed_on="",
+                    reason="",
+                    overdue=today > item.expected_day,
+                    why=why,
+                )
+            )
+    return states
+
+
+def label_lines(
+    receivables: Sequence[Receivable], states: Sequence[ReceivableState], today: date
+) -> list[LabelLine]:
+    """Each label's year to date: what the receivables carrying it come to, reimbursed, owed, and
+    written off. A label is one label however it is cased; receivables with none are not here,
+    and neither are those spent in another year."""
+    by_id = {state.id: state for state in states}
+    sums: dict[str, list[int]] = {}
+    shown: dict[str, str] = {}
+    for item in receivables:
+        if not item.label or item.day.year != today.year:
+            continue
+        key = item.label.casefold()
+        shown.setdefault(key, item.label)
+        total = sums.setdefault(key, [0, 0, 0, 0])
+        total[0] += item.amount_minor
+        state = by_id[item.id].state
+        slot = 2 if state == OPEN else 3 if state == WRITTEN_OFF else 1
+        total[slot] += item.amount_minor
+    return [
+        LabelLine(
+            shown[key],
+            Money(sums[key][0], CURRENCY),
+            Money(sums[key][1], CURRENCY),
+            Money(sums[key][2], CURRENCY),
+            Money(sums[key][3], CURRENCY),
+            has_written_off=sums[key][3] > 0,
+        )
+        for key in sorted(sums)
+    ]
+
+
+def label_sentence(label: str, total: str, reimbursed: str, owed: str) -> str:
+    """"volunteering this year: £N, of which £M reimbursed, £K owed", the figures as the page
+    shows them."""
+    return f"{label} this year: {total}, of which {reimbursed} reimbursed, {owed} owed"
 
 
 def missing_sentence(
@@ -441,14 +608,32 @@ def read_flows(
     names: Mapping[int, str],
     accounts: Mapping[str, AccountFigures],
     today: date,
+    receivables: Sequence[Receivable] = (),
 ) -> FlowReading:
     """The legs matched, the spaces' needs, and what is owed to the household, as of `today`: an
-    incoming leg is owed from its day, not before, and no longer once it has arrived.
+    incoming leg is owed from its day, not before, and no longer once it has arrived; a receivable
+    declared on a transaction is owed from the day it was declared until a transfer from its debtor
+    meets it or the owner closes it.
 
     `accounts` are Position's own figures by account reference (`FreeFigures.accounts`): a space's
     holding is read from them and never worked out again."""
-    instances = evaluate_legs(commitments, movers, names, today)
+    instances, used = _evaluate(commitments, movers, names, today)
     spaces = space_needs(commitments, accounts, today)
+    states = settle_receivables(receivables, movers, names, today, used=used)
+    by_id = {r.id: r for r in receivables}
+    owed_on_transactions = [
+        OwedLine(
+            who=names.get(by_id[state.id].debtor, "someone"),
+            what=by_id[state.id].label or f"an expense on {by_id[state.id].day.isoformat()}",
+            due=by_id[state.id].expected_day.isoformat(),
+            amount=Money(by_id[state.id].amount_minor, CURRENCY),
+            overdue=state.overdue,
+            source=TRANSACTION,
+            receivable=state.id,
+        )
+        for state in states
+        if state.state == OPEN
+    ]
     owed = [
         OwedLine(
             who=item.party or "someone",
@@ -461,10 +646,13 @@ def read_flows(
         for item in instances
         if item.kind == INCOMING and item.state != MATCHED and date.fromisoformat(item.due) <= today
     ]
+    owed.extend(owed_on_transactions)
     return FlowReading(
         legs=tuple(instances),
         spaces=tuple(spaces),
         owed=tuple(owed),
         owed_total=Money(sum(line.amount.minor for line in owed), CURRENCY),
         missing=sum(item.state == MISSING for item in instances),
+        receivables=tuple(states),
+        labels=tuple(label_lines(receivables, states, today)),
     )

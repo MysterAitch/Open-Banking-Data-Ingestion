@@ -398,11 +398,24 @@ def _free_section(free: Disclosed[FreeFigures]) -> str:
             word="free",
         )
     )
+    owed_to_you = ""
+    if free.owed_to_you:
+        lines = "".join(
+            f"<li>{_esc(line.who)}: {_figure('', line.amount)} for {_esc(line.what)}, "
+            f"expected by {_esc(line.due)}</li>"
+            for line in free.owed_to_you
+        )
+        owed_to_you = (
+            f"<p><strong>Owed to you</strong> {_figure('', free.owed_to_you_total)}. It is not "
+            "in any figure above: it is not in an account yet.</p>"
+            f'<ul class="keylist">{lines}</ul>'
+        )
     return (
         "<h2>Held, owed, committed, and free</h2>"
         f'<p class="muted">As at {_esc(free.as_of)}. A figure that cannot be made is not shown as '
         "nil; it says what is missing.</p>"
         f'<ul class="keylist">{totals}</ul>'
+        f"{owed_to_you}"
         f"<details><summary>Each account's four figures ({len(accounts)})</summary>"
         f'<ul class="pos-left-out">{"".join(_free_account(a) for a in accounts)}</ul></details>'
     )

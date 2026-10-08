@@ -29,8 +29,9 @@ from collections import Counter
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
-from ..analysis.flows import MISSING, missing_sentence
+from ..analysis.flows import MISSING, label_sentence, missing_sentence
 from ..analysis.this_month import ENDED, IN, NOT_TAKEN, OVERDUE, PAID, ThisMonth
+from ..core.errors import DataError
 from ..core.logs import say
 from ..core.masking import Disclosed
 from ..core.plural import agree, plural
@@ -46,6 +47,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for types alone
 _esc = html.escape
 
 ROUTE = "/this-month"
+CLOSE_ROUTE = "/receivable-close"
 #: The query value and the form field that ask for the month after this one.
 AHEAD = "next"
 FIELD = "month"
@@ -274,22 +276,59 @@ def _spaces_section(view: Any) -> str:
     return f'<h2>Spaces to fund</h2><ul class="keylist">{items}</ul>'
 
 
-def _receivables_section(view: Any) -> str:
-    """Money owed to the household and past its day, by who owes it. Silent when nothing is."""
-    owed = view.flows.owed
-    if not owed:
+def _close_forms(line: Any, *, unmasked: bool) -> str:
+    """The two ways to close by hand a receivable declared on a transaction, each asking for the
+    reason it keeps. A leg of a flow has none: it closes when the money arrives."""
+    if not int(line.receivable):
         return ""
-    items = "".join(
-        f"<li>{_esc(str(line.who))} owes {_figure('', line.amount)} for {_esc(str(line.what))}, "
-        f"expected by {_esc(str(line.due))}"
-        + (' <span class="pill pill-bad">late</span>' if line.overdue else "")
-        + "</li>"
-        for line in owed
-    )
-    return (
-        f'<h2>Owed to you</h2><p class="muted">In all {_figure("", view.flows.owed_total)}.</p>'
-        f'<ul class="keylist">{items}</ul>'
-    )
+    shown = '<input type="hidden" name="shown" value="1">' if unmasked else ""
+    ident = f'<input type="hidden" name="receivable" value="{int(line.receivable)}">'
+    forms = []
+    ways = (("written-off", "Written off"), ("received-elsewhere", "Received elsewhere"))
+    for how, label in ways:
+        forms.append(
+            f'<form method="post" action="{CLOSE_ROUTE}">{ident}{shown}'
+            f'<input type="hidden" name="how" value="{how}">'
+            '<label>Why <input name="reason" maxlength="120" required></label> '
+            + submit_button(label, secondary=True)
+            + "</form>"
+        )
+    return f"<details><summary>Close it</summary>{''.join(forms)}</details>"
+
+
+def _receivables_section(view: Any, *, unmasked: bool) -> str:
+    """Money owed to the household, by who owes it, and what each label comes to this year.
+    Silent when nothing is owed and no label is in use."""
+    owed = view.flows.owed
+    parts = []
+    if owed:
+        items = "".join(
+            f"<li>{_esc(str(line.who))} owes {_figure('', line.amount)} for "
+            f"{_esc(str(line.what))}, expected by {_esc(str(line.due))}"
+            + (' <span class="pill pill-bad">late</span>' if line.overdue else "")
+            + _close_forms(line, unmasked=unmasked)
+            + "</li>"
+            for line in owed
+        )
+        parts.append(
+            f'<h2>Owed to you</h2><p class="muted">In all {_figure("", view.flows.owed_total)}.'
+            f'</p><ul class="keylist">{items}</ul>'
+        )
+    if view.flows.labels:
+        lines = "".join(
+            "<li>"
+            + label_sentence(
+                _esc(str(item.label)),
+                _figure("", item.total),
+                _figure("", item.reimbursed),
+                _figure("", item.owed),
+            )
+            + (f", {_figure('', item.written_off)} written off" if item.has_written_off else "")
+            + ".</li>"
+            for item in view.flows.labels
+        )
+        parts.append(f'<h2>Labels this year</h2><ul class="keylist">{lines}</ul>')
+    return "".join(parts)
 
 
 def _goals_section(view: Any) -> str:
@@ -348,10 +387,17 @@ def _other_month(unmasked: bool, *, ahead: bool) -> str:
     )
 
 
-def render_this_month(month: ThisMonth, *, unmasked: bool) -> bytes:
+def render_this_month(
+    month: ThisMonth, *, unmasked: bool, said: str = "", refused: str = ""
+) -> bytes:
     view = Disclosed(month, unmasked=unmasked)
     ahead = bool(month.ahead)
-    body = _mode(unmasked, ahead=ahead)
+    body = ""
+    if said:
+        body += f'<p class="ok"><strong>{_esc(said)}</strong></p>'
+    elif refused:
+        body += f'<p class="bad">{_esc(refused)}</p>'
+    body += _mode(unmasked, ahead=ahead)
     body += f'<p class="lede"><strong>{headline(view, unmasked=unmasked)}</strong></p>'
     body += (
         f'<p class="muted">{_esc(_month_name(str(month.month)))}, as at {_esc(str(month.as_of))}.'
@@ -368,7 +414,7 @@ def render_this_month(month: ThisMonth, *, unmasked: bool) -> bytes:
     if not ahead:
         body += _funded(view, unmasked=unmasked)
     body += _spaces_section(view) + _legs_section(view)
-    body += _receivables_section(view) + _goals_section(view)
+    body += _receivables_section(view, unmasked=unmasked) + _goals_section(view)
     body += _other_month(unmasked, ahead=ahead) + _NOTE + _HOME
     return render_page(page_name(ROUTE), body)
 
@@ -395,7 +441,40 @@ class ThisMonthPages:
     def _this_month_post(self, form: dict[str, list[str]]) -> None:
         self._this_month(unmasked=True, ahead=form.get(FIELD, [""])[0] == AHEAD)
 
-    def _this_month(self, *, unmasked: bool, ahead: bool) -> None:
+    def _receivable_close_post(self, form: dict[str, list[str]]) -> None:
+        """Close what is owed on a transaction by hand, then answer with This month as it was
+        pressed on: masked unless the form says it was shown (or a sitting shows values), so a
+        press never unmasks a page by itself. The reason typed is kept and not repeated."""
+        unmasked = form.get("shown") == ["1"] or values_sitting.shown()
+        hook = self.bound_config.receivable_act
+        if hook is None:
+            self._respond(404, _page("Not available", "Closing what is owed is not wired."))
+            return
+        try:
+            said = hook("close", form)[0]
+        except DataError as exc:
+            self._this_month(unmasked=unmasked, ahead=False, refused=str(exc), status=400)
+            return
+        except Exception as fault:
+            say("this-month.close.fault", kind=type(fault).__name__)
+            self._this_month(
+                unmasked=unmasked,
+                ahead=False,
+                refused="Nothing was changed, because of an unexpected fault.",
+                status=500,
+            )
+            return
+        self._this_month(unmasked=unmasked, ahead=False, said=said)
+
+    def _this_month(
+        self,
+        *,
+        unmasked: bool,
+        ahead: bool,
+        said: str = "",
+        refused: str = "",
+        status: int = 200,
+    ) -> None:
         hook = self.bound_config.this_month_data
         if hook is None:
             unwired = "This deployment has no calendar wired, so nothing is shown."
@@ -409,5 +488,9 @@ class ThisMonthPages:
             say("this-month.fault", kind=type(fault).__name__)
             self._respond(500, _page("This month failed", "The calendar could not be built."))
             return
-        self._respond(200, render_this_month(month, unmasked=unmasked), no_store=unmasked)
+        self._respond(
+            status,
+            render_this_month(month, unmasked=unmasked, said=said, refused=refused),
+            no_store=unmasked,
+        )
 

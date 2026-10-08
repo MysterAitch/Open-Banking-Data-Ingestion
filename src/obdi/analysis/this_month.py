@@ -47,8 +47,8 @@ from ..ingest.commitment_records import Commitment, Window
 from ..read.ledger import Money
 from ..read.position import Position
 from .commitments import match_series
-from .flows import MISSING, NOTHING, FlowReading, LegInstance, OwedLine, SpaceNeed
-from .free_position import CURRENCY, AccountFigures, FreeFigures, due_days
+from .flows import MISSING, NOTHING, FlowReading, LegInstance, SpaceNeed
+from .free_position import CURRENCY, AccountFigures, FreeFigures, OwedLine, due_days
 from .recurring import PULLED, Series
 
 PAID = "paid"
@@ -132,7 +132,7 @@ class MonthNote:
     spaces: Structural[tuple[SpaceNeed, ...]] = ()
     #: The legs that did not happen (`flows.LegInstance`, state missing).
     missing: Structural[tuple[LegInstance, ...]] = ()
-    #: What is owed to the household and past its day, and what it comes to.
+    #: What is owed to the household and past its day (a thing to do), and what it comes to.
     owed: Structural[tuple[OwedLine, ...]] = ()
     owed_total: Total[Money] = NOTHING.owed_total
 
@@ -328,6 +328,8 @@ def is_unjudgeable(account: AccountFigures) -> bool:
 def note_of(month: ThisMonth) -> MonthNote:
     """What Today says of the month, from the same record the page is made from."""
     judged = judged_accounts(month)
+    # Today asks for what has gone past its day; what is merely owed is on the page and Position.
+    late = tuple(line for line in month.flows.owed if line.overdue)
     return MonthNote(
         overdue=month.counts.overdue,
         short=tuple(
@@ -336,6 +338,6 @@ def note_of(month: ThisMonth) -> MonthNote:
         unjudged=sum(is_unjudgeable(a) for a in judged),
         spaces=tuple(s for s in month.flows.spaces if not s.funded),
         missing=tuple(leg for leg in month.flows.legs if leg.state == MISSING),
-        owed=month.flows.owed,
-        owed_total=month.flows.owed_total,
+        owed=late,
+        owed_total=Money(sum(line.amount.minor for line in late), CURRENCY),
     )

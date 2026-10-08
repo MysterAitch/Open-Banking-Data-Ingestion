@@ -384,6 +384,29 @@ def _artefact_html(sighting: Any) -> str:
     return f'<p class="muted t-from">{", ".join(parts)}</p>' if parts else ""
 
 
+#: The id of the one form every row's "owed to me" button belongs to (`_owed_form_html`): the name
+#: and label are typed once above the rows, and a row is one press, not a form of its own.
+_OWED_FORM = "owed-form"
+
+
+def _owed_words(row: Any) -> str:
+    """What the owner declared is owed back on a row, in words. It says what was declared and how
+    a hand closing was made, and never that the money is still owed: whether a transfer has met it
+    is worked out on This month, not here."""
+    label = f" ({_esc(row.owed_label)})" if row.owed_label else ""
+    who = f'<span class="txt">{_esc(row.owed_by)}</span>'
+    amount = f'<span class="mono nowrap fig">{_esc(row.owed_amount)}</span>'
+    if row.owed_state == "declared":
+        return (
+            f"{who} owes {amount}{label}, expected by {_esc(row.owed_expected)}. "
+            '<a class="tap" href="/this-month">See whether it has been paid</a>'
+        )
+    way = {"written-off": "Written off", "received-elsewhere": "Received elsewhere"}.get(
+        str(row.owed_state), str(row.owed_state)
+    )
+    return f"{who} owed {amount}{label}. {_esc(way)}: {_esc(row.owed_reason)}."
+
+
 def _facts_html(row: Any) -> str:
     """What a row's fold states beyond its own line, as a definition list: the day the bank
     booked it where that is not the day on the line, where the other leg of a confirmed transfer
@@ -412,6 +435,18 @@ def _facts_html(row: Any) -> str:
         )
     if row.review_open:
         facts.append(("Review", '<a class="tap" href="/review-flags">Decide this flag</a>'))
+    if row.owed_state:
+        facts.append(("Owed back", _owed_words(row)))
+    elif row.direction == "out" and row.status == "booked" and row.anchor and not _is_copy(row):
+        facts.append(
+            (
+                "Owed back",
+                f'<button class="button secondary" type="submit" form="{_OWED_FORM}" '
+                f'name="anchor" value="{_esc(row.anchor)}" '
+                'style="width:100%;font-size:inherit;cursor:pointer">'
+                "Owed to me by the name under About this account</button>",
+            )
+        )
     if not facts:
         return ""
     return (
@@ -3010,6 +3045,31 @@ def _ownership_html(about: AccountAbout, view: Any, *, unmasked: bool) -> str:
     )
 
 
+def _owed_form_html(view: Any) -> str:
+    """The fields a payment's "owed to me" press reads: who owes it, an optional label (a second
+    axis beside the category), and optionally a smaller amount and a day it is expected. Typed once
+    here, they belong to the one form every eligible row's button submits (`_OWED_FORM`), so a
+    month of rows carries a button each and not a form each. No value is in the markup."""
+
+    def field(label: str, name: str, extra: str = "") -> str:
+        return (
+            f'<p><label>{label} <input form="{_OWED_FORM}" name="{name}" maxlength="120"{extra}>'
+            "</label></p>"
+        )
+
+    return _part(
+        "Payments to reclaim",
+        f'<form id="{_OWED_FORM}" method="post" action="/receivable-declare">'
+        f'<input type="hidden" name="month" value="{_esc(_scope(view))}"></form>'
+        '<p class="muted">Say who owes it, then open a payment below and press its button. '
+        "A transfer from them closes it.</p>"
+        + field("Owed by", "debtor")
+        + field("Label, if any", "label")
+        + field("Amount, if less than the payment", "amount", ' inputmode="decimal"')
+        + field("Due back by, if you know (2026-11-30)", "expected"),
+    )
+
+
 def _expected_html(expected: ExpectedFold, *, unmasked: bool) -> str:
     """The "Expected" fold: for a space, what this month's bills ask of it, what it holds, and
     what it holds beyond (the surplus); and the shares others owe this account and have not paid.
@@ -3058,7 +3118,7 @@ def _about_html(
         else declared
     )
     if view is not None and about.unread == "":
-        body += _ownership_html(about, view, unmasked=unmasked)
+        body += _ownership_html(about, view, unmasked=unmasked) + _owed_form_html(view)
     fold = _disclosure("About this account", body, css="about")
     if about.expected is not None:
         fold += _expected_html(about.expected, unmasked=unmasked)
@@ -3539,6 +3599,28 @@ class LedgerPages(AnswerPages):
                 "Ownership not changed",
                 "Nothing was changed, because of an unexpected fault.",
                 ref=ref,
+            )
+            return
+        self._ledger(ref, month, unmasked=False, notice=said, no_store=True)
+
+    def _receivable_declare_post(self, form: dict[str, list[str]]) -> None:
+        """Declare a payment owed back, then answer with the MASKED ledger of its account.
+
+        The name, label, and amount go to the hook and no further: the sentence that answers says
+        neither, and the page that follows is the masked one."""
+        hook = self.bound_config.receivable_act
+        if hook is None:
+            self._respond(404, _page("Not available", "Declaring what is owed is not wired."))
+            return
+        try:
+            said, ref, month = hook("declare", form)
+        except DataError as exc:
+            self._anchor_refusal(400, "Nothing declared", f"Nothing was declared. {exc}")
+            return
+        except Exception as fault:
+            say("ledger.receivable.fault", kind=type(fault).__name__)
+            self._anchor_refusal(
+                500, "Nothing declared", "Nothing was declared, because of an unexpected fault."
             )
             return
         self._ledger(ref, month, unmasked=False, notice=said, no_store=True)

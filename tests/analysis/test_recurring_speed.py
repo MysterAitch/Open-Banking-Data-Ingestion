@@ -32,7 +32,9 @@ from obdi.ingest.store import Store
 #: the commitments or the series.
 #: Measured 31 once the series set aside as not commitments were read as well
 #: (`Store.dismissals`, one select), again not growing with either.
-RECURRING_STATEMENTS = 31
+#: Measured 32 once every live entity's name was read as well (`Store.entity_names`, one select,
+#: for the leg matcher and the receivables, which name an entity that holds no payee name yet).
+RECURRING_STATEMENTS = 32
 SECONDS = 20.0
 
 
