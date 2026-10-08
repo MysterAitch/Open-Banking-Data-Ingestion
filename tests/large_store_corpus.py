@@ -813,15 +813,24 @@ def cached_large_store(*, waited: float = 1500.0, faithful: bool = False) -> Lar
     """The large store, built once per machine and shared by every test process that asks.
 
     Building takes minutes, and a suite runs across processes, so the first to ask builds into
-    a directory named for the builder's own text, the schema, and the form, and the others wait
-    for its `ready` file. Read-only: a test that writes takes a copy (`copy_of`).
+    a directory named for the builder's own text, the store module's text, the schema number,
+    and the form, and the others wait for its `ready` file. Read-only: a test that writes takes
+    a copy (`copy_of`).
+
+    The store module's text is in the name because the schema number alone is not the schema:
+    two working trees each adding a table under the same next number produced a cached store
+    stamped 30 with no `goals` table, which the other tree opened as current and every one of
+    its large-store tests then failed with "no such table". A change to the store module costs
+    one rebuild; a store that lies about its tables cost an afternoon.
     """
     import hashlib
     import time
 
+    from obdi.ingest import store as store_module
     from obdi.ingest.store import SCHEMA_VERSION
 
-    digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
+    text = Path(__file__).read_bytes() + Path(store_module.__file__).read_bytes()
+    digest = hashlib.sha256(text).hexdigest()[:12]
     form = "-faithful" if faithful else ""
     root = Path(tempfile.gettempdir()) / f"obdi-large-store-{digest}-s{SCHEMA_VERSION}{form}"
     ready = root / "ready"
@@ -850,6 +859,13 @@ def cached_large_store(*, waited: float = 1500.0, faithful: bool = False) -> Lar
                     f"{ready} did not appear: remove {claim} if its builder died"
                 ) from None
             time.sleep(2)
+        return held()
+    # The claim is held: look for `ready` once more, because the builder may have finished and
+    # released its claim between the check above and the mkdir. A worker that skipped this
+    # built a second store into the finished directory, and the two builders then raced to
+    # remove the same claim - one found it gone and the run ended with "cannot find the file".
+    if ready.exists():
+        claim.rmdir()
         return held()
     try:
         built = build_large_store(root, faithful=faithful)
