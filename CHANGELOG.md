@@ -26,6 +26,30 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.388] - 2026-10-08
+
+0.4.387 was tagged and its build failed, so it has no image; this version carries 0.4.387's
+content and the fixes below.
+
+### Fixed
+- **The whole-suite build failed 0.4.387 on five tests its merge gate did not run.** The gate
+  ran the layers R3 touched and not the layers downstream of them (`export` and `verify` sit
+  below `read`). The ledger page cost 23 statements against a documented 22 and the family
+  reading 37 against 36: the ledger reads what is owed back with one select per account that
+  no existing query could absorb, so the documented count is now 12 with the twelfth named
+  where the others are. The ledger row's declared value fields gained `owed_by`, `owed_label`,
+  `owed_reason`, and `owed_amount`, which are the owner's words and money. The account page
+  with two thousand balances had grown from under 96 KB to 106 KB because the owed-back press
+  was a form on every row; the budget is not raised - the press is now a plain link to its own
+  page.
+- **The owed-back page names the payment it is for.** The first cut of that page knew the
+  payment only by its anchor and could not say which it was, which is a page the owner must
+  take on trust. A row's anchor is a hash of its id and nothing looked rows up by it, so the
+  store now registers the hash as an SQL function and finds the row in one select; the page
+  shows the date, account, source, description, and amount, masked on a GET and shown for a
+  sitting, and says "That payment is not held now" for an anchor that resolves to nothing.
+  The account is named by its reference rather than its label, to keep the page at one select.
+
 ## [0.4.387] - 2026-10-08
 
 R3 of the commitments roadmap (ownership, legs, receivables), schema 31.
