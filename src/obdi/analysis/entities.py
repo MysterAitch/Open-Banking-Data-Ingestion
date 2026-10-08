@@ -44,9 +44,12 @@ from .entity_tokens import (
 )
 from .learned_rules import (
     APPLIED,
+    DEFAULT_SETTINGS,
     Learning,
     Rule,
     RulePolicy,
+    RuleSettings,
+    RuleView,
     decide,
     learn_rules,
     opens,
@@ -770,6 +773,37 @@ def learned_rules(
         if name == rule.party and opens(_words_of(shape, cache), rule.opening)
     }
     return learning, {rule.key: decide(rule, chosen, withdrawn) for rule in learning.rules}
+
+
+def rule_views(
+    held: Sequence[Fields],
+    links: Mapping[str, Alias],
+    policy: RulePolicy | None = None,
+    refused: Collection[tuple[str, str]] = (),
+) -> tuple[tuple[RuleView, ...], Learning]:
+    """Every rule the identified rows teach, with the shapes it links (applied) or would link
+    (offered, no other rung having linked them), for the Entities page. `links` is what
+    `learned_links` returned for the same rows."""
+    chosen = policy or RulePolicy()
+    seen = rule_inputs(held)
+    learning, states = learned_rules(held, chosen, refused, seen)
+    views: list[RuleView] = []
+    for rule in learning.rules:
+        state = states[rule.key]
+        shapes = []
+        rows = 0
+        for shape, forms in seen.bare.items():
+            taken = links.get(shape)
+            if taken is not None and not (taken.by == LEARNED_RULE and taken.name == rule.party):
+                continue
+            form = min(forms, key=lambda f: (-forms[f], len(f), f))
+            if opens(form, rule.opening):
+                shapes.append(shape)
+                rows += sum(forms.values())
+        views.append(
+            RuleView(rule, state, tuple(sorted(shapes)), rows, rule.key in chosen.kept)
+        )
+    return tuple(views), learning
 
 
 def _rule_links(
@@ -1930,6 +1964,11 @@ class EntitiesView:
     #: (`external_accounts.unheld_accounts`), and how many more they declined.
     unheld: tuple[UnheldAccount, ...] = ()
     declined: int = 0
+    #: The learned rules (`learned_rules`), the openings shared by several parties that taught
+    #: nothing, and the settings that decided each rule's state.
+    rules: tuple[RuleView, ...] = ()
+    rules_shared: int = 0
+    rule_settings: RuleSettings = DEFAULT_SETTINGS
 
     def label(self, name: str) -> str:
         """What a page prints for a name: its label where it is an identifier, the name itself
@@ -2062,8 +2101,13 @@ def view_of(
     ties: Sequence[Tie] = (),
     unheld: tuple[UnheldAccount, ...] = (),
     declined: int = 0,
+    rules: tuple[RuleView, ...] = (),
+    rules_shared: int = 0,
+    rule_settings: RuleSettings = DEFAULT_SETTINGS,
 ) -> EntitiesView:
     """The page's view of the names held and the entities made from them.
+
+    `rules`, `rules_shared`, and `rule_settings` are the learned rules (`rule_views`).
 
     `unheld` and `declined` are `external_accounts.unheld_accounts`.
 
@@ -2095,6 +2139,9 @@ def view_of(
         suggestions=suggest_for_entities(text_names, made, set_apart | offered, readings),
         unheld=unheld,
         declined=declined,
+        rules=rules,
+        rules_shared=rules_shared,
+        rule_settings=rule_settings,
     )
 
 

@@ -15,6 +15,7 @@ from ..core.plural import plural
 from ..ingest.entity_records import DECLARED, DESCRIPTION, Entity, EntityRefused, Identifier
 from .entities import (
     Alias,
+    Fields,
     LearnedLine,
     Named,
     NameOrigin,
@@ -25,10 +26,12 @@ from .entities import (
     holder_of,
     identifier_for,
     learned_lines,
+    learned_rules,
     resolve_form_value,
     rule_phrase,
 )
 from .external_accounts import declare_external, dismiss, offer_again
+from .learned_rules import keep_rule, rule_policy, set_settings
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from ..ingest.store import Store
@@ -52,6 +55,11 @@ DECLARE_EXTERNAL = "declare-external"
 NOT_EXTERNAL = "not-external"
 OFFER_AGAIN = "offer-again"
 EXTERNAL_ACTIONS = (DECLARE_EXTERNAL, NOT_EXTERNAL, OFFER_AGAIN)
+#: The presses about the learned rules (`learned_rules`): the two settings, and ticking an offered
+#: rule. They read the rows the rules are learned from, as the external presses do.
+RULE_SETTINGS = "rule-settings"
+RULE_TICK = "rule-tick"
+RULE_ACTIONS = (RULE_SETTINGS, RULE_TICK)
 ACTIONS = (
     MERGE,
     SPLIT,
@@ -65,6 +73,7 @@ ACTIONS = (
     KEEP_LINK,
     REFUSE_LINK,
     *EXTERNAL_ACTIONS,
+    *RULE_ACTIONS,
 )
 
 
@@ -83,6 +92,38 @@ def apply_external_action(
         return dismiss(store, rows, named, form)
     if action == OFFER_AGAIN:
         return offer_again(store)
+    raise EntityRefused("That press is not one this page makes.")
+
+
+def apply_rule_action(
+    store: Store,
+    fields: Sequence[Fields],
+    action: str,
+    form: Mapping[str, Sequence[str]],
+) -> str:
+    """Do what a press about the learned rules asked and say what was done. `fields` are the
+    rows the rules are learned from; a tick names a rule by its key and is refused if the rows
+    no longer teach it."""
+    if action == RULE_SETTINGS:
+        try:
+            support, confidence = int(_one(form, "support")), int(_one(form, "confidence"))
+            set_settings(store, support, confidence)
+        except ValueError:
+            raise EntityRefused(
+                "Support is two rows or more and confidence is one row or more, as whole numbers."
+            ) from None
+        return (
+            f"Set: a rule needs {support:,} rows to be learned and {confidence:,} other "
+            "identified rows tested to be applied by default."
+        )
+    if action == RULE_TICK:
+        learning, _states = learned_rules(fields, rule_policy(store))
+        wanted = _one(form, "rule")
+        found = next((r for r in learning.rules if r.key == wanted), None)
+        if found is None:
+            raise EntityRefused("The rows no longer teach that rule; reload the page.")
+        keep_rule(store, found)
+        return "Ticked: that rule is applied whatever the confidence setting is."
     raise EntityRefused("That press is not one this page makes.")
 
 

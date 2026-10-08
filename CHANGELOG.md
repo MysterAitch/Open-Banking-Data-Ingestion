@@ -26,6 +26,21 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [Unreleased]
+
+Held here while several pieces are cut in steps; each line moves under its version at the
+release commit.
+
+### Added
+- **The Entities page lists the rules the identified rows teach, with the two settings that
+  decide them.** A description-only row can be named by an opening one party's identified rows
+  share, but until now the owner could neither see the rules nor move the thresholds that decide
+  whether one applies. Each rule shows both counts and the rule-of-three bound with its caveat;
+  one below the confidence setting is offered unticked with its descriptions under a closed fold
+  and a Tick, one above it is applied; a line counts what the current settings decide. Not this on
+  an inferred description, through the existing entity-link-refuse press, withdraws the whole
+  rule, which is now tested end to end.
+
 ## [0.4.384] - 2026-10-08
 
 ### Added

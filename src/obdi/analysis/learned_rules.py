@@ -67,6 +67,9 @@ class RuleSettings:
     confidence: int = CONFIDENCE_DEFAULT
 
 
+DEFAULT_SETTINGS = RuleSettings()
+
+
 @dataclass(frozen=True)
 class RulePolicy:
     """The settings and the owner's decisions: `kept` rules are applied and `refused` ones
@@ -101,6 +104,19 @@ class Learning:
 
     rules: tuple[Rule, ...] = ()
     shared: int = 0
+
+
+@dataclass(frozen=True)
+class RuleView:
+    """A rule as the Entities page lists it: its state, the description-shapes of the rows it
+    links (applied) or would link (offered), and how many rows those are."""
+
+    rule: Rule
+    state: str
+    shapes: tuple[str, ...] = ()
+    rows: int = 0
+    #: Whether the owner ticked it (so it is applied whatever the confidence setting says).
+    ticked: bool = False
 
 
 def rule_key(party: str, opening: Form) -> str:

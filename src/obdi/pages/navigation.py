@@ -165,6 +165,8 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/entities-external": "more",
     "/entities-not-external": "more",
     "/entities-offer-again": "more",
+    "/entities-rule-settings": "more",
+    "/entities-rule-tick": "more",
     "/entity": "more",
     "/entity-rule": "more",
     "/entity-rule-try": "more",
