@@ -26,6 +26,12 @@ IGNORED_TRAILING: frozenset[str] = frozenset(
     {"gb", "gbr", "uk", "eng", "ltd", "limited", "plc", "llp", "inc", "co", "com"}
 )
 
+#: Words that are a payee's own name when they OPEN a shape ("google storage") and a payment-method
+#: marker when they END it after a merchant ("visa purchase <merchant> google": Google Pay). Cut
+#: from the end only; unlike `IGNORED_TRAILING` they stay distinctive, so three Google services
+#: are still offered as one payee.
+TRAILING_MARKERS: frozenset[str] = frozenset({"google"})
+
 #: A word that is dropped wherever it stands: "&" is already punctuation by the time a shape is
 #: made, so "M&S" is "m s" and "MARKS & SPENCER" is "marks spencer"; "and" is the same joint
 #: written out.
@@ -127,6 +133,10 @@ def core_words(shape: str) -> list[str]:
     end = len(words)
     while end > 1 and words[end - 1] in IGNORED_TRAILING:
         end -= 1
+    if end > 1 and words[end - 1] in TRAILING_MARKERS:
+        end -= 1
+        while end > 1 and words[end - 1] in IGNORED_TRAILING:
+            end -= 1
     return words[:end]
 
 

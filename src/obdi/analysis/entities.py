@@ -35,6 +35,7 @@ from ..ingest.entity_records import (
 )
 from ..ingest.identity import NORMALISATION_STEPS, normalise_description
 from .entity_tokens import (
+    IGNORED_TRAILING,
     MIN_DISTINCTIVE_LETTERS,
     Token,
     distinctive_words,
@@ -55,7 +56,7 @@ from .learned_rules import (
     opens,
     origin_sentence,
 )
-from .payment_methods import strip_leading_methods
+from .payment_methods import METHOD_WORDS, strip_leading_methods
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from ..ingest.store import Store
@@ -1300,7 +1301,79 @@ def display_names(
         else UNNAMED_PARTY
         for key in stated
     }
+    labels.update(_told_apart(labels, described))
     return {**labels, **held}
+
+
+#: What `_told_apart` puts after a stated name, so a group of locations can be named by the name
+#: they share: the part told them apart (" - stores leeds") or their number (" (location 2)").
+_LOCATION_SUFFIXES = (" - ", " (location ")
+
+
+def without_location(label: str) -> str:
+    """The stated name a location label (`_told_apart`) was made from."""
+    for mark in _LOCATION_SUFFIXES:
+        label = label.split(mark, 1)[0]
+    return label
+
+
+def _told_apart(
+    named_alike: Mapping[str, str],
+    described: Mapping[str, Counter[str]],
+) -> dict[str, str]:
+    """For source ids (locations) whose readable names are alike, a label that tells them apart.
+
+    A retailer's branches are each known to the bank by their own id and all state the same
+    merchant name, so five of them read "tesco" and differ only by opening each. What tells one
+    apart is the part of its descriptions that EVERY description of that id has and the other ids
+    in the group do not (the town, "stores"), less the words of the name itself, the payment
+    methods and the trailing codes: "tesco - stores birmingham". Where nothing tells it apart, or
+    two would read alike, it is "tesco (location 2)", numbered by how many payments each has then
+    by id so the answer does not depend on the order of the rows. Account-keyed names are left
+    alone: two people who share a name are not locations.
+    """
+    by_label: dict[str, list[str]] = {}
+    for key, label in named_alike.items():
+        if key.startswith(ACCOUNT_KEY_PREFIX) or label == UNNAMED_PARTY:
+            continue
+        by_label.setdefault(label, []).append(key)
+
+    def words_of(key: str) -> tuple[list[str], set[str]]:
+        """The ordered words of the id's commonest description and the words every one of its
+        descriptions has."""
+        shapes = described[key]
+        if not shapes:
+            return [], set()
+        top = min(shapes, key=lambda text: (-shapes[text], text)).split()
+        common = set.intersection(*(set(shape.split()) for shape in shapes))
+        return top, common
+
+    told: dict[str, str] = {}
+    for label, keys in by_label.items():
+        if len(keys) < 2:
+            continue
+        ranked = sorted(keys, key=lambda k: (-sum(described[k].values()), k))
+        seen = {key: words_of(key) for key in ranked}
+        shared = set.intersection(*(common for _top, common in seen.values()))
+        own = set(label.split())
+        distinct: dict[str, str] = {}
+        for key in ranked:
+            top, common = seen[key]
+            kept = [
+                word
+                for word in top
+                if word in common
+                and word not in shared
+                and word not in own
+                and word not in METHOD_WORDS
+                and word not in IGNORED_TRAILING
+            ]
+            distinct[key] = " ".join(kept)
+        for number, key in enumerate(ranked, start=1):
+            text = distinct[key]
+            unique = text and sum(1 for other in distinct.values() if other == text) == 1
+            told[key] = f"{label} - {text}" if unique else f"{label} (location {number})"
+    return told
 
 
 def count_shapes(descriptions: Iterable[str]) -> dict[str, int]:
@@ -1831,8 +1904,8 @@ def evidence_proposals(
             continue
         assigned.update(free)
         ordered = tuple(sorted(free, key=strength))
-        label = next(
-            (readable(n) for n in ordered if readable(n) != UNNAMED_PARTY), UNNAMED_PARTY
+        label = without_location(
+            next((readable(n) for n in ordered if readable(n) != UNNAMED_PARTY), UNNAMED_PARTY)
         )
         found.append(
             Proposal(

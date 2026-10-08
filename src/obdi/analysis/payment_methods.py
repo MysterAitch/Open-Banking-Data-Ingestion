@@ -72,6 +72,24 @@ METHODS: tuple[PaymentMethod, ...] = (
     # retailer. PayPal is deliberately not here - it is a counterparty of its own.
     PaymentMethod("google-pay", ("google pay",), brand="google"),
     PaymentMethod("apple-pay", ("apple pay",), brand="apple"),
+    # Channels and processors every bank prints in front of the merchant, found as groups headed by
+    # the channel when the Entities page was read on a real store: "www <site> com" for two sites,
+    # "visa purchase <merchant> google" for three merchants, "zettle <merchant>" for three, and
+    # "paypal <merchant>", and the first payment of a direct debit. The party is what follows.
+    # PayPal keeps its word as a brand, because a payment to PayPal itself (a top-up) is PayPal;
+    # the others are never the party, and a shape of nothing but them keeps its words
+    # (`entity_tokens.core_words`), so a merchant that only ever appears behind one is still named
+    # by what follows it.
+    PaymentMethod("www", ("www",)),
+    PaymentMethod("visa-purchase", ("visa purchase",)),
+    PaymentMethod("zettle", ("zettle",)),
+    PaymentMethod("sumup", ("sumup",)),
+    PaymentMethod("paypal", ("paypal",), brand="paypal"),
+    PaymentMethod("direct-debit-first-payment", ("direct debit first payment",)),
+    # What a card provider charges on a balance, printed with no party: "balance transfer
+    # interest" and "interest" were offered as one payee, which is two prints of the bank's own
+    # charge and not somebody who was paid.
+    PaymentMethod("interest", ("interest",)),
 )
 
 

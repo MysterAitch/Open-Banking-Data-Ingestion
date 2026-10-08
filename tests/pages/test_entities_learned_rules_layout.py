@@ -68,7 +68,7 @@ class TestTheSectionDoesNotGrowWithRulesThatReachNoRow:
         ]
 
         assert len(folds) == 1 and "open" not in folds[0].attrs
-        items = [n for n in elements(folds[0], "li")]
+        items = list(elements(folds[0], "li"))
         assert len(items) == 120
         assert "120 rules learned that reach no row" in folds[0].text()
 
@@ -82,10 +82,11 @@ class TestTheSectionDoesNotGrowWithRulesThatReachNoRow:
 
         assert len(items) == 3
         for item in items:
-            drill = [d for d in elements(item, "details")]
+            drill = list(elements(item, "details"))
             assert len(drill) == 1 and "open" not in drill[0].attrs
-            summary = [s for s in elements(drill[0], "summary")][0].text()
-            assert re.search(r"- taught by 14, tested against [\d,]+, (would link|links) 3", summary)
+            summary = next(iter(elements(drill[0], "summary"))).text()
+            said = r"- taught by 14, tested against [\d,]+, (would link|links) 3"
+            assert re.search(said, summary)
 
 
 class TestTheMethodIsSaidOnce:

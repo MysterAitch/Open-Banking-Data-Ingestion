@@ -4398,7 +4398,20 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
             known = {name: origin.rows for name, origin in origins.items()}
             links = _held_links(store) if action in (KEEP_LINK, REFUSE_LINK) else None
-            return apply_action(store, known, action, form, origins=origins, links=links)
+            labels: dict[str, str] | None = None
+            if action == SPLIT_LOCATIONS:
+                held = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+                named_fields, _named_links, named_rows = name_rows(
+                    held,
+                    store.confirmed_transfer_pairs(),
+                    refused=refused_links(store),
+                    policy=rule_policy(store),
+                    external=store.external_identifiers(),
+                )
+                labels = display_names(named_fields, named_rows)
+            return apply_action(
+                store, known, action, form, origins=origins, links=links, shown_as=labels
+            )
 
     def entity_page(entity_id: int) -> EntityPage | None:
         """One entity with every name under it and the newest transactions of each: one

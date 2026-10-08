@@ -764,3 +764,18 @@ The rung is `analysis/learned_rules.py` (learning, state, sentences, the setting
    against a rule's `total - party rows` over rows with an identifier; they are now both
    identifier-carrying rows, and the rule's test population is those WITH a description, said in
    the method line. Not measured on the real store.
+7. CHANNEL PHRASES. `www`, `visa purchase`, `zettle`, `sumup`, `paypal` (brand kept),
+   `direct debit first payment`, and `interest` are `payment_methods.METHODS`; `google` is an
+   `IGNORED_TRAILING` code. Measured while testing (a prediction I got wrong): a row's NAME is
+   still its whole shape ("zettle alder"); the channel is set aside only in the comparison that
+   proposes groups, so the tests assert `core_words`, not `name_of`. A group needs three shapes to
+   be offered, so the control ("vendorpay") has three. `interest` was not in the owner's list of
+   additions but was in his list of groups seen, and the two prints reduced to one word. On the
+   large invented store before and after: names 127, proposals 28, series 14, unchanged, since it
+   holds none of these phrases. Not red-checked against the old methods for each phrase.
+8. LOCATION LABELS. `display_names` tells source ids that state one name apart (`_told_apart`):
+   the words EVERY description of an id has and its group-mates do not, less the name, methods,
+   and trailing codes ("branchco - york"), else "branchco (location N)" by usage then id. Store
+   numbers cannot appear: a shape drops any word holding a digit. Accounts are left alone. Split
+   into locations names children by the same label. Not done: a label that reads alike for
+   two ids because both have the same extra words falls back to numbers, not to a longer part.

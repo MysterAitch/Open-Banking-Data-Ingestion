@@ -36,6 +36,15 @@ transcription would add no reasoning that the subjects do not already carry.
   rules that reach no row sit in one closed fold of one line each. The form's labels are
   sentences.
 
+- **Channels and processors are no longer offered as payees; branches that read alike are told
+  apart.** Read on the real store, groups were headed "www", "visa purchase", "zettle", "paypal",
+  "first payment", and "interest": words every bank prints in front of (or after) the merchant,
+  shared by rows that have nothing else in common. They are now payment methods (PayPal keeps
+  its word, so a payment to PayPal itself is still PayPal) and "google" is a trailing code. And
+  five branches of one retailer all labelled "tesco" are labelled by what their own descriptions
+  say that the others' do not ("tesco - stores birmingham"), or "tesco (location 2)" where
+  nothing does; "Split into locations" names its children the same way.
+
 ### Fixed
 - **The page head and a rule counted different populations as "identified".** The head summed
   every row named by anything a source states (9,195) while a rule said "tested against 4,585

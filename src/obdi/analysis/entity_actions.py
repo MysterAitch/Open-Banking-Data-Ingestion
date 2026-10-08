@@ -162,8 +162,10 @@ def apply_action(
     form: Mapping[str, Sequence[str]],
     origins: Mapping[str, NameOrigin] | None = None,
     links: Mapping[str, Alias] | None = None,
+    shown_as: Mapping[str, str] | None = None,
 ) -> str:
     """Do what a press asked and say what was done; `known` is every shape the store holds.
+    `shown_as` is `entities.display_names`, which names the locations a split makes.
 
     `links` are the links the rows teach now (`name_rows`), which a press on a learned line is
     checked against: a line the rows no longer teach is refused, never kept or refused by guess.
@@ -228,7 +230,7 @@ def apply_action(
         )
         return f"Made {' '.join(_one(form, 'name').split())} its own entity under {parent}."
     if action == SPLIT_LOCATIONS:
-        return _split_into_locations(store, known, _one(form, "entity"))
+        return _split_into_locations(store, known, _one(form, "entity"), shown_as or {})
     if action == PARENT:
         entity = _one(form, "entity")
         if not entity.isdigit():
@@ -291,12 +293,16 @@ def apply_action(
     raise EntityRefused("That press is not one this page makes.")
 
 
-def _split_into_locations(store: Store, known: Mapping[str, int], wanted: str) -> str:
+def _split_into_locations(
+    store: Store, known: Mapping[str, int], wanted: str, shown_as: Mapping[str, str]
+) -> str:
     """One child entity per source id the entity holds, under it: a card acceptor is identified
-    per location, so a company gathered from its locations is split back into them. Children are
-    named "<company> location N" by how many payments each has (the owner renames them: nothing a
-    source states tells the locations apart). The company keeps the commonest location where it
-    would otherwise be left holding nothing, since an entity with no name is removed."""
+    per location, so a company gathered from its locations is split back into them. A child is
+    named by the id's readable label (`entities.display_names`: "tesco - stores birmingham", or
+    "tesco (location 2)" where nothing tells it apart), the label the Entities page shows it
+    under; where that name is taken, or is the company's own, "<company> location N" by how many
+    payments each has. The company keeps the commonest location where it would otherwise be left
+    holding nothing, since an entity with no name is removed."""
     entity = next(
         (e for e in store.entities_with_shapes() if wanted.isdigit() and e.id == int(wanted)),
         None,
@@ -316,7 +322,13 @@ def _split_into_locations(store: Store, known: Mapping[str, int], wanted: str) -
     others = {i.value for i in entity.identifiers if i.kind != SOURCE_ID}
     moving = uids if others else uids[1:]
     taken = {e.name.casefold() for e in store.entities_with_shapes()}
-    names = {uid: f"{entity.name} location {uids.index(uid) + 1}" for uid in moving}
+    names: dict[str, str] = {}
+    for uid in moving:
+        label = shown_as.get(uid, "")
+        usable = label and label.casefold() not in taken and label.casefold() not in {
+            n.casefold() for n in names.values()
+        }
+        names[uid] = label if usable else f"{entity.name} location {uids.index(uid) + 1}"
     clash = [name for name in names.values() if name.casefold() in taken]
     if clash:
         raise EntityRefused(f"There is already an entity called {clash[0]}.")

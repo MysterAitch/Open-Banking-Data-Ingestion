@@ -21,6 +21,7 @@ two rows) and one printing "MARLOW BAKERY HIGH STREET YORK GB 1".
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import httpx
@@ -203,6 +204,45 @@ def served_branches(tmp_path, monkeypatch):
     stop()
 
 
+TOWNS = {BRANCHES[0]: "LEEDS", BRANCHES[1]: "YORK", BRANCHES[2]: "HULL"}
+
+
+@pytest.fixture
+def served_towns(tmp_path, monkeypatch):
+    db = tmp_path / "store.sqlite3"
+    rows = [
+        replace(r, description=f"BRANCHCO STORES {TOWNS[r.party_source_id]} {n}")
+        for n, r in enumerate(branch_world())
+    ]
+    with Store(db) as store:
+        reconcile_batch(store, rows, digest="feed")
+    environment(monkeypatch, tmp_path)
+    config = build_web_config(db)
+    assert config is not None
+    base, stop = serve_config(config)
+    yield base
+    stop()
+
+
+class TestSplitNamesLocationsAsThePageLabelsThem:
+    def test_BranchesDifferingByTown_BecomeEntitiesNamedByTheirTown(self, served_towns):
+        press(served_towns, "/entities-merge", name="Branchco Group", shape=list(BRANCHES))
+        page = httpx.post(f"{served_towns}/entities", timeout=60).text
+        link = next(
+            a.attrs["href"]
+            for a in elements(parse(page), "a")
+            if "/entity?id=" in a.attrs.get("href", "")
+        )
+
+        done = press(
+            served_towns, "/entity-split-locations", entity=link.split("id=")[1]
+        )
+
+        text = " ".join(parse(done.text).text().split())
+        # "stores" is on every branch's descriptions, so it tells none of them apart.
+        assert "branchco - york" in text and "branchco - hull" in text
+
+
 class TestSplitIntoLocations:
     def company(self, base: str) -> str:
         press(base, "/entities-merge", name="Branchco Group", shape=list(BRANCHES))
@@ -226,7 +266,9 @@ class TestSplitIntoLocations:
         assert done.status_code == 200, done.text[:300]
         text = " ".join(parse(done.text).text().split())
         assert "Split Branchco Group into 2 locations under it, the commonest staying" in text
-        assert "Branchco Group location 2" in text and "Branchco Group location 3" in text
+        assert "branchco (location 2)" in text and "branchco (location 3)" in text, (
+            "named as the page labels them, since nothing in these descriptions tells them apart"
+        )
 
     def test_SplitTwice_IsRefusedSinceOneIdIsLeft(self, served_branches):
         entity = self.company(served_branches)

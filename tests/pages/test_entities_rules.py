@@ -96,11 +96,11 @@ class TestPaymentMethodWordsAreNotThePayee:
 
         assert group.name == "Google"
 
-    def test_Proposal_WhenPayPalPrecedesPayees_PayPalIsStillTheirCounterparty(self):
-        # PayPal is a counterparty of its own and is not set aside like a wallet.
-        (group,) = groups("PAYPAL SPOTIFY", "PAYPAL NETFLIX", "PAYPAL STEAM")
-
-        assert group.name == "Paypal"
+    def test_Proposal_WhenPayPalPrecedesPayees_ThePayeesAreNotOfferedAsOnePayeeCalledPayPal(self):
+        # Read on the real store: "paypal <merchant>" for three merchants was offered as one
+        # payee headed "Paypal". As a LEADING token PayPal is a channel, set aside like a wallet;
+        # it keeps its word as a brand, so a payment to PayPal itself is still PayPal.
+        assert groups("PAYPAL SPOTIFY", "PAYPAL NETFLIX", "PAYPAL STEAM") == []
         assert "paypal" not in payment_methods.METHOD_WORDS
 
     def test_Proposal_WhenNineRetailersFollowOneMethod_NothingIsOfferedOrCountedBroad(self):
