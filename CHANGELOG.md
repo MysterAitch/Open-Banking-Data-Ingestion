@@ -26,6 +26,38 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.376] - 2026-10-08
+
+### Added
+- **A proposal can rest on evidence rather than resemblance.** Item 4 of
+  `entities.md`: names that remain distinct after the ladder - a merchant
+  the bank knows by two ids under one stated name, a party paid both by
+  account and by id, a description that two payments tie to one id and one
+  to another - are offered as one party when at least two payments carry
+  both identifiers, "N payments carry both the stated name and the bank's
+  own id for the party", naming the kinds; such a group leads the page,
+  above the text-rule groups, and its press attaches each member's
+  identifier with its kind, strongest first. A description-shape never
+  joins names that payments name differently, so two housemates paid under
+  one reference stay apart. The invented stores offer none of these - they
+  hold no merchant with two ids - so the constructed cases are the proof;
+  on the real store a handful at most is predicted, from merchants whose
+  bank id is per branch.
+- **What obdi learns for a party is shown as learned, kept on a press, or
+  refused on another.** Under each identifier an entity holds, the
+  description-shapes the learned links resolve to it appear as "learned:
+  through N payments seen by both", "the description matches exactly", or
+  "a truncation" - computed on every read, not stored, since storing them
+  would be a second copy of derived state. "Keep" stores the shape as a
+  declared description identifier, so it survives a change in the rows;
+  "Not this" records an exclusion the ladder honours everywhere - the
+  Entities page, the entity page, the detector, and the "Party stated" bar
+  all read the refusals - and "Not this" on a seen-by-both link turns five
+  linked transactions back into a description-name and splits the series,
+  which is what refusing means. Not done: nothing lists or undoes a
+  refusal yet; lines are offered under identifiers held by hand, not under
+  names a rule attaches.
+
 ## [0.4.375] - 2026-10-08
 
 ### Changed
