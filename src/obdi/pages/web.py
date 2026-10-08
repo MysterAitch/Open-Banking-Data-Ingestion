@@ -45,6 +45,7 @@ from urllib.parse import ParseResult, parse_qs, quote, urlparse
 from ..analysis import entity_actions
 from ..analysis.commitments import ACT_CONFIRM, ACT_DISMISS, ACT_PRICE, ACT_RESTORE
 from ..analysis.entities import EntitiesView, EntityPage, RuleTrial
+from ..analysis.free_position import FreeFigures
 from ..analysis.recurring import RecurringFindings
 from ..core.classification import redact_summary
 from ..core.errors import DataError
@@ -827,6 +828,9 @@ class WebConfig:
     #: same reason `ledger_data` is data: the page decides in one place whether
     #: a reader may see them.
     position_data: Callable[[], Position] | None = None
+    #: What is held, owed, committed before the next income, and free, for the position the page
+    #: was just handed (`analysis.free_position`); None leaves the section off the page.
+    free_data: Callable[[Position], FreeFigures] | None = None
     #: The same position for the home page's masked status line, held while nothing it reads has
     #: changed, so opening the home page does not re-walk every account (`position_data` costs
     #: several statements per account).

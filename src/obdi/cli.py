@@ -39,6 +39,7 @@ from .analysis.entities import (
     refused_links,
 )
 from .analysis.external_accounts import dismissed_keys, unheld_accounts
+from .analysis.free_position import FreeFigures
 from .analysis.recurring import RecurringFindings
 from .core.errors import DataError
 from .core.money import parse_amount
@@ -3963,6 +3964,20 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         )
         return RecurringFindings(found, today, external_labels, commitments, dismissals)
 
+    def free_data(position: Position) -> FreeFigures:
+        """The Position page's four figures per account. The detector runs only when a confirmed
+        outgoing commitment has no confirmed income to be counted to (`wants_detector`), so a
+        household that has confirmed its incomes pays one select for the commitments and no
+        whole-table detection."""
+        from .analysis.free_position import build_free, wants_detector
+
+        on = date.fromisoformat(position.as_of)
+        with Store(db_path) as store:
+            commitments = store.commitments()
+        asks = wants_detector(position, commitments, today=on)
+        detected = recurring_data().series if asks else []
+        return build_free(position, commitments, detected, today=on)
+
     def recurring_act(action: str, form: dict[str, list[str]]) -> str:
         """One press on the Recurring page: the series it names is found again from the
         transactions, so that a press made on a page that has gone stale is refused and never
@@ -5002,6 +5017,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         coverage_timeline_compact=coverage_timeline_compact,
         coverage_timeline_household=coverage_timeline_household,
         position_data=position_data,
+        free_data=free_data,
         home_position=home_position,
         anchor_save=anchor_save,
         anchor_remove=anchor_remove,

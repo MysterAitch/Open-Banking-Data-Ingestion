@@ -278,6 +278,59 @@ Rejected: matching a commitment by (name, account) alone (loses it when the name
 an entity, and cannot tell two products apart); a full-width button for each press (5,907 px for
 thirty lines against a 3,376 px budget).
 
+## Position as built: held, owed, committed, free (roadmap item 3)
+
+One section on the existing Position page (no second page), `analysis/free_position.py` beside
+`pages/web_position._free_section`, wired by `WebConfig.free_data`. Per live (unarchived) account
+and in total:
+
+- HELD is the position balance; its basis is the newest known balance it was tested against
+  (`AccountPosition.anchor_basis/anchor_day`): "stated by you on D", "statement to D", "feed N days
+  ago", then ", and the transactions to D" if rows run past it. No balance: "not known since D"
+  (the first row) and why, and no free figure.
+- OWED is a card's or loan's negative balance. What is a card is a word match on the declared kind
+  ("card", "loan", "mortgage", "credit"), because a balance's sign cannot tell an overdraft from a
+  card.
+- COMMITTED is the sum of confirmed outgoing commitments (open window) whose next due day
+  (`next_due`: cadence, usual day, first day for the phase of a day-counted cadence) falls strictly
+  before the next income. The next income is the earliest next day of the confirmed incoming
+  commitments into the account; if none, the detector's next expected income there, said so ("No
+  income is confirmed; the next expected by rhythm is D."); if neither, a sentence saying there is
+  no income to count to and no free figure. A card is counted to the earliest income across the
+  household.
+- FREE is held less committed. A card's is limit less owed where a limit is handed in; nothing
+  declares a limit yet, so it says "No limit declared."
+- Totals count only the accounts each figure was made for and say "counting N of M accounts. K left
+  out: why".
+- Masked GET: labels, bases, counts, dates, and sentences are real; every amount is the sealed
+  token and each payee name is masked. Direction words ("in credit", "short by") show, as on the
+  rest of the page.
+
+Measured (invented household of `tests/free_position_world.py`, answers decided before the first
+run): the gas due before the salary is the only commitment counted (120.00 of 1,000.00, free
+880.00); the gym after it is not; one falling on the income's own day is not; an ended window is
+not. With the salary unconfirmed the page says so and uses the rhythm's date. Page at 390 px,
+values masked: 2,285 px before, 2,637 px after (+352 px, the totals open and each account's four
+figures folded), no sideways scroll. Statements over the large invented store (6,969
+transactions): 802 for a GET with no commitment confirmed (801 before this; the one addition is
+the commitments select), 817 with an outgoing commitment and no confirmed income (the detector is
+read once, only then); 1.2 s and 2.1 s.
+
+Not done or not proven: the owner's own reckoning for a month (nothing here has been compared with
+it, and no real store was read); a commitment already paid this cycle is counted again until its
+payment reaches the balance; a late detected income is counted to today; a card's own commitments
+do not reduce its free figure (the spec's limit less owed); no way yet to declare a card limit, so
+"no limit declared" is always said; a commitment whose cadence or day cannot be placed is counted
+as "could not be placed" and left out; the second and later windows of a commitment are not
+consulted (only the open one); transfers between the household's own accounts are not special-cased.
+
+Found on merging R1: its tests called `import_file` and `rebuild_from_raw` directly, which the
+main line had moved behind `tests/landing.py` (they need `finishers`); three test files now use the
+wrapper.
+
+Rejected: reading the detector on every GET (a whole-table detection to say nothing when incomes
+are confirmed), and a figure that dashes when it cannot be made.
+
 ## Measured on the real store (counts only, read from the page after each deploy)
 
 | Version | Recurring series | Kinds (pulled / scheduled / habit) | Payments / transfers / incomes | Stopped (over a year) | Changed | Entities: names / proposals / covered / too broad |

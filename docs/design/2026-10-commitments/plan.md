@@ -750,7 +750,8 @@ obdi each day, and the projection to Actual moves to the end as an export. The s
    one payee become one. Rejected: description-first (0.4.362), which removed the split by
    removing the identifier; and asking the owner to join the two spellings by hand, which the
    evidence already answers.
-3. **Position, honestly** (new, before R3) - one page: what is held, what is owed, what is
+3. **Position, honestly** (new, before R3; **built 2026-10-08**, see "Position as built" in
+   `notes.md`; the comparison with the owner's own reckoning for a month is NOT yet made) - one page: what is held, what is owed, what is
    committed before the next income, and what is free, per account and in total, each figure
    with its basis beside it. The "available to spend" of a budgeting tool collapsed to one
    number from facts obdi verifies. Measured against the owner's own reckoning for a month.

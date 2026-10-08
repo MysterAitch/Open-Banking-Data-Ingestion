@@ -34,6 +34,7 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from ..analysis.free_position import DETECTED, FreeFigures
 from ..core.date_window import (
     Resolution,
     Window,
@@ -296,6 +297,115 @@ def _headline(view: Any, trust_lines: str = "") -> str:
             "pounds are added up.</p>"
         )
     return body
+
+
+def _free_total(label: str, total: Any, what: str, *, word: str = "") -> str:
+    """One total, the accounts it counts, and how many it leaves out. `word` names the figure
+    ("owed", "free"); without one the total is said by the way it sits."""
+    counted, of = int(total.counted), int(total.of)
+    if not counted:
+        figure = "cannot be made for any account"
+    elif word:
+        # The label already names the figure; only a shortfall needs a word of its own.
+        figure = _figure("short by" if total.direction == "out" else "", total.amount)
+    else:
+        figure = _figure(_balance_word(total.direction), total.amount)
+    left = of - counted
+    left_out = f" {left} left out: {_esc(what)}." if left else ""
+    return (
+        f"<li><strong>{_esc(label)}</strong> {figure}, counting {counted} of "
+        f"{_plural(of, 'account')}.{left_out}</li>"
+    )
+
+
+def _free_account(account: Any) -> str:
+    """One account's four figures, each with the sentence that says how it is known."""
+    name = AccountShown.named(account.ref, account.label).as_name()
+    parts = []
+    if account.is_card:
+        parts.append("<li><strong>Held</strong> nothing: a card's balance is what is owed.</li>")
+        if account.owed:
+            parts.append(
+                f"<li><strong>Owed</strong> {_figure('', account.owed)} "
+                f"({_esc(account.held_basis)}).</li>"
+            )
+        else:
+            parts.append(f"<li><strong>Owed</strong> {_esc(account.held_basis)}.</li>")
+    else:
+        if account.held_known:
+            held = _figure(_balance_word(account.held_direction), account.held)
+            parts.append(f"<li><strong>Held</strong> {held} ({_esc(account.held_basis)}).</li>")
+        else:
+            parts.append(f"<li><strong>Held</strong> {_esc(account.held_basis)}.</li>")
+        parts.append("<li><strong>Owed</strong> nothing: not a card or a loan.</li>")
+    due = account.due
+    if account.committed:
+        lines = "".join(
+            f'<li>{_figure("", d.amount)} due on <span class="nowrap">{_esc(d.due)}</span> '
+            f"to {_esc(d.name)}</li>"
+            for d in due
+        )
+        fold = (
+            f"<details><summary>{_plural(len(due), 'commitment')} due</summary>"
+            f'<ul class="keylist">{lines}</ul></details>'
+            if due
+            else ""
+        )
+        said = f" {_esc(account.committed_said)}"
+        if account.income_from == DETECTED:
+            said += f" {_esc(account.income_said)}"
+        parts.append(
+            f"<li><strong>Committed before the next income</strong> "
+            f"{_figure('', account.committed)}.{said}{fold}</li>"
+        )
+    else:
+        said = _esc(account.committed_said)
+        parts.append(f"<li><strong>Committed before the next income</strong> {said}</li>")
+    if int(account.unplaced):
+        parts.append(
+            f"<li class=\"muted\">{_plural(int(account.unplaced), 'commitment')} could not be "
+            "placed on a day, so not counted.</li>"
+        )
+    if account.free:
+        word = "short by" if account.free_short else ""
+        figure, said = _figure(word, account.free), _esc(account.free_said)
+        parts.append(f"<li><strong>Free</strong> {figure}. {said}</li>")
+    else:
+        parts.append(f"<li><strong>Free</strong> {_esc(account.free_said)}</li>")
+    return f"<li><strong>{name}</strong><ul>{''.join(parts)}</ul></li>"
+
+
+def _free_section(free: Disclosed[FreeFigures]) -> str:
+    """What is held, owed, committed before the next income, and free: the totals first, each
+    with the accounts it counts, and the per-account detail folded. Every amount is a `Total` of
+    the record, so a masked page carries the labels, bases, counts, and dates and no amount."""
+    accounts = free.accounts
+    if not accounts:
+        return ""
+    totals = (
+        _free_total("Held", free.held, "no balance is known for them")
+        + _free_total("Owed", free.owed, "their balance owed is not known", word="owed")
+        + _free_total(
+            "Committed before the next income",
+            free.committed,
+            "there is no next income to count to",
+            word="committed",
+        )
+        + _free_total(
+            "Free",
+            free.free,
+            "a balance, a next income, or a declared limit is missing",
+            word="free",
+        )
+    )
+    return (
+        "<h2>Held, owed, committed, and free</h2>"
+        f'<p class="muted">As at {_esc(free.as_of)}. A figure that cannot be made is not shown as '
+        "nil; it says what is missing.</p>"
+        f'<ul class="keylist">{totals}</ul>'
+        f"<details><summary>Each account's four figures ({len(accounts)})</summary>"
+        f'<ul class="pos-left-out">{"".join(_free_account(a) for a in accounts)}</ul></details>'
+    )
 
 
 def _mode(unmasked: bool) -> str:
@@ -1217,6 +1327,8 @@ def render_position(
     window_fields: Mapping[str, str] | None = None,
     accounts: Sequence[AccountOverview] | None = None,
     today: date | None = None,
+    free: FreeFigures | None = None,
+    free_unread: bool = False,
 ) -> bytes:
     """The page; `chart_in` names the items the chart is drawn from, None for all.
 
@@ -1228,6 +1340,8 @@ def render_position(
     `accounts` are the Overview's, from which each counted account's trust is read
     (`web_position_trust`); None says the trust could not be read and the page says so once.
     `today` is the day the bars end on, the position's own day where none is given.
+    `free` is the four figures per account (`analysis.free_position`), None for a deployment
+    that wires none; `free_unread` says they were asked for and could not be worked out.
     """
     if unmasked and window_fields is not None:
         choice = window_choice(position, window_fields)
@@ -1258,6 +1372,13 @@ def render_position(
             reading = read_trust(counted, accounts, today)
             lines = figure_lines(reading, today, shown_of)
     body = _mode(unmasked) + _headline(view, lines)
+    if free is not None:
+        body += _free_section(Disclosed(free, unmasked=unmasked))
+    elif free_unread:
+        body += (
+            '<p class="warn">What is free could not be worked out just now, so the four figures '
+            "are not shown.</p>"
+        )
     if view.groups:
         balances = (
             {
@@ -1371,6 +1492,15 @@ class PositionPages:
                 accounts = overview(False).accounts
             except Exception as fault:
                 say("position.overview-fault", kind=type(fault).__name__)
+        free: FreeFigures | None = None
+        free_unread = False
+        free_hook = self.bound_config.free_data
+        if free_hook is not None:
+            try:
+                free = free_hook(position)
+            except Exception as fault:
+                say("position.free-fault", kind=type(fault).__name__)
+                free_unread = True
         self._respond(
             200,
             render_position(
@@ -1379,6 +1509,8 @@ class PositionPages:
                 chart_in=chart_in,
                 window_fields=window_fields,
                 accounts=accounts,
+                free=free,
+                free_unread=free_unread,
             ),
             no_store=unmasked,
         )

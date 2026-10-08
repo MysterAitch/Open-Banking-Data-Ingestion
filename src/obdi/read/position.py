@@ -154,6 +154,12 @@ class AccountPosition:
     #: how far it has moved since its history began, and never a balance.
     #: None when the account is counted or holds no rows.
     moved: Total[Money | None]
+    #: The newest known balance the opening was tested against, as `balance_anchors` names its
+    #: basis ("stated", "statement", "bank", ...) and the day it states it for; "" for both where
+    #: the account has none. Said by `analysis.free_position`, which is the page's one reading of
+    #: how a held figure is known.
+    anchor_basis: Structural[str] = ""
+    anchor_day: Structural[str] = ""
 
 
 @dataclass(frozen=True)
@@ -399,6 +405,8 @@ def _account_position(item: AccountInput, today: date) -> tuple[AccountPosition,
     # The same rows as the balance, so the two can only differ by the opening.
     moved_minor = running_balance(0, item.rows) if balance_minor is None and live else None
     first = min((t.value_date for t in live), default=None)
+    # Readings are earliest first, so the newest known balance is the last one that was stated.
+    latest = opening.readings[-1].anchor if opening.readings else None
     return (
         AccountPosition(
             ref=item.ref,
@@ -431,6 +439,8 @@ def _account_position(item: AccountInput, today: date) -> tuple[AccountPosition,
             moved_direction=direction_of(moved_minor) if moved_minor is not None else "",
             balance=Money(balance_minor, CURRENCY) if balance_minor is not None else None,
             moved=Money(moved_minor, CURRENCY) if moved_minor is not None else None,
+            anchor_basis=latest.basis if latest else "",
+            anchor_day=latest.day.isoformat() if latest else "",
         ),
         balance_minor,
     )
