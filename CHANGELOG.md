@@ -42,6 +42,10 @@ transcription would add no reasoning that the subjects do not already carry.
   so Keep now stores the opening as the entity's own rule, which names later variants on sight and
   no longer depends on the confidence setting. The entity page lists the rule with where it came
   from ("learned from 14 identified rows, kept by you on 2026-10-08").
+- **A recurring series that rests partly on inferred rows says so.** A series joined across
+  sources by the learned rule is a guess at the join, and showing "8 times" beside it made it look
+  as well evidenced as a series of rows the bank identified. Its line now reads, for example, "8
+  payments, 4 of them inferred from the description".
 
 ## [0.4.384] - 2026-10-08
 

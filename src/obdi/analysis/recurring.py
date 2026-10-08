@@ -71,7 +71,7 @@ from statistics import median_low
 from ..core.models import Transaction, TransactionStatus
 from ..ingest.commitment_records import Commitment, Dismissal
 from ..ingest.stated_words import words_in
-from .entities import HELD_PREFIX, Alias, display_names, entity_of, name_rows
+from .entities import HELD_PREFIX, LEARNED_RULE, Alias, display_names, entity_of, name_rows
 from .payment_methods import METHODS
 
 #: Fewest occurrences that make a series. Two is a coincidence of a payee and a gap.
@@ -243,6 +243,9 @@ class Series:
     #: the cadence was fitted on. `This month` sets a commitment's due days against these to say
     #: which were paid; a weekly rhythm has several in a month, so the last day alone is not enough.
     seen_days: tuple[date, ...] = ()
+    #: How many of the `count` payments were named by an inference from their description
+    #: (`entities.LEARNED_RULE`), counted apart so the series never looks better evidenced.
+    inferred: int = 0
 
 
 #: How many of a series' newest occurrence days `Series.seen_days` keeps: enough to cover a month
@@ -417,6 +420,9 @@ class _Leg:
     other: str
     #: The name `name_rows` gave the row, or `TRANSFER_NAME` and the other account for a transfer.
     name: str = ""
+    #: Whether the row was named by an inference (`entities.LEARNED_RULE`) and not by anything its
+    #: source states: a series resting on such rows says so.
+    inferred: bool = False
 
 
 #: How long before a slot the statement for its cycle may be dated: a card statement closes some
@@ -618,6 +624,7 @@ def _series_of(
         drift_percent=drift,
         steady=steady,
         count=len(legs),
+        inferred=sum(leg.inferred for leg in legs),
         kind=kind,
         basis=basis,
         periods=len(legs) + fit.missed,        explained=explained_inside + explained_after,
@@ -783,7 +790,9 @@ def find_recurring(
         # transfer to it: `other` is what makes the series one (`_is_transfer`), not income or a
         # payee, and a transfer to an account declared external (`held_counterparts`) has no
         # opposite leg to pair with at all.
-        groups[payee].append(_Leg(row, held_of.get(payee, ""), shape))
+        groups[payee].append(
+            _Leg(row, held_of.get(payee, ""), shape, inferred=item.kind == LEARNED_RULE)
+        )
 
     found: list[Series] = []
     for key, legs in groups.items():
