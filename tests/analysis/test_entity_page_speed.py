@@ -21,11 +21,13 @@ from obdi.ingest.store import Store
 #: rule), warm: 23 statements (17 of them selects) and 0.37 s for a masked GET; the decomposition
 #: was not measured. The bound allows two statements more than measured (a read per name, rule,
 #: or entity would add dozens); the time is loose so a slow machine does not flake.
-#: Measured 26 after the declared external accounts' one select (`Store.external_identifiers`)
+#: Measured 26 after the declared external accounts' one select (`Store.declared_identifiers`)
 #: joined the learned lines' refusal read; the bound is raised by that one statement.
 #: Measured 27 once the learned rules' settings and ticks were read
 #: (`Store.preferences_with_prefix`, one select, not growing with the rules).
-ENTITY_STATEMENTS = 27
+#: Measured 28 once the first row of each account was read to say why a transfer has no other leg
+#: (`overview.first_row_dates`), one select that does not grow with the store.
+ENTITY_STATEMENTS = 28
 SECONDS = 5.0
 
 

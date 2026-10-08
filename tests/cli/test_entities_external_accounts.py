@@ -113,9 +113,10 @@ def shown(base: str) -> str:
 
 
 def section_of(page: str) -> list[str]:
-    """The text of each item in the unheld-accounts section."""
+    """The sentence that leads each item in the unheld-accounts section, before its fold of
+    payments (`test_entities_identify_held` reads the fold)."""
     return [
-        " ".join(item.text().split())
+        " ".join(item.text().split()).split(" The payments")[0]
         for item in elements(parse(page), "li")
         if "ent-unheld" in item.classes
     ]
@@ -170,7 +171,8 @@ class TestTheShownPage:
 
         page = shown(base)
 
-        assert len(keys_on(page)) == 4  # a declaration form and a decline form for each of two
+        # a held-account form, a declaration form, and a decline form for each of two
+        assert len(keys_on(page)) == 6
         assert len(set(keys_on(page))) == 2
         actions = [f.attrs.get("action") for f in elements(parse(page), "form")]
         assert actions.count("/entities-external") == 2
@@ -222,7 +224,7 @@ class TestPressingThisAccountIsMine:
         remaining = section_of(response.text)
         assert len(remaining) == 1 and "3 payments" in remaining[0]
         with Store(db) as store:
-            assert store.external_identifiers() == {UNHELD: store.external_accounts()[0].ref}
+            assert store.declared_identifiers() == {UNHELD: store.external_accounts()[0].ref}
 
     def test_Declaring_TheSecondNumberWithTheSameEnding_IsASeparateDeclaration(self, world):
         base, db = world

@@ -54,7 +54,7 @@ transcription would add no reasoning that the subjects do not already carry.
   line says what "tested against" counts.
 
 ### Added
-- **The learned rule is measured against the identifiers that arrive after it (schema 32).** A
+- **The learned rule is measured against the identifiers that arrive after it (schema 34).** A
   description-only row named by the rule is a guess, and the one place the guess is tested for
   real is when a richer source later supplies an identifier for the same payment; until now that
   moment left no trace because the inference was recomputed each time. The inference is now
@@ -67,6 +67,57 @@ transcription would add no reasoning that the subjects do not already carry.
   detaching each id by hand. An entity holding two or more of the bank's own ids now offers
   "Split into locations": one child entity per id under it, named "<company> location N" by how many
   payments each has, the commonest staying with the company where it would otherwise hold nothing.
+
+## [0.4.389] - 2026-10-08
+
+Payments to an account of the owner's that obdi holds, schema 33 (32 is in build).
+
+### Added
+- **"It is this account" on the Entities page.** An account whose source never
+  states its own number could only ever be recognised through a confirmed
+  transfer pair, so its payments sat under "not held here" as if foreign, with
+  only a text box to name them. Each line now has a select of the held accounts
+  and a press that pins the number on one; every payment stating it then reads as
+  a transfer to that account, paired or not. An account answers to many numbers
+  (`account_identifiers`), because a sort-code migration or a merger gives one
+  balance history a second.
+- **A fold under each line lists its payments**, newest ten and "and N more",
+  masked by default, from rows the page already read.
+- **The account's edit page keeps its numbers**, including a card's last four
+  digits with the owner's dates (a card replaced, a network switched); a card is
+  kept as the record and joins no payment.
+- **A transfer with no other leg says why**: when the account it went to has no
+  rows that early, the row says when that account's rows begin, and no leg is
+  invented.
+
+### Changed
+- `Store.external_identifiers` is `declared_identifiers` and returns every
+  account's numbers, held or external. The Entities page costs two more
+  statements and the entity page one, recorded beside their bounds.
+
+## [0.4.388] - 2026-10-08
+
+0.4.387 was tagged and its build failed, so it has no image; this version carries 0.4.387's
+content and the fixes below.
+
+### Fixed
+- **The whole-suite build failed 0.4.387 on five tests its merge gate did not run.** The gate
+  ran the layers R3 touched and not the layers downstream of them (`export` and `verify` sit
+  below `read`). The ledger page cost 23 statements against a documented 22 and the family
+  reading 37 against 36: the ledger reads what is owed back with one select per account that
+  no existing query could absorb, so the documented count is now 12 with the twelfth named
+  where the others are. The ledger row's declared value fields gained `owed_by`, `owed_label`,
+  `owed_reason`, and `owed_amount`, which are the owner's words and money. The account page
+  with two thousand balances had grown from under 96 KB to 106 KB because the owed-back press
+  was a form on every row; the budget is not raised - the press is now a plain link to its own
+  page.
+- **The owed-back page names the payment it is for.** The first cut of that page knew the
+  payment only by its anchor and could not say which it was, which is a page the owner must
+  take on trust. A row's anchor is a hash of its id and nothing looked rows up by it, so the
+  store now registers the hash as an SQL function and finds the row in one select; the page
+  shows the date, account, source, description, and amount, masked on a GET and shown for a
+  sitting, and says "That payment is not held now" for an anchor that resolves to nothing.
+  The account is named by its reference rather than its label, to keep the page at one select.
 
 ## [0.4.387] - 2026-10-08
 

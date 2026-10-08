@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -39,7 +39,7 @@ from .analysis.entities import (
     name_rows,
     refused_links,
 )
-from .analysis.external_accounts import dismissed_keys, unheld_accounts
+from .analysis.external_accounts import dismissed_keys, held_choices, unheld_accounts
 from .analysis.flows import FlowReading
 from .analysis.free_position import DeclaredLimit, FreeFigures
 from .analysis.goals import GoalsView
@@ -87,6 +87,8 @@ from .ingest.declined_items import void_declined_items
 from .ingest.doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .ingest.family_anchors import Families, families_of
 from .ingest.finishers import Finishers, SettleReport
+from .ingest.identifier_records import ACCOUNT as ACCOUNT_KIND
+from .ingest.identifier_records import IdentifierEntry, checked_day
 from .ingest.pipeline import (
     MatcherPreview,
     import_file,
@@ -3970,7 +3972,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             from .analysis.recurring import counts_as_occurrence
 
             occurrences = [t for t in transactions if counts_as_occurrence(t)]
-            external = store.external_identifiers()
+            external = store.declared_identifiers()
             row_fields, links, named = name_rows(
                 occurrences,
                 pairs,
@@ -4188,6 +4190,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             held = [str(record.ref) for record in store.declared_accounts()]
             return apply_press(store, action, form, accounts=held)
 
+    def owed_row(anchor: str) -> Transaction | None:
+        """The transaction a row's anchor names, in one select."""
+        from .read.ledger import row_anchor
+
+        with Store(db_path) as store:
+            return store.transaction_by_key(row_anchor, anchor)
+
     def receivable_act(action: str, form: dict[str, list[str]]) -> tuple[str, str, str]:
         """One press on what is owed back. A declaration finds its transaction again among those
         held, so a press on a page that has gone stale is refused and never applied to another."""
@@ -4262,7 +4271,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             rows,
             store.confirmed_transfer_pairs(),
             refused=refused_links(store), policy=rule_policy(store),
-            external=store.external_identifiers(),
+            external=store.declared_identifiers(),
         )
         return name_origins(named, [t.source for t in rows])
 
@@ -4276,14 +4285,35 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             rows,
             store.confirmed_transfer_pairs(),
             refused=refused_links(store), policy=rule_policy(store),
-            external=store.external_identifiers(),
+            external=store.declared_identifiers(),
         )
         return links
 
     def _shape_counts(store: Store) -> dict[str, int]:
         return {n: o.rows for n, o in _held_origins(store).items()}
 
-    def _covered(t: Transaction, item: Named, names: AccountsShown) -> Covered:
+    def _notes(
+        store: Store,
+        rows: Sequence[Transaction],
+        named: Sequence[Named],
+        pairs: Collection[tuple[str, str]],
+        names: AccountsShown,
+    ) -> dict[str, str]:
+        """Why a transfer to a held account has no other leg, by entity: said only where some
+        row is a transfer to a held account, so a store without one pays no statement."""
+        from .analysis.external_accounts import other_leg_notes
+        from .read.overview import first_row_dates
+
+        if not any(item.name.startswith(HELD_PREFIX) for item in named):
+            return {}
+        return other_leg_notes(rows, named, pairs, first_row_dates(store), names)
+
+    def _covered(
+        t: Transaction,
+        item: Named,
+        names: AccountsShown,
+        notes: Mapping[str, str] | None = None,
+    ) -> Covered:
         from .read.ledger import row_anchor
 
         return Covered(
@@ -4300,6 +4330,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             support=item.support,
             linked_by=item.linked_by,
             tested=item.tested,
+            note=(notes or {}).get(t.entity_id, ""),
         )
 
     def entities_data() -> EntitiesView:
@@ -4320,14 +4351,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             names = account_names(store)
             refusals = refused_links(store)
             policy = rule_policy(store)
+            pairs = store.confirmed_transfer_pairs()
             fields, links, named = name_rows(
                 rows,
-                store.confirmed_transfer_pairs(),
+                pairs,
                 refused=refusals,
                 policy=policy,
-                external=store.external_identifiers(),
+                external=store.declared_identifiers(),
             )
             rule_lines, learning = rule_views(fields, links, policy, refusals)
+            notes = _notes(store, rows, named, pairs, names)
             listed: dict[str, list[Covered]] = {}
             order = sorted(
                 range(len(rows)),
@@ -4338,10 +4371,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 shape = named[i].name
                 shown = listed.setdefault(shape, [])
                 if shape and len(shown) < COVERED_SHOWN:
-                    shown.append(_covered(rows[i], named[i], names))
+                    shown.append(_covered(rows[i], named[i], names, notes))
             origins = name_origins(named, [t.source for t in rows])
             counts = {n: o.rows for n, o in origins.items()}
-            unheld, declined = unheld_accounts(rows, named, dismissed_keys(store))
+            unheld, declined = unheld_accounts(rows, named, dismissed_keys(store), names)
             return view_of(
                 counts,
                 entities_of(store, counts),
@@ -4355,6 +4388,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 rule_lines,
                 learning.shared,
                 policy.settings,
+                held_choices=held_choices(store, names),
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
@@ -4381,7 +4415,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     store.confirmed_transfer_pairs(),
                     refused=refused_links(store),
                     policy=rule_policy(store),
-                    external=store.external_identifiers(),
+                    external=store.declared_identifiers(),
                 )
                 return apply_rule_action(store, fields, action, form)
             if action in EXTERNAL_ACTIONS:
@@ -4390,7 +4424,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     rows,
                     store.confirmed_transfer_pairs(),
                     refused=refused_links(store), policy=rule_policy(store),
-                    external=store.external_identifiers(),
+                    external=store.declared_identifiers(),
                 )
                 return apply_external_action(store, rows, named, action, form)
             origins = (
@@ -4406,7 +4440,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     store.confirmed_transfer_pairs(),
                     refused=refused_links(store),
                     policy=rule_policy(store),
-                    external=store.external_identifiers(),
+                    external=store.declared_identifiers(),
                 )
                 labels = display_names(named_fields, named_rows)
             return apply_action(
@@ -4422,12 +4456,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
             policy = rule_policy(store)
+            pairs = store.confirmed_transfer_pairs()
             fields, links, named = name_rows(
                 rows,
-                store.confirmed_transfer_pairs(),
+                pairs,
                 refused=refused_links(store),
                 policy=policy,
-                external=store.external_identifiers(),
+                external=store.declared_identifiers(),
             )
             origins = name_origins(named, [t.source for t in rows])
             counts = {n: o.rows for n, o in origins.items()}
@@ -4437,6 +4472,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 return None
             names = account_names(store)
             wanted = set(found.shapes)
+            notes = _notes(store, rows, named, pairs, names)
             listed: dict[str, list[Covered]] = {}
             order = sorted(
                 range(len(rows)),
@@ -4449,7 +4485,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     continue
                 shown = listed.setdefault(shape, [])
                 if len(shown) < COVERED_SHOWN:
-                    shown.append(_covered(rows[i], named[i], names))
+                    shown.append(_covered(rows[i], named[i], names, notes))
             return entity_page_of(
                 entity_id,
                 entities,
@@ -5202,6 +5238,31 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             return store.declare_account(record)
 
+    def account_identifier_view(
+        ref: str,
+    ) -> tuple[list[IdentifierEntry], dict[str, tuple[date, date]]]:
+        """An account's declared numbers and the days payments state them: two selects."""
+        with Store(db_path) as store:
+            entries = store.identifier_entries(AccountRef(ref))
+            return entries, store.identifier_sightings(
+                [e.value for e in entries if e.kind == ACCOUNT_KIND]
+            )
+
+    def add_identifier(ref: str, kind: str, value: str, valid_from: str, valid_to: str) -> bool:
+        """Say an account answers to a number as typed; a `DataError` says why not."""
+        with Store(db_path) as store:
+            return store.add_account_identifier(
+                AccountRef(ref),
+                value,
+                kind=kind,
+                valid_from=checked_day(valid_from),
+                valid_to=checked_day(valid_to),
+            )
+
+    def remove_identifier(ref: str, entry: int) -> bool:
+        with Store(db_path) as store:
+            return store.remove_account_identifier(AccountRef(ref), entry)
+
     return WebConfig(
         client_id=client_id,
         client_secret=current_secret,
@@ -5260,6 +5321,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         declared_accounts=declared_accounts,
         held_accounts=held_accounts,
         declare_account=declare_account,
+        account_identifier_view=account_identifier_view,
+        add_identifier=add_identifier,
+        remove_identifier=remove_identifier,
         known_accounts=known_accounts_data,
         declare_known=declare_known,
         set_parents=set_parents,
@@ -5304,6 +5368,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         anchor_save=anchor_save,
         ownership_act=ownership_act,
         receivable_act=receivable_act,
+        owed_row=owed_row,
         anchor_remove=anchor_remove,
         balance_disregard=balance_disregard,
         balance_use_again=balance_use_again,

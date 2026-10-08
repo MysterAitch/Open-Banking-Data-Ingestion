@@ -153,7 +153,7 @@ class TestDeclaringAnAccountMine:
         )
         assert str(record.ref).startswith(EXTERNAL_REF_PREFIX)
         assert "Partner joint" in said and "12 payments" in said and "2222" in said
-        fields, _links, after = name_rows(rows, [], external=store.external_identifiers())
+        fields, _links, after = name_rows(rows, [], external=store.declared_identifiers())
         assert {n.name for n in after} == {HELD_PREFIX + str(record.ref)}
         labels = display_names(fields, after, {str(record.ref): "Partner joint"})
         assert set(labels.values()) == {"your Partner joint"}
@@ -167,7 +167,7 @@ class TestDeclaringAnAccountMine:
         )
 
         offered, _declined = unheld_accounts(
-            rows, named(rows, external=store.external_identifiers())
+            rows, named(rows, external=store.declared_identifiers())
         )
         assert [a.key for a in offered] == [second.key]
 
@@ -247,7 +247,7 @@ class TestDeclaringAnAccountMine:
             declare_external(
                 store,
                 rows,
-                named(rows, external=store.external_identifiers()),
+                named(rows, external=store.declared_identifiers()),
                 {"account": [offered.key], "label": ["Again"]},
             )
 

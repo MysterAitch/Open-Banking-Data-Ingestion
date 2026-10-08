@@ -8,7 +8,7 @@ invented.
     identifier.
   - An external account declared with an identifier and a label reads back with both, is NOT in
     `declared_accounts()` (the registry every page of held accounts reads), IS in
-    `external_accounts()`, and its identifier finds its name through `external_identifiers()`.
+    `external_accounts()`, and its identifier finds its name through `declared_identifiers()`.
   - An ordinary account declared with no identifier reads back with none; one declared with an
     identifier keeps it and is still an ordinary, listed account.
   - Editing a declared account keeps the stable id it was minted with, and an external account
@@ -95,24 +95,29 @@ class TestAnExternalAccount:
         store.declare_account(external("external-aaaa", "Partner joint", IDENTIFIER))
         store.declare_account(external("external-bbbb", "Pension pot", OTHER_IDENTIFIER))
 
-        assert store.external_identifiers() == {
+        assert store.declared_identifiers() == {
             IDENTIFIER: "external-aaaa",
             OTHER_IDENTIFIER: "external-bbbb",
         }
 
-    def test_ExternalIdentifiers_WhenNothingIsExternal_AreEmpty(self, store):
+    def test_DeclaredIdentifiers_WhenAHeldAccountIsDeclaredWithOne_IncludeItToo(self, store):
         store.declare_account(
             AccountRecord(ref=AccountRef("current-main"), label="Current", identifier=IDENTIFIER)
         )
 
-        assert store.external_identifiers() == {}
+        assert store.declared_identifiers() == {IDENTIFIER: "current-main"}
+
+    def test_DeclaredIdentifiers_WhenNothingCarriesOne_AreEmpty(self, store):
+        store.declare_account(AccountRecord(ref=AccountRef("current-main"), label="Current"))
+
+        assert store.declared_identifiers() == {}
 
     def test_ExternalAccount_WhenTheStoreIsRebuiltFromRaw_IsUntouched(self, store):
         store.declare_account(external("external-aaaa", "Partner joint", IDENTIFIER))
 
         rebuild_from_raw(store)
 
-        assert store.external_identifiers() == {IDENTIFIER: "external-aaaa"}
+        assert store.declared_identifiers() == {IDENTIFIER: "external-aaaa"}
 
     def test_ExternalAccount_WhenRelabelled_KeepsItsStableIdAndIdentifier(self, store):
         first = store.declare_account(external("external-aaaa", "Partner joint", IDENTIFIER))

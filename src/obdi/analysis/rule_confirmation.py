@@ -59,7 +59,7 @@ def confirm_inferred(store: Store) -> Confirmation:
         store.confirmed_transfer_pairs(),
         refused=refused_links(store),
         policy=policy,
-        external=store.external_identifiers(),
+        external=store.declared_identifiers(),
     )
     made = []
     for row, item in zip(rows, named, strict=True):

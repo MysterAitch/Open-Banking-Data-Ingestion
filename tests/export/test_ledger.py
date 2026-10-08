@@ -581,6 +581,9 @@ class TestStructureIsDeclaredNotAssumed:
         assert values == {
             "description", "counterparty", "amount", "review_reason",
             "send_refusal", "category", "payee", "balance_after",
+            # What the owner declared owed back on the row: who owes it, its label, the reason it
+            # was closed, and the amount - all words or money of the owner's.
+            "owed_by", "owed_label", "owed_reason", "owed_amount",
         }
 
     def test_Summary_OnlyTheSumsAreValues(self):

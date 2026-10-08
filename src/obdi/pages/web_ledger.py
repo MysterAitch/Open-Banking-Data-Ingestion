@@ -30,7 +30,7 @@ from ..core.errors import DataError
 from ..core.logs import say
 from ..core.london_clock import london
 from ..core.masking import MASKED_TOTAL, Disclosed, mask_text
-from ..core.models import BASIS_ID
+from ..core.models import BASIS_ID, Transaction
 from ..core.money import format_amount
 from ..core.page_words import (
     ACCOUNT_CHECK_HEADING,
@@ -384,11 +384,6 @@ def _artefact_html(sighting: Any) -> str:
     return f'<p class="muted t-from">{", ".join(parts)}</p>' if parts else ""
 
 
-#: The id of the one form every row's "owed to me" button belongs to (`_owed_form_html`): the name
-#: and label are typed once above the rows, and a row is one press, not a form of its own.
-_OWED_FORM = "owed-form"
-
-
 def _owed_words(row: Any) -> str:
     """What the owner declared is owed back on a row, in words. It says what was declared and how
     a hand closing was made, and never that the money is still owed: whether a transfer has met it
@@ -405,6 +400,18 @@ def _owed_words(row: Any) -> str:
         str(row.owed_state), str(row.owed_state)
     )
     return f"{who} owed {amount}{label}. {_esc(way)}: {_esc(row.owed_reason)}."
+
+
+def _owed_button(row: Any) -> str:
+    """The link that opens the page declaring a settled payment owed back (`owed_page`). It is as
+    small as a press can be - a link naming the row - because every row of a page carries one and
+    the account page's size is budgeted for exactly that: a form, a field, or a sentence per row
+    would add to the size of every month listed, and a form to the page once."""
+    if row.owed_state or row.direction != "out" or row.status != "booked" or not row.anchor:
+        return ""
+    if _is_copy(row):
+        return ""
+    return f'<a class="tap" href="/owed?r={_esc(row.anchor)}">Owed</a>'
 
 
 def _facts_html(row: Any) -> str:
@@ -437,16 +444,6 @@ def _facts_html(row: Any) -> str:
         facts.append(("Review", '<a class="tap" href="/review-flags">Decide this flag</a>'))
     if row.owed_state:
         facts.append(("Owed back", _owed_words(row)))
-    elif row.direction == "out" and row.status == "booked" and row.anchor and not _is_copy(row):
-        facts.append(
-            (
-                "Owed back",
-                f'<button class="button secondary" type="submit" form="{_OWED_FORM}" '
-                f'name="anchor" value="{_esc(row.anchor)}" '
-                'style="width:100%;font-size:inherit;cursor:pointer">'
-                "Owed to me by the name under About this account</button>",
-            )
-        )
     if not facts:
         return ""
     return (
@@ -634,7 +631,7 @@ def _row_html(row: Any, unmasked: bool = True, *, running: bool = False) -> str:
     )
     more = (
         f'{stated}<p class="t-chips pills">{_status_pill(row)} {sources}{_row_flags(row)}</p>'
-        f"{counterparty}{dates}{annotation}{_facts_html(row)}"
+        f"{counterparty}{dates}{annotation}{_facts_html(row)}{_owed_button(row)}"
     )
     return f'<li class="txn{kind}{_row_rail(row)}"{ident}>{_line_html(row, line, more)}</li>'
 
@@ -3045,28 +3042,48 @@ def _ownership_html(about: AccountAbout, view: Any, *, unmasked: bool) -> str:
     )
 
 
-def _owed_form_html(view: Any) -> str:
-    """The fields a payment's "owed to me" press reads: who owes it, an optional label (a second
-    axis beside the category), and optionally a smaller amount and a day it is expected. Typed once
-    here, they belong to the one form every eligible row's button submits (`_OWED_FORM`), so a
-    month of rows carries a button each and not a form each. No value is in the markup."""
+def owed_page(anchor: str, row: Transaction | None, *, unmasked: bool = False) -> bytes:
+    """The page a row's "Owed" link opens: which payment it is for, and the fields a declaration
+    reads - who owes it, an optional label (a second axis beside the category), and optionally a
+    smaller amount and a day it is due back.
 
-    def field(label: str, name: str, extra: str = "") -> str:
-        return (
-            f'<p><label>{label} <input form="{_OWED_FORM}" name="{name}" maxlength="120"{extra}>'
-            "</label></p>"
+    The payment is said by its day, account, source, and description; the description is a payee
+    and the amount a figure, so both are masked unless values were asked for (a POST, or a
+    sitting), as on every page. A row the anchor names no longer is said so and nothing is
+    offered: a form that could only be refused is not drawn."""
+    if row is None:
+        return render_page(
+            "Owed to you",
+            "<p>That payment is not held now, so nothing can be marked against it. Open it again "
+            f"from its account.</p>{_HOME}",
         )
 
-    return _part(
-        "Payments to reclaim",
-        f'<form id="{_OWED_FORM}" method="post" action="/receivable-declare">'
-        f'<input type="hidden" name="month" value="{_esc(_scope(view))}"></form>'
-        '<p class="muted">Say who owes it, then open a payment below and press its button. '
-        "A transfer from them closes it.</p>"
-        + field("Owed by", "debtor")
+    def field(label: str, name: str, extra: str = "") -> str:
+        return f'<p><label>{label} <input name="{name}" maxlength="120"{extra}></label></p>'
+
+    text = row.description if unmasked else mask_text(row.description)
+    amount = figure_html(format_amount(abs(row.amount_minor)), unmasked=unmasked)
+    switch = (
+        ""
+        if unmasked
+        else f'<form method="post" action="/owed"><input type="hidden" name="r" '
+        f'value="{_esc(anchor)}">' + submit_button("Show values", secondary=True) + "</form>"
+    )
+    return render_page(
+        "Owed to you",
+        f'<p class="lede"><strong>{_esc(row.value_date.isoformat())}</strong> from '
+        f"{code_html(row.account_id)}, {code_html(row.source)}: {_esc(text)}, {amount}.</p>"
+        f"{switch}"
+        '<form method="post" action="/receivable-declare">'
+        f'<input type="hidden" name="anchor" value="{_esc(anchor)}">'
+        '<p class="muted">Say who owes this payment back. A transfer from them closes it.</p>'
+        + field("Owed by", "debtor", " required")
         + field("Label, if any", "label")
         + field("Amount, if less than the payment", "amount", ' inputmode="decimal"')
-        + field("Due back by, if you know (2026-11-30)", "expected"),
+        + field("Due back by, if you know (2026-11-30)", "expected")
+        + submit_button("Mark as owed to me")
+        + "</form>"
+        + _HOME,
     )
 
 
@@ -3118,7 +3135,7 @@ def _about_html(
         else declared
     )
     if view is not None and about.unread == "":
-        body += _ownership_html(about, view, unmasked=unmasked) + _owed_form_html(view)
+        body += _ownership_html(about, view, unmasked=unmasked)
     fold = _disclosure("About this account", body, css="about")
     if about.expected is not None:
         fold += _expected_html(about.expected, unmasked=unmasked)
@@ -3602,6 +3619,23 @@ class LedgerPages(AnswerPages):
             )
             return
         self._ledger(ref, month, unmasked=False, notice=said, no_store=True)
+
+    def _owed_get(self, params: dict[str, list[str]], *, unmasked: bool = False) -> None:
+        """The declaration form for the payment a row's link named, with the payment said: masked
+        on a GET, and with values only for the POST that asks for them (or a sitting)."""
+        anchor = (params.get("r", [""])[0] or "").strip()
+        hook = self.bound_config.owed_row
+        if not anchor or hook is None:
+            self._respond(400, _page("No payment named", "Open it from a payment's Owed link."))
+            return
+        shown = unmasked or values_sitting.shown()
+        try:
+            row = hook(anchor)
+        except Exception as fault:
+            say("ledger.owed.fault", kind=type(fault).__name__)
+            self._respond(500, _page("Owed to you", "The payment could not be read."))
+            return
+        self._respond(200, owed_page(anchor, row, unmasked=shown), no_store=shown)
 
     def _receivable_declare_post(self, form: dict[str, list[str]]) -> None:
         """Declare a payment owed back, then answer with the MASKED ledger of its account.

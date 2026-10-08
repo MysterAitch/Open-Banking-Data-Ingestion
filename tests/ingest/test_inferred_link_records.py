@@ -20,7 +20,7 @@ from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.store import SCHEMA_VERSION, Store
 
 HISTORY = pathlib.Path(__file__).resolve().parent.parent / "schema_history"
-SNAPSHOT = HISTORY / "27-inferred-links.sql"
+SNAPSHOT = HISTORY / "29-inferred-links.sql"
 NOW = datetime(2026, 10, 8, 9, 0, tzinfo=UTC)
 
 
@@ -49,7 +49,7 @@ class TestRecording:
 
 
 class TestTheSchema:
-    def test_Store_WhenStampedSchema30_OpensAndGainsTheTable(self, tmp_path):
+    def test_Store_WhenStampedSchema33_OpensAndGainsTheTable(self, tmp_path):
         path = tmp_path / "old.sqlite3"
         legacy = sqlite3.connect(path)
         legacy.executescript(SNAPSHOT.read_text(encoding="utf-8"))
@@ -64,7 +64,7 @@ class TestTheSchema:
             ).fetchone()[0]
             goals = store.goals()
 
-        assert stamped == str(SCHEMA_VERSION) == "32"
+        assert stamped == str(SCHEMA_VERSION) == "34"
         assert goals == [], "the goals table the snapshot carries is read without a fault"
 
     def test_RebuildFromRaw_LeavesTheRecordsAsTheyWere(self, tmp_path):

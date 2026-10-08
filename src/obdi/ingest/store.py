@@ -23,7 +23,7 @@ import json
 import os
 import re
 import sqlite3
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -80,6 +80,7 @@ from .entity_records import (
     Identifier,
 )
 from .goal_records import CLEAR, GOAL_KINDS, SAVE, Goal, GoalRefused
+from .identifier_records import ACCOUNT, IdentifierEntry, checked_identifier
 from .inferred_link_records import InferredLink
 from .ownership_records import WHOLE, OwnerShare, OwnershipRefused
 from .payment_links import stated_link_of
@@ -196,9 +197,16 @@ from .stated_words import recorded_words
 #: is owed to the owner on one transaction. Declared state, kept across the rebuild from raw, and
 #: new tables only, so a store stamped 30 would never have grown them.
 #:
-#: 31 -> 32: the `inferred_links` table: each row the learned rule named by inference and whether
-#: an identifier that arrived later agreed. A new table, so no column migration, as for 29.
-SCHEMA_VERSION = 32
+#: 31 -> 33 (32 is taken by another change landing beside this one): the `account_identifiers`
+#: table: every sort code and number an account answers to, so a held account whose source never
+#: states its number can still be recognised as the other side of a payment. The identifiers of
+#: accounts declared external (`declared_accounts.identifier`) are copied in by
+#: `_migrate_account_identifiers`; the column stays readable and is written alongside.
+#:
+#: 33 -> 34 (32 is taken by another change): the `inferred_links` table: each row the learned rule
+#: named by inference and whether an identifier that arrived later agreed. A new table, so no
+#: column migration, as for 29.
+SCHEMA_VERSION = 34
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -940,6 +948,30 @@ CREATE TABLE IF NOT EXISTS account_owners (
     removed_at  TEXT
 );
 
+-- DECLARED: a number an account answers to (`identifier_records`). `kind` is 'account' (a sort
+-- code and number, or a non-GB IBAN, in the one canonical form a transaction's `party_account`
+-- takes) or 'card' (the last four digits of a card, kept as a record and joined to no row). One row
+-- per identifier per account, because an account is its numbers and not its bank: a sort-code
+-- migration or a merger gives one balance history a second number. An 'account' identifier belongs
+-- to at most ONE account (the partial unique index), so a payment stating it has one answer; a
+-- card's last four is shared by chance across cards and is not unique. `valid_from` and `valid_to`
+-- are the owner's own dates for when the number was in use. `declared_at` is when the owner said
+-- so. The days an identifier was first and last stated are read from the transactions when a page
+-- needs them and are not kept here: a stored copy would go stale on the next rebuild.
+CREATE TABLE IF NOT EXISTS account_identifiers (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ref         TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'account',
+    identifier  TEXT NOT NULL,
+    valid_from  TEXT,
+    valid_to    TEXT,
+    declared_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS account_identifiers_account
+    ON account_identifiers (identifier) WHERE kind = 'account';
+CREATE UNIQUE INDEX IF NOT EXISTS account_identifiers_entry
+    ON account_identifiers (ref, kind, identifier, COALESCE(valid_from, ''));
+
 -- DECLARED: one step of how a commitment's money moves (`commitment_records.Leg`). An end is a
 -- held account reference or an entity, either or neither; a leg with no held account at either
 -- end is external and is never checked. `amount_minor` or `share_percent` (of the window's
@@ -1071,6 +1103,10 @@ NOT_STANDING_TABLES: dict[str, str] = {
         "share of a balance; the balance and what it agrees through are the account's whole, "
         "whoever owns it"
     ),
+    "account_identifiers": (
+        "the numbers an account answers to, read by the pages that name a payment's other side; "
+        "a balance, agreement, or protection is the account's whatever number a payment stated"
+    ),
     "goals": (
         "the debts to clear, funds to build, and savings the owner declared, read by the Goals "
         "and This month pages, which set them against a balance; no balance, agreement, or "
@@ -1175,6 +1211,9 @@ def schema_shape() -> dict[str, list[str]]:
 #: store runs its migrations at all. Derived automatically it would agree with
 #: itself for ever and catch nothing.
 SCHEMA_SHAPE: dict[str, list[str]] = {
+    'account_identifiers': [
+        'declared_at', 'id', 'identifier', 'kind', 'ref', 'valid_from', 'valid_to',
+    ],
     'account_owners': ['account', 'declared_at', 'entity_id', 'id', 'percent', 'removed_at'],
     'annotations': ['annotated_at', 'entity_id', 'kind', 'provenance', 'value'],
     'artefact_origins': ['account_ref', 'digest', 'first_seen_at', 'origin', 'source'],
@@ -1668,6 +1707,7 @@ class Store:
         self._migrate_entity_role()
         self._migrate_entity_identifiers()
         self._migrate_transaction_party_columns()
+        self._migrate_account_identifiers()
         self.connection.executescript(_epoch_triggers())
         self.connection.execute(
             "INSERT INTO obdi_meta (key, value) VALUES ('schema_version', ?) "
@@ -1903,6 +1943,17 @@ class Store:
             self.connection.execute(
                 "ALTER TABLE declared_accounts ADD COLUMN external INTEGER NOT NULL DEFAULT 0"
             )
+
+    def _migrate_account_identifiers(self) -> None:
+        """Copy the identifiers of declared accounts into `account_identifiers`.
+
+        Before the table, only an external account carried one, in `declared_accounts`. Ignoring
+        a row already there keeps this safe to run on every upgrade."""
+        self.connection.execute(
+            "INSERT OR IGNORE INTO account_identifiers (ref, identifier, declared_at) "
+            "SELECT ref, identifier, declared_at FROM declared_accounts "
+            "WHERE identifier IS NOT NULL AND identifier != ''"
+        )
 
     def _migrate_valuation_income_columns(self) -> None:
         """Teach valuations the difference between a pot and an income.
@@ -2152,6 +2203,12 @@ class Store:
         if previous is not None and str(previous["ref"]) != stored.ref:
             self._move_account_balances(str(previous["ref"]), stored.ref)
             self._move_statement_sections(str(previous["ref"]), stored.ref)
+            self.connection.execute(
+                "UPDATE account_identifiers SET ref = ? WHERE ref = ?",
+                (stored.ref, str(previous["ref"])),
+            )
+        if stored.identifier:
+            self._attach_identifier(stored.ref, stored.identifier)
         self.connection.execute(
             "DELETE FROM declared_account_limits WHERE stable_id = ?", (stable_id,)
         )
@@ -2210,17 +2267,162 @@ class Store:
         name: the accounts a payment can be a transfer to without any row of theirs existing."""
         return self._registry(external=True)
 
-    def external_identifiers(self) -> dict[str, str]:
-        """Each external account's identifier, to its canonical name: how a row stating an
-        identifier finds the account it went to (`analysis.entities.held_counterparts`). One
-        statement, because the pages that name rows ask it on every view."""
+    def declared_identifiers(self) -> dict[str, str]:
+        """Every identifier the owner declared an account answers to, held or external, to that
+        account's canonical name: how a row stating an identifier finds the account it went to
+        (`analysis.entities.held_counterparts`). One statement, because the pages that name rows
+        ask it on every view."""
         return {
             str(row["identifier"]): str(row["ref"])
             for row in self.connection.execute(
-                "SELECT identifier, ref FROM declared_accounts "
-                "WHERE external = 1 AND identifier IS NOT NULL ORDER BY ref"
+                "SELECT identifier, ref FROM account_identifiers WHERE kind = 'account' "
+                "ORDER BY ref, identifier"
             )
         }
+
+    def account_identifiers(self) -> dict[str, list[str]]:
+        """Each account's declared account numbers (never a card's last four), to its canonical
+        name, in the order declared."""
+        found: dict[str, list[str]] = {}
+        for row in self.connection.execute(
+            "SELECT ref, identifier FROM account_identifiers WHERE kind = 'account' "
+            "ORDER BY ref, declared_at, identifier"
+        ):
+            found.setdefault(str(row["ref"]), []).append(str(row["identifier"]))
+        return found
+
+    def identifier_entries(self, ref: AccountRef) -> list[IdentifierEntry]:
+        """Everything the owner declared the account answers to, cards included: accounts then
+        cards, each by the day it came into use (undated last), what the account's edit page
+        lists."""
+        return [
+            IdentifierEntry(
+                int(row["id"]),
+                str(row["kind"]),
+                str(row["identifier"]),
+                _read_date(row["valid_from"]),
+                _read_date(row["valid_to"]),
+            )
+            for row in self.connection.execute(
+                "SELECT id, kind, identifier, valid_from, valid_to FROM account_identifiers "
+                "WHERE ref = ? ORDER BY kind, valid_from IS NULL, valid_from, id",
+                (str(ref),),
+            )
+        ]
+
+    def identifier_sightings(self, identifiers: Collection[str]) -> dict[str, tuple[date, date]]:
+        """The first and last day a transaction states each identifier as its other party's
+        account, for those any transaction states: the evidence beside the owner's own dates. One
+        statement however many are asked."""
+        wanted = sorted(set(identifiers))
+        if not wanted:
+            return {}
+        marks = ",".join("?" for _ in wanted)
+        return {
+            str(row["party_account"]): (
+                date.fromisoformat(str(row["first"])),
+                date.fromisoformat(str(row["last"])),
+            )
+            for row in self.connection.execute(
+                "SELECT party_account, MIN(value_date) AS first, MAX(value_date) AS last "  # noqa: S608
+                f"FROM transactions WHERE party_account IN ({marks}) GROUP BY party_account",
+                wanted,
+            )
+        }
+
+    def held_account_refs(self) -> list[str]:
+        """The canonical names of the accounts obdi holds a source for that the owner has
+        declared, by name: the accounts a payment's number can be said to belong to. One
+        statement."""
+        return [
+            str(row["ref"])
+            for row in self.connection.execute(
+                "SELECT ref FROM declared_accounts WHERE external = 0 ORDER BY ref"
+            )
+        ]
+
+    def add_account_identifier(
+        self,
+        ref: AccountRef,
+        identifier: str,
+        *,
+        kind: str = ACCOUNT,
+        valid_from: date | None = None,
+        valid_to: date | None = None,
+    ) -> bool:
+        """Say that the declared, held account `ref` answers to `identifier`, as well as to any
+        it already has. Returns whether it was new. The value is checked and written in its
+        canonical form (`identifier_records.checked_identifier`: a card is its last four digits
+        and nothing more). Refused (`DataError`, nothing written) where the value is not what its
+        kind is, the dates are the wrong way round, the account is not declared as held here, or
+        another account already answers to an account number."""
+        record = self.declared_account(ref)
+        if record is None or record.external:
+            raise DataError(
+                "That account is not declared as one held here; declare it first. Nothing was "
+                "changed."
+            )
+        value = checked_identifier(kind, identifier)
+        if valid_from is not None and valid_to is not None and valid_to < valid_from:
+            raise DataError("The number cannot end before it begins. Nothing was changed.")
+        added = self._attach_identifier(str(ref), value, kind, valid_from, valid_to)
+        self.connection.commit()
+        return added
+
+    def remove_account_identifier(self, ref: AccountRef, entry: int) -> bool:
+        """Forget one number declared on the account; whether there was one. The account's
+        payments that stated it are then unrecognised again, which is the point."""
+        cursor = self.connection.execute(
+            "DELETE FROM account_identifiers WHERE id = ? AND ref = ?", (entry, str(ref))
+        )
+        self.connection.commit()
+        return bool(cursor.rowcount)
+
+    def _attach_identifier(
+        self,
+        ref: str,
+        identifier: str,
+        kind: str = ACCOUNT,
+        valid_from: date | None = None,
+        valid_to: date | None = None,
+    ) -> bool:
+        if kind == ACCOUNT:
+            owner = self.connection.execute(
+                "SELECT a.ref, d.label FROM account_identifiers a "
+                "LEFT JOIN declared_accounts d ON d.ref = a.ref "
+                "WHERE a.kind = 'account' AND a.identifier = ?",
+                (identifier,),
+            ).fetchone()
+            if owner is not None:
+                if str(owner["ref"]) != ref:
+                    self.connection.rollback()
+                    name = str(owner["label"] or owner["ref"])
+                    raise DataError(
+                        f"The number ending {identifier[-4:]} already belongs to {name} "
+                        f"({owner['ref']}); an account number answers to one account. "
+                        "Nothing was changed."
+                    )
+                return False
+        taken = self.connection.execute(
+            "SELECT 1 FROM account_identifiers WHERE ref = ? AND kind = ? AND identifier = ? "
+            "AND COALESCE(valid_from, '') = ?",
+            (ref, kind, identifier, valid_from.isoformat() if valid_from else ""),
+        ).fetchone()
+        if taken is not None:
+            return False
+        self.connection.execute(
+            "INSERT INTO account_identifiers "
+            "(ref, kind, identifier, valid_from, valid_to, declared_at) VALUES (?,?,?,?,?,?)",
+            (
+                ref,
+                kind,
+                identifier,
+                valid_from.isoformat() if valid_from else None,
+                valid_to.isoformat() if valid_to else None,
+                _stamp_now(),
+            ),
+        )
+        return True
 
     def external_labels(self) -> dict[str, str]:
         """Each external account's canonical name to the label it is shown under, in one
@@ -2765,6 +2967,18 @@ class Store:
             replace(t, transfer_confirmed=t.entity_id in confirmed)
             for t in (_row_to_transaction(row) for row in rows)
         ]
+
+    def transaction_by_key(self, key: Callable[[str], str], wanted: str) -> Transaction | None:
+        """The transaction whose id `key` maps to `wanted`, or None: one select.
+
+        A row's anchor (`read.ledger.row_anchor`) is a hash of its id, so it cannot be turned back
+        into the id; `key` is registered as an SQL function and the table is searched by it in
+        the one statement, where a page that holds only an anchor needs the row it names."""
+        self.connection.create_function("transaction_key", 1, key, deterministic=True)
+        found = self.connection.execute(
+            "SELECT * FROM transactions WHERE transaction_key(entity_id) = ? LIMIT 1", (wanted,)
+        ).fetchone()
+        return None if found is None else _row_to_transaction(found)
 
     def replace_transfer_pairs(self, pairs: list[tuple[str, str]]) -> None:
         """Record the pairing pass's findings, replacing any previous pass's.

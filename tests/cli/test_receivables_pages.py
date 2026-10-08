@@ -196,9 +196,45 @@ class TestDeclaringOnTheRow:
         with served(tmp_path, monkeypatch) as (base, _, coffee, income):
             html = httpx.get(f"{base}/ledger", params={"ref": ACCOUNT}, timeout=60).text
 
-        assert f'name="anchor" value="{coffee}"' in html
-        assert f'value="{income}"' not in html.replace(f"anchor-{income}", "")
-        assert html.count('form="owed-form"') >= 4
+        assert f'href="/owed?r={coffee}"' in html
+        assert f"/owed?r={income}" not in html
+        assert html.count("/owed?r=") >= 2
+
+    def test_OwedPage_WhenOpenedFromARow_HoldsTheFormForThatRowAndMasksThePayment(
+        self, tmp_path, monkeypatch
+    ):
+        with served(tmp_path, monkeypatch) as (base, _, coffee, _income):
+            response = httpx.get(f"{base}/owed", params={"r": coffee}, timeout=60)
+            bare = httpx.get(f"{base}/owed", timeout=60)
+
+        page = response.text
+        said = text_of(page)
+        assert response.status_code == 200
+        assert 'action="/receivable-declare"' in page
+        assert f'name="anchor" value="{coffee}"' in page
+        assert "2026-10-03 from current-main" in said
+        assert COFFEE not in page and "4.20" not in page and CHARITY not in page
+        assert MASKED_TOTAL in page
+        assert bare.status_code == 400
+
+    def test_OwedPage_WhenValuesAreAskedFor_NamesTheDateAccountSourceDescriptionAndAmount(
+        self, tmp_path, monkeypatch
+    ):
+        with served(tmp_path, monkeypatch) as (base, _, coffee, _income):
+            response = httpx.post(f"{base}/owed", data={"r": coffee}, timeout=60)
+
+        said = text_of(response.text)
+        assert response.headers["cache-control"].startswith("no-store")
+        assert "2026-10-03 from current-main, " in said
+        assert f"{COFFEE}, £4.20." in said
+
+    def test_OwedPage_WhenTheAnchorNamesNothing_SaysSoAndOffersNoForm(self, tmp_path, monkeypatch):
+        with served(tmp_path, monkeypatch) as (base, _, _coffee, _income):
+            response = httpx.get(f"{base}/owed", params={"r": "0123456789ab"}, timeout=60)
+
+        assert "That payment is not held now" in text_of(response.text)
+        assert "<form" not in response.text.split("</header>")[-1]
+        assert "receivable-declare" not in response.text
 
 
 class TestMetByATransfer:
