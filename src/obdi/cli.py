@@ -959,7 +959,7 @@ def _push_refusal_findings(db_path: Path, store: Store) -> list[Finding]:
     succeeds. Only the duplicate-identity refusal and the missing map speak
     here; any other exception propagates to be reported as a failed check.
     """
-    from .export.actual_push import DuplicateImportedIdError
+    from .core.errors import DuplicateImportedIdError
     from .read.alerts import push_refused_finding
 
     if not os.getenv("ACTUAL_SYNC_ID", "").strip():

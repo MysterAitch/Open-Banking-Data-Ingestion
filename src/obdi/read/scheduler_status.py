@@ -224,7 +224,7 @@ def describe_error(error: BaseException, *, item: ItemPosition | None = None) ->
     `where` is always given and never carries data: the module and function of the innermost frame
     in obdi's own code, then the item the step was on where it said (`StepHandle.working_on`).
     """
-    from ..export.actual_push import DuplicateImportedIdError
+    from ..core.errors import DuplicateImportedIdError
 
     text: str | None = None
     if isinstance(error, DuplicateImportedIdError):

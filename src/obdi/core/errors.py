@@ -18,3 +18,17 @@ from __future__ import annotations
 
 class DataError(ValueError):
     """External input could not be turned into a record."""
+
+
+class DuplicateImportedIdError(ValueError):
+    """The push to Actual was refused because two store rows share an imported id.
+
+    `str()` is the full refusal for the operator's log, including the start
+    of the offending key. `public` is the same refusal without that key: the
+    key is derived from the payment's content, so it stays out of anything
+    sent to a phone.
+    """
+
+    def __init__(self, message: str, *, public: str) -> None:
+        super().__init__(message)
+        self.public = public

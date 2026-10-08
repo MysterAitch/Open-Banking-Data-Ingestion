@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..core.errors import DuplicateImportedIdError
 from ..core.models import Transaction
 from ..core.plural import plural, word
 from ..ingest.family_anchors import Families
@@ -42,20 +43,6 @@ from .replay import (
 # applier refuses any version it does not know, so a change here ships with
 # its applier.
 ENVELOPE_VERSION = 3
-
-
-class DuplicateImportedIdError(ValueError):
-    """The push was refused because two store rows share an imported id.
-
-    `str()` is the full refusal for the operator's log, including the start
-    of the offending key. `public` is the same refusal without that key: the
-    key is derived from the payment's content, so it stays out of anything
-    sent to a phone.
-    """
-
-    def __init__(self, message: str, *, public: str) -> None:
-        super().__init__(message)
-        self.public = public
 
 
 def write_map(map_path: Path, payload: dict[str, object]) -> None:
