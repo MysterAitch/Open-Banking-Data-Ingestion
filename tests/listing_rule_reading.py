@@ -32,7 +32,7 @@ def shown_balances_are_stated_or_named(
     store: Store, ref: str, families: Families, standing: Standing
 ) -> int:
     """For every known balance on or before the day an account said to add up adds up through, the
-    balance the account page shows for that day (`ledger.running_balance`: the opening and the
+    balance the account page shows for that day (`protection.running_balance`: the opening and the
     transactions by stored date) is the stated one, OR a statement's closing that differs from it
     by exactly what the page names: the transactions dated on or before the day that the
     statement's balance does not hold, less the ones it lists that are dated after it
@@ -43,8 +43,8 @@ def shown_balances_are_stated_or_named(
     quantities, which the owner's own correction accepts ("a closing balance is not the balance at
     the end of a calendar day") and the page must therefore say rather than leave "adds up"
     beside a different figure."""
-    from obdi.read.ledger import running_balance
     from obdi.verify.balance_anchors import STATEMENT, effective_opening
+    from obdi.verify.protection import running_balance
     from obdi.verify.standing_data import statement_checks_for
 
     if standing.own.through is None or standing.own.held is not None:

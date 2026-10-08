@@ -22,7 +22,7 @@ movement to the known net worth, which takes each unknown opening as nil: its
 shape is real and its level is not, so it exists only beside the real figure
 and only while some account is uncounted.
 
-ONE BALANCE, TWO PAGES. An account's balance is `ledger.running_balance`, the
+ONE BALANCE, TWO PAGES. An account's balance is `protection.running_balance`, the
 function the ledger's running position uses, so the two pages cannot disagree.
 
 OBSERVED ASSETS count at their latest observed value. A defined-benefit or
@@ -69,8 +69,9 @@ from ..ingest.family_anchors import Families
 from ..ingest.store import Store
 from ..ingest.valuations import AssetKind
 from ..verify.balance_anchors import CURRENCY, STATED, EffectiveOpening, effective_opening
+from ..verify.protection import running_balance
 from .account_names import AccountsShown, accounts_shown
-from .ledger import Money, direction_of, running_balance
+from .ledger import Money, direction_of
 from .overview import held_by_account
 
 #: Kinds of observed asset that are a promise of income and have no pot.

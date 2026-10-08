@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
@@ -477,6 +478,25 @@ def tested_days(opening: EffectiveOpening, standing: Standing) -> tuple[date, ..
     return tested_days_of(standing)
 
 
+def running_balance(
+    opening_minor: int, rows: Iterable[Transaction], through: date | None = None
+) -> int:
+    """The balance by the store's own rows: the opening plus every row that is money.
+
+    A void, folded, or reversed row is history and is never counted.
+
+    Rows are counted when dated on or before `through` (all of them when None).
+    The ledger's running position, the position page, and a protection's span all
+    call this, so they cannot come to differ about what an account holds.
+    """
+    return opening_minor + sum(
+        t.amount_minor
+        for t in rows
+        if not t.status.is_history
+        and (through is None or t.value_date <= through)
+    )
+
+
 def tested_days_of(standing: Standing) -> tuple[date, ...]:
     """`tested_days` from the standing alone, for a reader that holds no opening (Today's offer to
     lock an account in is told from the same days the account's page offers)."""
@@ -541,8 +561,6 @@ def press(
         # span is reproduced by is the other source's, not the statement's, so it is preferred.
         key=lambda k: (k.day, k.closed_before is None, k.source),
     )
-    from ..read.ledger import running_balance
-
     opening_day = date.fromordinal(start.toordinal() - 1)
     span = span_rows(store, ref, start, through)
     stamp = _now(now)
@@ -696,8 +714,6 @@ def protection_view(
     check: Check | None = None,
 ) -> ProtectionView:
     """`check` is the span's check where the caller already made it."""
-    from ..read.ledger import running_balance
-
     record = store.protection_record(ref)
     offer: tuple[date, ...] = ()
     not_offered = ""

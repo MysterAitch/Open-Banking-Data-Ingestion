@@ -35,7 +35,6 @@ from obdi.export.replay import ActualAccountBinding, build_payload
 from obdi.ingest.accounts import BALANCE_ONLY_KIND, AccountRecord, AccountRef
 from obdi.ingest.store import Store
 from obdi.pages.web import AuthorisationSession, ConnectionHandler
-from obdi.read.ledger import running_balance
 from obdi.read.position import read_position
 from obdi.verify.balance_anchors import (
     STATED,
@@ -45,6 +44,7 @@ from obdi.verify.balance_anchors import (
     record_stated_anchor,
     remove_stated_anchor,
 )
+from obdi.verify.protection import running_balance
 
 MORTGAGE = "mortgage"
 D = date

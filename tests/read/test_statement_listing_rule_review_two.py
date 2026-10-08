@@ -85,7 +85,6 @@ from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.space_attribution import fold_space_copies
 from obdi.ingest.store import Store
-from obdi.read.ledger import running_balance
 from obdi.verify.agreement import HELD_CONFLICT
 from obdi.verify.balance_anchors import (
     STATEMENT,
@@ -93,7 +92,7 @@ from obdi.verify.balance_anchors import (
     effective_opening,
     record_stated_anchor,
 )
-from obdi.verify.protection import press
+from obdi.verify.protection import press, running_balance
 from obdi.verify.protection import tested_days as days_offered
 from obdi.verify.standing_data import (
     ADDS_UP,

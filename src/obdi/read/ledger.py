@@ -81,7 +81,13 @@ from ..verify.bank_balances import describe as describe_bank
 from ..verify.clearing import ClearingView, cleared_by, clearing_counts
 from ..verify.fault_explanation import WalkExplanation
 from ..verify.fault_structure import StructureReport, account_report, walk_report
-from ..verify.protection import Check, ProtectionView, check_span, protection_view
+from ..verify.protection import (
+    Check,
+    ProtectionView,
+    check_span,
+    protection_view,
+    running_balance,
+)
 from ..verify.standing_data import statement_checks_for
 from ..verify.statement_checks import StatementChecks
 from .account_about import AccountAbout
@@ -890,25 +896,6 @@ def opening_view(opening: EffectiveOpening) -> OpeningView:
         shared_more=shared_more,
         disregarded=_disregards(opening),
         opening=Money(opening.opening_minor or 0, CURRENCY),
-    )
-
-
-def running_balance(
-    opening_minor: int, rows: Iterable[Transaction], through: date | None = None
-) -> int:
-    """The balance by the store's own rows: the opening plus every row that is money.
-
-    A void, folded, or reversed row is history and is never counted.
-
-    Rows are counted when dated on or before `through` (all of them when None).
-    The ledger's running position and the position page both call this, so the
-    two cannot come to differ about what an account holds.
-    """
-    return opening_minor + sum(
-        t.amount_minor
-        for t in rows
-        if not t.status.is_history
-        and (through is None or t.value_date <= through)
     )
 
 

@@ -39,8 +39,8 @@ from obdi.ingest.typed_transactions import (
     typed_entries,
 )
 from obdi.pages.web import AuthorisationSession, ConnectionHandler
-from obdi.read.ledger import running_balance
 from obdi.verify.balance_anchors import AnchorRefused
+from obdi.verify.protection import running_balance
 from test_ledger import land, txn
 
 TIN = "tin"

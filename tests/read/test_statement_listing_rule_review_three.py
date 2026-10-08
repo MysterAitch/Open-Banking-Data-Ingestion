@@ -2,7 +2,7 @@
 known balance of an account said to add up, and not only of a day a statement closed before
 something (`listing_rule_reading.shown_balances_are_the_stated_ones`, which holds on those days).
 
-The balance SHOWN for the end of a day is `ledger.running_balance` over the account's opening
+The balance SHOWN for the end of a day is `protection.running_balance` over the account's opening
 figure and its rows by their stored dates: the function the ledger's running position and the
 position page both call. The balance STATED is the known balance's own figure. Every account is
 invented, built through the file doors, read through `app_reading`, and its answer was written
@@ -65,7 +65,6 @@ from obdi.core.models import SourceTier, Transaction, TransactionStatus
 from obdi.ingest.identity import content_key
 from obdi.ingest.pipeline import reconcile_batch
 from obdi.ingest.store import Store
-from obdi.read.ledger import running_balance
 from obdi.verify.agreement import date_difference_sentence
 from obdi.verify.balance_anchors import (
     STATEMENT,
@@ -73,7 +72,7 @@ from obdi.verify.balance_anchors import (
     effective_opening,
     record_stated_anchor,
 )
-from obdi.verify.protection import ProtectionRefused, press
+from obdi.verify.protection import ProtectionRefused, press, running_balance
 from obdi.verify.protection import tested_days as days_offered
 from obdi.verify.standing_data import ADDS_UP, statement_checks_for
 from statement_span_world import Spend, statement
