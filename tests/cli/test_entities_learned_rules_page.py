@@ -166,6 +166,85 @@ class TestARecurringSeriesBuiltOnInferredRows:
         assert any("8 payments, 4 of them inferred from the description" in k for k in kinds), kinds
 
 
+BRANCHES = ("starling:uid-b-north", "starling:uid-b-quay", "starling:uid-b-hill")
+
+
+def branch_world() -> list[Transaction]:
+    """Twelve weekly card payments to one retailer stating one name across three branch uids:
+    six at the first, four at the second, two at the third."""
+    uids = [BRANCHES[0]] * 6 + [BRANCHES[1]] * 4 + [BRANCHES[2]] * 2
+    return [
+        Transaction(
+            account_id=ACCOUNT,
+            amount_minor=-300 - week,
+            value_date=date(2026, 7, 6) + timedelta(weeks=week),
+            booking_date=date(2026, 7, 6) + timedelta(weeks=week),
+            description=f"BRANCHCO {week}",
+            counterparty="Branchco",
+            party_source_id=uids[week],
+            source="starling",
+            source_id=f"b{week}",
+            tier=SourceTier.AUTHORITATIVE,
+        )
+        for week in range(12)
+    ]
+
+
+@pytest.fixture
+def served_branches(tmp_path, monkeypatch):
+    db = tmp_path / "store.sqlite3"
+    with Store(db) as store:
+        reconcile_batch(store, branch_world(), digest="feed")
+    environment(monkeypatch, tmp_path)
+    config = build_web_config(db)
+    assert config is not None
+    base, stop = serve_config(config)
+    yield base
+    stop()
+
+
+class TestSplitIntoLocations:
+    def company(self, base: str) -> str:
+        press(base, "/entities-merge", name="Branchco Group", shape=list(BRANCHES))
+        page = httpx.post(f"{base}/entities", timeout=60).text
+        link = next(
+            a.attrs["href"]
+            for a in elements(parse(page), "a")
+            if "/entity?id=" in a.attrs.get("href", "")
+        )
+        return link.split("id=")[1]
+
+    def test_CompanyHoldingThreeBranchIds_OffersTheSplitAndMakesChildrenByUsage(
+        self, served_branches
+    ):
+        entity = self.company(served_branches)
+        page = httpx.post(f"{served_branches}/entity?id={entity}", timeout=60).text
+        assert "Split into locations" in parse(page).text()
+
+        done = press(served_branches, "/entity-split-locations", entity=entity)
+
+        assert done.status_code == 200, done.text[:300]
+        text = " ".join(parse(done.text).text().split())
+        assert "Split Branchco Group into 2 locations under it, the commonest staying" in text
+        assert "Branchco Group location 2" in text and "Branchco Group location 3" in text
+
+    def test_SplitTwice_IsRefusedSinceOneIdIsLeft(self, served_branches):
+        entity = self.company(served_branches)
+        press(served_branches, "/entity-split-locations", entity=entity)
+
+        again = press(served_branches, "/entity-split-locations", entity=entity)
+
+        assert again.status_code == 400
+        assert "fewer than two" in again.text
+
+    def test_ALocationAlreadyUnderACompany_IsNotOfferedTheSplit(self, served_branches):
+        entity = self.company(served_branches)
+        press(served_branches, "/entity-split-locations", entity=entity)
+        page = httpx.post(f"{served_branches}/entity?id={entity}", timeout=60).text
+
+        assert "Split into locations" not in parse(page).text()
+
+
 class TestAnOfferedRule:
     def test_RuleBelowTheDefaultConfidence_IsOfferedUntickedWithItsRowsUnderAClosedFold(
         self, served

@@ -17,6 +17,7 @@ from ..ingest.entity_records import (
     BEGINS,
     DECLARED,
     DESCRIPTION,
+    SOURCE_ID,
     Entity,
     EntityRefused,
     Identifier,
@@ -58,6 +59,8 @@ PARENT = "parent"
 #: identifier of the entity, or say it is not so.
 KEEP_LINK = "keep-link"
 REFUSE_LINK = "refuse-link"
+#: Makes one child entity per source id of a company gathered from its locations.
+SPLIT_LOCATIONS = "split-locations"
 #: The presses about payments to an account obdi holds nothing for (`external_accounts`): these
 #: read the transactions' names, where the others read the names the store keeps.
 DECLARE_EXTERNAL = "declare-external"
@@ -81,6 +84,7 @@ ACTIONS = (
     PARENT,
     KEEP_LINK,
     REFUSE_LINK,
+    SPLIT_LOCATIONS,
     *EXTERNAL_ACTIONS,
     *RULE_ACTIONS,
 )
@@ -223,6 +227,8 @@ def apply_action(
             int(entity), resolve_form_value(_one(form, "shape"), known), _one(form, "name")
         )
         return f"Made {' '.join(_one(form, 'name').split())} its own entity under {parent}."
+    if action == SPLIT_LOCATIONS:
+        return _split_into_locations(store, known, _one(form, "entity"))
     if action == PARENT:
         entity = _one(form, "entity")
         if not entity.isdigit():
@@ -283,6 +289,44 @@ def apply_action(
         )
         return f"Kept that description for {pressed.name}; it no longer depends on the link."
     raise EntityRefused("That press is not one this page makes.")
+
+
+def _split_into_locations(store: Store, known: Mapping[str, int], wanted: str) -> str:
+    """One child entity per source id the entity holds, under it: a card acceptor is identified
+    per location, so a company gathered from its locations is split back into them. Children are
+    named "<company> location N" by how many payments each has (the owner renames them: nothing a
+    source states tells the locations apart). The company keeps the commonest location where it
+    would otherwise be left holding nothing, since an entity with no name is removed."""
+    entity = next(
+        (e for e in store.entities_with_shapes() if wanted.isdigit() and e.id == int(wanted)),
+        None,
+    )
+    if entity is None:
+        raise EntityRefused("There is no such entity; it may have been removed.")
+    if entity.parent_id is not None:
+        raise EntityRefused("Only a company, not one already under another entity, is split.")
+    uids = sorted(
+        {i.value for i in entity.identifiers if i.kind == SOURCE_ID},
+        key=lambda uid: (-known.get(uid, 0), uid),
+    )
+    if len(uids) < 2:
+        raise EntityRefused(
+            "It holds fewer than two of the bank's own ids; there is nothing to split."
+        )
+    others = {i.value for i in entity.identifiers if i.kind != SOURCE_ID}
+    moving = uids if others else uids[1:]
+    taken = {e.name.casefold() for e in store.entities_with_shapes()}
+    names = {uid: f"{entity.name} location {uids.index(uid) + 1}" for uid in moving}
+    clash = [name for name in names.values() if name.casefold() in taken]
+    if clash:
+        raise EntityRefused(f"There is already an entity called {clash[0]}.")
+    for uid in moving:
+        store.make_child_entity(entity.id, uid, names[uid])
+    return (
+        f"Split {entity.name} into {plural(len(moving), 'location')} under it"
+        + ("" if others else ", the commonest staying with it")
+        + "."
+    )
 
 
 def _keep_learned_rule(

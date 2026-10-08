@@ -39,6 +39,7 @@ from ..ingest.entity_records import (
     DECLARED,
     DESCRIPTION,
     OWNER_ROLE,
+    SOURCE_ID,
     EntityRefused,
     Identifier,
 )
@@ -70,6 +71,7 @@ RULE_REMOVE_ROUTE = "/entity-rule-remove"
 RENAME_ROUTE = "/entity-rename"
 SPLIT_ROUTE = "/entity-split"
 PARENT_ROUTE = "/entity-parent"
+SPLIT_LOCATIONS_ROUTE = "/entity-split-locations"
 KEEP_LINK_ROUTE = "/entity-link-keep"
 REFUSE_LINK_ROUTE = "/entity-link-refuse"
 
@@ -226,7 +228,25 @@ def _names(page: EntityPage, *, unmasked: bool) -> str:
             f"<h4>{_esc(IDENTIFIER_HEADINGS[kind])}</h4>"
             f'<ul class="ent-names">{lines}</ul>'
         )
-    return f"<h3>Names</h3>{said}{''.join(sections)}{_orphans(orphaned, unmasked=True)}"
+    return (
+        f"<h3>Names</h3>{said}{''.join(sections)}{_locations_form(page)}"
+        f"{_orphans(orphaned, unmasked=True)}"
+    )
+
+
+def _locations_form(page: EntityPage) -> str:
+    """The press that splits a company into its locations: one entity per source id it holds,
+    under it. Offered for an entity under no other with two or more source ids."""
+    entity = page.entity
+    held = [i for i in entity.identifiers if i.kind == SOURCE_ID]
+    if entity.parent_id is not None or len(held) < 2:
+        return ""
+    return (
+        f'<form method="post" action="{SPLIT_LOCATIONS_ROUTE}">{_hidden(entity.id)}'
+        f'<p class="ent-why">It holds {len(held):,} of the bank\'s own ids, one for each '
+        "location a card was used at.</p>"
+        '<button class="tap secondary" type="submit">Split into locations</button></form>'
+    )
 
 
 def _orphans(orphaned: tuple[Identifier, ...], *, unmasked: bool) -> str:

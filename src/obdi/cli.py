@@ -4350,6 +4350,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             REFUSE_LINK,
             RULE_ACTIONS,
             SPLIT,
+            SPLIT_LOCATIONS,
             apply_action,
             apply_external_action,
             apply_rule_action,
@@ -4376,7 +4377,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     external=store.external_identifiers(),
                 )
                 return apply_external_action(store, rows, named, action, form)
-            origins = _held_origins(store) if action in (MERGE, SPLIT, CHILD) else {}
+            origins = (
+                _held_origins(store) if action in (MERGE, SPLIT, CHILD, SPLIT_LOCATIONS) else {}
+            )
             known = {name: origin.rows for name, origin in origins.items()}
             links = _held_links(store) if action in (KEEP_LINK, REFUSE_LINK) else None
             return apply_action(store, known, action, form, origins=origins, links=links)

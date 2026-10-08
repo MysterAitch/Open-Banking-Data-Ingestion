@@ -62,6 +62,11 @@ R3 of the commitments roadmap (ownership, legs, receivables), schema 31.
   month and Position sum what is owed and name each; Today asks once it is past
   its expected day; the label's year says what is reimbursed and what is owed.
   That a transfer met it is worked out on every read and never stored.
+- **A company gathered from its locations can be split back into them.** Merging a retailer's
+  branch ids into one entity was the only way to join its series, with no way back short of
+  detaching each id by hand. An entity holding two or more of the bank's own ids now offers
+  "Split into locations": one child entity per id under it, named "<company> location N" by how many
+  payments each has, the commonest staying with the company where it would otherwise hold nothing.
 
 ### Changed
 - The card account page's statement budget moved from 130 to 132 and the Recurring page's by
