@@ -78,12 +78,12 @@ from ..core.models import Transaction
 from ..core.money import format_amount
 from ..core.plural import plural as _plural
 from ..ingest.parsers.pdf_statements import PDF_PARSERS
+from ..ingest.same_money_outcome import AccountOutcome, dated_list
 from ..ingest.statement_membership import ListedStatement, Membership, statement_membership
 from ..ingest.statement_terms import StatementBalance, held_statement_readings, statement_balances
 from ..ingest.store import Store
 from .balance_anchors import STATEMENT, _counts_toward
 from .coverage import Agreement, agreements
-from .same_money_outcome import AccountOutcome, dated_list
 
 #: The sources whose rows are a statement's own, as opposed to a feed's.
 STATEMENT_SOURCES = frozenset(parser.source for parser in PDF_PARSERS)

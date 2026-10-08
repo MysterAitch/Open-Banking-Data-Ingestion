@@ -173,8 +173,8 @@ from ..verify.period_reconciliation import (
     gather_evidence,
     held_in,
 )
-from ..verify.same_money_outcome import AccountOutcome, ClosingOutcome, Verdict
 from .accounts import AccountMap
+from .same_money_outcome import AccountOutcome, ClosingOutcome, Verdict
 from .statement_terms import keep_statement_readings
 from .store import Store
 

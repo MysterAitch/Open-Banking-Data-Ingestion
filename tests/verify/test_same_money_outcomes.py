@@ -41,6 +41,7 @@ from obdi.ingest.same_money_fold import (
     fold_same_money,
     plan_same_money,
 )
+from obdi.ingest.same_money_outcome import AccountOutcome, Verdict
 from obdi.ingest.store import SCHEMA_VERSION, Store
 from obdi.verify.period_reconciliation import (
     PeriodKind,
@@ -48,7 +49,6 @@ from obdi.verify.period_reconciliation import (
     gather_evidence,
     period_reconciliation,
 )
-from obdi.verify.same_money_outcome import AccountOutcome, Verdict
 from test_period_reconciliation import MONEY_FIGURE, _held_statement
 
 

@@ -46,7 +46,6 @@ ALLOWED_UPWARD: frozenset[tuple[str, str]] = frozenset(
         ("read.ledger", "export.replay"),
         ("export.actual_verdict", "pages.web_prune"),
         ("ingest.same_money_fold", "verify.period_reconciliation"),
-        ("ingest.same_money_fold", "verify.same_money_outcome"),
         ("ingest.typed_transactions", "verify.balance_anchors"),
     }
 )
@@ -421,7 +420,7 @@ class TestTheAllowedListCanOnlyShrink:
         # the entity record) before the move, and the record moved below the store to remove it.
         # The settle-after-landing group (nine lines: the landing functions take their finishers
         # as a required parameter) is gone. The number only goes down from here.
-        assert len(ALLOWED_UPWARD) == 5
+        assert len(ALLOWED_UPWARD) == 4
 
 
 class TestOverTheRealTree:
