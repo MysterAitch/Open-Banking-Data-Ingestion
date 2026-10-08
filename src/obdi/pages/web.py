@@ -6510,6 +6510,9 @@ class ConnectionHandler(
         if route == "/entity-split":
             self._entity_press_post(entity_actions.SPLIT)
             return
+        if route == "/entity-split-locations":
+            self._entity_press_post(entity_actions.SPLIT_LOCATIONS)
+            return
         if route == "/entity-parent":
             self._entity_press_post(entity_actions.PARENT)
             return

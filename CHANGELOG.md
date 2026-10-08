@@ -50,6 +50,11 @@ release commit.
   sources by the learned rule is a guess at the join, and showing "8 times" beside it made it look
   as well evidenced as a series of rows the bank identified. Its line now reads, for example, "8
   payments, 4 of them inferred from the description".
+- **A company gathered from its locations can be split back into them.** Merging a retailer's
+  branch ids into one entity was the only way to join its series, with no way back short of
+  detaching each id by hand. An entity holding two or more of the bank's own ids now offers
+  "Split into locations": one child entity per id under it, named "<company> location N" by how many
+  payments each has, the commonest staying with the company where it would otherwise hold nothing.
 
 ## [0.4.382] - 2026-10-08
 

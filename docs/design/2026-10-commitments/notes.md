@@ -596,3 +596,10 @@ The rung is `analysis/learned_rules.py` (learning, state, sentences, the setting
    amount a week apart are folded into one payment by the matcher, so the constructed world uses a
    penny's difference; a real statement and feed with equal amounts a week apart would fold too,
    which the rule never sees.
+5. SPLIT INTO LOCATIONS (cut before 4). `/entity-split-locations` (`SPLIT_LOCATIONS`,
+   `_split_into_locations`) makes a child per source id through the existing `make_child_entity`,
+   named "<company> location N" by usage because nothing a source states tells locations apart;
+   the commonest stays with the company when it holds no other kind of identifier (an entity with
+   no name is removed). Not built: naming a location from its town; a series test of the split
+   (no constructed world was found where the split changes a series, which merging, not splitting,
+   is for).
