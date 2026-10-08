@@ -26,6 +26,39 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.381] - 2026-10-08
+
+### Added
+- **Position says what is held, owed, committed before the next income,
+  and free, per account and in total, each with its basis.** Roadmap item
+  3: the "available to spend" of a budgeting tool collapsed to one number
+  from facts obdi verifies. Held is the latest known balance with how it is
+  known ("feed 2 days ago", "statement to D", "stated by you on D", ", and
+  the transactions to D" where rows run past it) or "not known since D"
+  with no free figure; owed is a card's or loan's balance; committed is the
+  sum of confirmed outgoing commitments whose next due day falls strictly
+  before the next income - a confirmed income commitment, else the
+  detector's next expected income with the sentence "No income is
+  confirmed; the next expected by rhythm is D", else nothing to count to
+  and no free figure; free is held less committed, and for a card the
+  limit less owed, which today always reads "No limit declared" because
+  nothing declares one yet. Totals count only the accounts each figure was
+  made for and say "counting N of M accounts, K left out: why". The detector
+  runs only when an outgoing commitment has no confirmed income, so most
+  loads do not pay for it: 802 statements with nothing confirmed (one more
+  than before), 817 with. Masked, the labels, bases, counts, and dates show
+  and the amounts are sealed as the page already seals them. Pinned by a
+  world with the answers decided first - gas due before the salary counted,
+  the gym after it not, a same-day commitment not, an ended window not -
+  and one of the hand answers was wrong (a fortnightly due date off-phase),
+  corrected with a note beside it. Not done: the comparison with the
+  owner's own reckoning for a month, which is the plan's measurement; a
+  commitment paid this cycle is counted again until its payment reaches
+  the balance; no way to declare a card limit yet; a card's own
+  commitments are listed but do not reduce its free figure; the
+  per-account figures sit in a closed fold, and the page's height at phone
+  width (2,285 to 2,637 px masked) is measured by a script, not guarded.
+
 ## [0.4.380] - 2026-10-08
 
 ### Added
