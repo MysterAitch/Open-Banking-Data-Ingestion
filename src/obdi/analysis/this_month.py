@@ -29,6 +29,10 @@ shortfall, `income_on` the day it is judged to. Only an account that has an outg
 judged, and a card is judged only where a limit is declared: a card with none has nothing to be
 short of, and the page says so instead of failing the headline.
 
+GOALS are carried whole from `analysis.goals` and read by the page; they are not lines of the
+calendar and do not enter what is committed or whether an account is funded, because a goal is
+the owner's choice and a commitment is an obligation.
+
 NOT HANDLED, and said on the page where it matters: a commitment with no day that can be placed
 is not on the calendar (it is counted unplaced by Position); the NOT TAKEN rule cannot tell an
 old explained slot from a trailing one when a series has both, so it is read as a trailing slot
@@ -49,6 +53,7 @@ from ..read.position import Position
 from .commitments import match_series
 from .flows import MISSING, NOTHING, FlowReading, LegInstance, SpaceNeed
 from .free_position import CURRENCY, AccountFigures, FreeFigures, OwedLine, due_days
+from .goals import GoalsView
 from .recurring import PULLED, Series
 
 PAID = "paid"
@@ -109,6 +114,9 @@ class ThisMonth:
     #: How the money of commitments with legs moves: the legs that did not happen, the spaces'
     #: needs, and what is owed to the household (`flows`). Empty where no leg is declared.
     flows: Structural[FlowReading] = NOTHING
+    #: Where each goal stands (`analysis.goals`), or None where none is read. A goal is the
+    #: owner's choice and is never added to what is committed.
+    goals: Structural[GoalsView | None] = None
 
 
 @dataclass(frozen=True)
@@ -266,11 +274,14 @@ def build_this_month(
     today: date,
     ahead: bool = False,
     flows: FlowReading = NOTHING,
+    goals: GoalsView | None = None,
 ) -> ThisMonth:
     """The calendar of the month of `today` (or the month after, where `ahead`), with Position's
     `free` figures beside it. `detected` are the detector's series, from which each commitment's
     payments are read; handing none leaves every past day unpaid, which is why a day is only
-    called overdue where its account's transactions reach past it."""
+    called overdue where its account's transactions reach past it. `goals` are carried as they
+    stand today: a goal's share is a figure for the month now, so the month ahead does not
+    show them."""
     first, last = month_bounds(today, ahead=ahead)
     matches = match_series(detected, commitments)
     by_commitment: dict[int, Series] = {
@@ -307,6 +318,7 @@ def build_this_month(
         free=free,
         judged=_judged(free, commitments),
         flows=flows,
+        goals=None if ahead else goals,
     )
 
 

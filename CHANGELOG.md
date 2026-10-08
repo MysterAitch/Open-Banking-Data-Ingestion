@@ -28,7 +28,8 @@ transcription would add no reasoning that the subjects do not already carry.
 
 ## [Unreleased]
 
-The orchestrator names the version; this section is R3 of the commitments roadmap (schema 30).
+Held here while several pieces are cut in steps; each line moves under its version at the
+release commit. R3 of the commitments roadmap (ownership, legs, receivables) is schema 31.
 
 ### Added
 - **A joint account counts only the owner's share.** Position counted every
@@ -62,11 +63,122 @@ The orchestrator names the version; this section is R3 of the commitments roadma
   month and Position sum what is owed and name each; Today asks once it is past
   its expected day; the label's year says what is reimbursed and what is owed.
   That a transfer met it is worked out on every read and never stored.
+- **The Entities page lists the rules the identified rows teach, with the two settings that
+  decide them.** A description-only row can be named by an opening one party's identified rows
+  share, but until now the owner could neither see the rules nor move the thresholds that decide
+  whether one applies. Each rule shows both counts and the rule-of-three bound with its caveat;
+  one below the confidence setting is offered unticked with its descriptions under a closed fold
+  and a Tick, one above it is applied; a line counts what the current settings decide. Not this on
+  an inferred description, through the existing entity-link-refuse press, withdraws the whole
+  rule, which is now tested end to end.
+- **Keep on an inferred description declares a "begins with" rule on the entity.** Keeping a
+  statistic as a stored description would have frozen one shape; the owner's claim is the opening,
+  so Keep now stores the opening as the entity's own rule, which names later variants on sight and
+  no longer depends on the confidence setting. The entity page lists the rule with where it came
+  from ("learned from 14 identified rows, kept by you on 2026-10-08").
 
 ### Changed
-- The card account page's statement budget moved from 130 to 131 for the one
-  select that asks whether a leg touches the account; the receivables on a
-  ledger add one more.
+- The card account page's statement budget moved from 130 to 132 and the Recurring page's by
+  one: the account page asks whether a leg touches it and what is owed back on its rows, and the
+  matcher reads every entity's name.
+
+## [0.4.384] - 2026-10-08
+
+### Added
+- **Goals: a debt to clear, a fund to build, a saving for a thing by a date -
+  under More, with their share on This month and beside Position.** Roadmap
+  item 5 (FR-RECUR-14), the owner's "credit cards etc. to repay and rainy day
+  funds to build and planned renovation activities/holidays to save for".
+  Goals live in a declared table (schema 30) kept across every rebuild and
+  counted as irreplaceable. Each shows its progress against its target
+  (cleared, held, or set aside, and what is to go), the monthly rate that
+  reaches its date, and - where it has a date - whether it is ahead of or
+  behind a straight line in whole months from the day it was declared,
+  computed in pence so that the stance never rounds the wrong way (the first
+  worked example was done in pounds and got the answer wrong by a penny's
+  rounding; the corrected figures are in the world's docstring). A goal with
+  no date or an unknown balance shows no stance and says why; goals on one
+  account are funded in the order declared; a debt whose owed balance is
+  unknown or nil is refused at declaration. This month lists "£N towards
+  <goal>" with a sentence that this is the owner's choice and not committed;
+  Position says "and £N towards goals this month, from N dated goals" beside
+  the totals and never inside committed or free. The masked GET shows names,
+  kinds, accounts, dates, and ahead or behind, and no amount. Not built: "top
+  up each month" and "keep a minimum" targets, the household funding stance,
+  goals in the exported declared files, moving a goal between accounts, debt
+  interest, an overdraft limit on a current account.
+- **A card's declared limit makes its free figure on Position.** The account
+  edit page already kept limit windows; nothing read them. The limit in force
+  today (newest start wins) less what is owed is the card's free figure, with
+  the basis "the limit you declared in force from D" - from, not on, because a
+  window carries when it took effect rather than when it was typed. No window
+  in force says "No limit declared", including a window that exists but does
+  not cover today.
+
+### Fixed
+- **The large-store cache can no longer hand one tree another tree's store.**
+  Two working trees each adding a table under the same next schema number
+  produced a cached store stamped 30 with no `goals` table, which the other
+  tree opened as current; every one of its large-store tests then failed with
+  "no such table". The cache's name now carries a digest of the store module's
+  text as well as the schema number, so a change to the store costs one
+  rebuild instead of a false failure.
+- **Two workers can no longer both build the same large store.** A worker
+  that checked for `ready`, lost the race to a builder finishing and releasing
+  its claim, and then claimed successfully built a second store into the
+  finished directory; the two then raced to remove one claim and the run ended
+  with "cannot find the file" on a green suite. The claim is re-checked against
+  `ready` once held.
+
+## [0.4.383] - 2026-10-08
+
+### Added
+- **A description-only row can be named by a rule learned from one party's
+  identified rows, as an inference with its evidence stated.** The exact and
+  truncation rungs reached only a statement description that equalled or
+  truncated a feed row's stated name; the real store's habit stayed at 0
+  because the venue's statement months match neither way. The new rung learns,
+  per source id or account, the longest opening every one of its rows'
+  descriptions shares (SUPPORT rows at least, distinctive, never method or
+  function words), tests it against every OTHER identified row in the store,
+  and names a description-only row opening so with kind `LEARNED_RULE`, below
+  truncation and above the bare description. The statistical direction is kept
+  straight on the page: the identified rows prove only that every row of the
+  party opens so; the reverse is estimated solely by the test against the
+  other identified rows, so each rule's sentence carries both counts, the
+  rule-of-three bound in words ("fewer than 1 in 770 would belong to someone
+  else"), and in the same sentence the caveat that the unidentified rows need
+  not resemble the identified ones. CONFIDENCE (how many other identified
+  rows a rule was tested against) decides only the DEFAULT - applied and
+  ticked above it, offered unticked below it with the words "unable to
+  confirm from the rows held" - because hiding a weak rule hides evidence the
+  owner could weigh. SUPPORT and CONFIDENCE are store preferences (defaults 2
+  and 300) rather than constants, since both are guesses until the real store
+  has been read at them; a tick or refusal the owner has made is never
+  re-decided by a setting. Inferred rows are counted apart from identified
+  ones ("N identified and M inferred") so a series never looks better
+  evidenced than it is. Proved on constructed worlds; on the large invented
+  store it learned nothing, because that corpus's merchants each hold three
+  branch uids whose descriptions open alike - precisely the shared opening it
+  refuses - and the real store may behave the same, so the count line after
+  deploy is the measurement. Not yet built: the settings form and the
+  offered-rule lists on the Entities page, Keep promoting a rule to a declared
+  one, the Recurring basis line, and confirmation by a later-identified row.
+
+### Changed
+- **A retailer's branches are offered as one party, and a source id per
+  merchant location is kept.** 0.4.382's reading showed 651 of 972 names by
+  source id because one bank issues a uid per merchant location; the owner's
+  decision is that this is fine - locations are entities, grouped under the
+  company - so the earlier premise ("a uid identifies a party only for
+  payees") is recorded as false and no provider changes. The SAME_ROWS
+  proposal already groups branches sharing one stated name (three uids, twelve
+  weekly rows: one proposal; a branch seen once is left out; branches stating
+  other names are not offered), and merging them turns payments that each
+  branch sees every third week - no series at all - into one weekly series of
+  twelve. The merge attaches the source ids and not the stated name, so a
+  fourth branch appearing later is a new name until gathered; "Split into
+  locations" is not yet built.
 
 ## [0.4.382] - 2026-10-08
 

@@ -32,9 +32,11 @@ from obdi.ingest.store import Store
 #: the commitments or the series.
 #: Measured 31 once the series set aside as not commitments were read as well
 #: (`Store.dismissals`, one select), again not growing with either.
-#: Measured 32 once every live entity's name was read as well (`Store.entity_names`, one select,
+#: Measured 32 once the learned rules' settings and ticks were read
+#: (`Store.preferences_with_prefix`, one select, not growing with the rules or the store).
+#: Measured 33 once every live entity's name was read as well (`Store.entity_names`, one select,
 #: for the leg matcher and the receivables, which name an entity that holds no payee name yet).
-RECURRING_STATEMENTS = 32
+RECURRING_STATEMENTS = 33
 SECONDS = 20.0
 
 

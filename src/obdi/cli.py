@@ -41,7 +41,9 @@ from .analysis.entities import (
 )
 from .analysis.external_accounts import dismissed_keys, unheld_accounts
 from .analysis.flows import FlowReading
-from .analysis.free_position import FreeFigures
+from .analysis.free_position import DeclaredLimit, FreeFigures
+from .analysis.goals import GoalsView
+from .analysis.learned_rules import rule_policy
 from .analysis.recurring import Mover, RecurringFindings, Series
 from .analysis.this_month import MonthNote, ThisMonth
 from .core.errors import DataError
@@ -3954,7 +3956,11 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             occurrences = [t for t in transactions if counts_as_occurrence(t)]
             external = store.external_identifiers()
             row_fields, links, named = name_rows(
-                occurrences, pairs, refused=refused_links(store), external=external
+                occurrences,
+                pairs,
+                refused=refused_links(store),
+                policy=rule_policy(store),
+                external=external,
             )
             held_names = {n: o.rows for n, o in name_origins(named).items()}
             held_entities = shape_entities(store, held_names)
@@ -4018,6 +4024,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             commitments = store.commitments()
             owners = store.account_owners()
             receivables = store.receivables()
+            limits = limits_in_force(store, on)
+            goals = goals_of(store, position, on)
         asks = wants_detector(position, commitments, today=on)
         # What is owed to the household needs the transactions read once more, for the matcher; a
         # household with no incoming leg and nothing declared owed pays nothing for it.
@@ -4026,7 +4034,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         )
         findings = recurring_data() if asks or owes else None
         detected = findings.series if findings is not None and asks else []
-        figures = build_free(position, commitments, detected, today=on, owners=owners)
+        figures = build_free(
+            position,
+            commitments,
+            detected,
+            today=on,
+            limits=limits,
+            owners=owners,
+            goals_share=goals.share_total if goals else None,
+            goals_sharing=goals.sharing if goals else 0,
+        )
         if findings is None or not (has_checked_legs(commitments) or receivables):
             return figures
         flows = read_flows(
@@ -4041,19 +4058,39 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             figures, owed_to_you=flows.owed, owed_to_you_total=flows.owed_total
         )
 
+    def goals_of(store: Store, position: Position, on: date) -> GoalsView | None:
+        """Where each goal stands against `position`, or None where none is declared: one select."""
+        from .analysis.goals import build_goals
+
+        declared = store.goals()
+        return build_goals(declared, position, today=on) if declared else None
+
+    def limits_in_force(store: Store, on: date) -> dict[str, DeclaredLimit]:
+        """Each account's declared limit in force on `on`: one select."""
+        from .analysis.free_position import limit_in_force
+
+        return {
+            ref: limit
+            for ref, windows in store.declared_limit_windows().items()
+            if (limit := limit_in_force(windows, on)) is not None
+        }
+
     def month_inputs_key(store: Store) -> tuple[object, ...]:
         # What the calendar reads beyond the position: the commitments, whose windows the owner
-        # edits, who owns each account, and the transactions the position's own key already
+        # edits, who owns each account, what is owed back, the declared limits a card's free
+        # figure is made from, the goals, and the transactions the position's own key already
         # follows.
         return (
             *position_memo_key(store),
             repr(store.commitments()),
             repr(store.account_owners()),
             repr(store.receivables()),
+            repr(store.declared_limit_windows()),
+            repr(store.goals()),
         )
 
     def month_inputs() -> tuple[
-        Position, list[Commitment], list[Series], FreeFigures, FlowReading
+        Position, list[Commitment], list[Series], FreeFigures, FlowReading, GoalsView | None
     ]:
         from .analysis.flows import NOTHING, has_checked_legs, read_flows
         from .analysis.free_position import build_free
@@ -4064,9 +4101,20 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             commitments = store.commitments()
             owners = store.account_owners()
             receivables = store.receivables()
+            limits = limits_in_force(store, on)
+            goals = goals_of(store, position, on)
         findings = recurring_data() if commitments or receivables else None
         found = findings.series if findings is not None else []
-        free = build_free(position, commitments, found, today=on, owners=owners)
+        free = build_free(
+            position,
+            commitments,
+            found,
+            today=on,
+            limits=limits,
+            owners=owners,
+            goals_share=goals.share_total if goals else None,
+            goals_sharing=goals.sharing if goals else 0,
+        )
         flows = NOTHING
         if findings is not None and (has_checked_legs(commitments) or receivables):
             flows = read_flows(
@@ -4077,10 +4125,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 on,
                 receivables,
             )
-        return position, commitments, found, free, flows
+        return position, commitments, found, free, flows, goals
 
     month_memo: KeyedMemo[
-        tuple[Position, list[Commitment], list[Series], FreeFigures, FlowReading]
+        tuple[Position, list[Commitment], list[Series], FreeFigures, FlowReading, GoalsView | None]
     ] = KeyedMemo(month_inputs_key, name="this month", epoch=rebuild_epoch)
 
     def this_month_data(ahead: bool) -> ThisMonth:
@@ -4090,7 +4138,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         from .analysis.this_month import build_this_month
 
         with Store(db_path) as store:
-            position, commitments, found, free, flows = month_memo.get(store, month_inputs)
+            position, commitments, found, free, flows, goals = month_memo.get(
+                store, month_inputs
+            )
         return build_this_month(
             position,
             commitments,
@@ -4099,6 +4149,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             today=date.fromisoformat(position.as_of),
             ahead=ahead,
             flows=flows,
+            goals=goals,
         )
 
     def this_month_note() -> MonthNote | None:
@@ -4129,6 +4180,25 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             rows = store.all_transactions() if action == ACT_DECLARE else []
             return apply_press(store, action, form, rows)
+
+    def goals_data() -> GoalsView:
+        """Where each goal stands against the held position, for the Goals page."""
+        from .analysis.goals import build_goals
+
+        position = home_position()
+        with Store(db_path) as store:
+            declared = store.goals()
+        return build_goals(declared, position, today=date.fromisoformat(position.as_of))
+
+    def goals_act(action: str, form: dict[str, list[str]]) -> str:
+        """One press on the Goals page. A refusal is a `GoalRefused`, with nothing changed."""
+        from .analysis.goals import apply_press
+
+        position = home_position()
+        with Store(db_path) as store:
+            return apply_press(
+                store, position, action, form, today=date.fromisoformat(position.as_of)
+            )
 
     def recurring_act(action: str, form: dict[str, list[str]]) -> str:
         """One press on the Recurring page: the series it names is found again from the
@@ -4175,7 +4245,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         _fields, _links, named = name_rows(
             rows,
             store.confirmed_transfer_pairs(),
-            refused=refused_links(store),
+            refused=refused_links(store), policy=rule_policy(store),
             external=store.external_identifiers(),
         )
         return name_origins(named, [t.source for t in rows])
@@ -4189,7 +4259,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         _fields, links, _named = name_rows(
             rows,
             store.confirmed_transfer_pairs(),
-            refused=refused_links(store),
+            refused=refused_links(store), policy=rule_policy(store),
             external=store.external_identifiers(),
         )
         return links
@@ -4213,6 +4283,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             via=item.via,
             support=item.support,
             linked_by=item.linked_by,
+            tested=item.tested,
         )
 
     def entities_data() -> EntitiesView:
@@ -4222,6 +4293,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             COVERED_SHOWN,
             entities_of,
             name_readings,
+            rule_views,
             view_of,
         )
         from .analysis.entity_ties import row_ties
@@ -4230,12 +4302,16 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
             names = account_names(store)
-            fields, _links, named = name_rows(
+            refusals = refused_links(store)
+            policy = rule_policy(store)
+            fields, links, named = name_rows(
                 rows,
                 store.confirmed_transfer_pairs(),
-                refused=refused_links(store),
+                refused=refusals,
+                policy=policy,
                 external=store.external_identifiers(),
             )
+            rule_lines, learning = rule_views(fields, links, policy, refusals)
             listed: dict[str, list[Covered]] = {}
             order = sorted(
                 range(len(rows)),
@@ -4260,6 +4336,9 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 row_ties(fields, named),
                 unheld,
                 declined,
+                rule_lines,
+                learning.shared,
+                policy.settings,
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
@@ -4269,19 +4348,31 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             KEEP_LINK,
             MERGE,
             REFUSE_LINK,
+            RULE_ACTIONS,
             SPLIT,
             apply_action,
             apply_external_action,
+            apply_rule_action,
         )
         from .analysis.recurring import counts_as_occurrence
 
         with Store(db_path) as store:
+            if action in RULE_ACTIONS:
+                rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+                fields, _links, _named = name_rows(
+                    rows,
+                    store.confirmed_transfer_pairs(),
+                    refused=refused_links(store),
+                    policy=rule_policy(store),
+                    external=store.external_identifiers(),
+                )
+                return apply_rule_action(store, fields, action, form)
             if action in EXTERNAL_ACTIONS:
                 rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
                 _fields, _links, named = name_rows(
                     rows,
                     store.confirmed_transfer_pairs(),
-                    refused=refused_links(store),
+                    refused=refused_links(store), policy=rule_policy(store),
                     external=store.external_identifiers(),
                 )
                 return apply_external_action(store, rows, named, action, form)
@@ -4298,10 +4389,12 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+            policy = rule_policy(store)
             fields, links, named = name_rows(
                 rows,
                 store.confirmed_transfer_pairs(),
                 refused=refused_links(store),
+                policy=policy,
                 external=store.external_identifiers(),
             )
             origins = name_origins(named, [t.source for t in rows])
@@ -4334,6 +4427,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 origins,
                 display_names(fields, named, _held_labels(store, rows, named, names)),
                 links,
+                policy.origins,
             )
 
     def entity_trial(entity_id: int, kind: str, words: str) -> RuleTrial:
@@ -5118,6 +5212,8 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         ),
         recurring_data=recurring_data,
         recurring_act=recurring_act,
+        goals_data=goals_data,
+        goals_act=goals_act,
         entities_data=entities_data,
         entities_act=entities_act,
         entity_page=entity_page,

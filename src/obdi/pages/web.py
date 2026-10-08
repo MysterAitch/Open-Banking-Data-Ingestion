@@ -46,6 +46,7 @@ from ..analysis import entity_actions
 from ..analysis.commitments import ACT_CONFIRM, ACT_DISMISS, ACT_PRICE, ACT_RESTORE
 from ..analysis.entities import EntitiesView, EntityPage, RuleTrial
 from ..analysis.free_position import FreeFigures
+from ..analysis.goals import ACT_ADD, ACT_EDIT, ACT_REMOVE, GoalsView
 from ..analysis.recurring import RecurringFindings
 from ..analysis.this_month import MonthNote, ThisMonth
 from ..core.classification import redact_summary
@@ -138,6 +139,7 @@ from .web_empty import (
 )
 from .web_entity import EntityPages
 from .web_flags import FlagPages
+from .web_goals import GoalPages
 from .web_ledger import LedgerPages
 from .web_marker import marker_result_row
 from .web_overview import overview_html
@@ -651,6 +653,12 @@ class WebConfig:
     #: One press on the Recurring page: (the action, the form it sent) to the sentence that says
     #: what was done. A refusal is a `CommitmentRefused`.
     recurring_act: Callable[[str, dict[str, list[str]]], str] | None = None
+    #: Where each goal stands against the held position (`analysis.goals`): the Goals page's one
+    #: read.
+    goals_data: Callable[[], GoalsView] | None = None
+    #: One press on the Goals page: (the action, the form it sent) to the sentence that says what
+    #: was done. A refusal is a `GoalRefused`.
+    goals_act: Callable[[str, dict[str, list[str]]], str] | None = None
     #: Every counterparty name held with its transactions, and the entities made from them, with
     #: what the rules propose from the names under none: the Entities page's one read.
     entities_data: Callable[[], EntitiesView] | None = None
@@ -3657,6 +3665,7 @@ class ConnectionHandler(
     CoverageTimelinePages,
     PositionPages,
     ThisMonthPages,
+    GoalPages,
     RecurringPages,
     EntityPages,
     DestinationPages,
@@ -3776,6 +3785,8 @@ class ConnectionHandler(
             self._flags_post()
         elif route == "/recurring":
             self._recurring_post()
+        elif route == "/goals":
+            self._goals_post()
         elif route == "/entities":
             self._entities_page(unmasked=True)
         elif route == "/entity":
@@ -3940,6 +3951,9 @@ class ConnectionHandler(
             return
         if route == "/recurring":
             self._recurring_get()
+            return
+        if route == "/goals":
+            self._goals_get()
             return
         if route == "/entities":
             self._entities_get()
@@ -6463,6 +6477,18 @@ class ConnectionHandler(
         if route == "/recurring":
             self._recurring_post()
             return
+        if route == "/goals":
+            self._goals_post()
+            return
+        if route == "/goals-add":
+            self._goals_press_post(ACT_ADD)
+            return
+        if route == "/goals-edit":
+            self._goals_press_post(ACT_EDIT)
+            return
+        if route == "/goals-remove":
+            self._goals_press_post(ACT_REMOVE)
+            return
         if route == "/recurring-confirm":
             self._recurring_press_post(ACT_CONFIRM)
             return
@@ -6501,6 +6527,12 @@ class ConnectionHandler(
             return
         if route == "/entities-not-external":
             self._entities_press_post(entity_actions.NOT_EXTERNAL)
+            return
+        if route == "/entities-rule-settings":
+            self._entities_press_post(entity_actions.RULE_SETTINGS)
+            return
+        if route == "/entities-rule-tick":
+            self._entities_press_post(entity_actions.RULE_TICK)
             return
         if route == "/entities-offer-again":
             self._entities_press_post(entity_actions.OFFER_AGAIN)

@@ -328,9 +328,11 @@ class _Item:
 def _party_fields(name: str, minor: int, transfer_with: str = "") -> dict[str, object]:
     """What the bank's feed states about the other party, in the shape the real API uses.
 
-    The merchant's uid is the merchant's, not the payment's: every payment to one merchant
-    states one uid. (This builder once hashed the whole payment name, which gave a merchant a
-    new uid for each payment and so measured a bank that does not exist.) A payment IN is a bank
+    The merchant's uid is the LOCATION's, not the payment's: every payment at one branch states
+    one uid and a retailer has three branches. (This builder once hashed the whole payment name,
+    which gave a merchant a new uid for each payment and so measured a bank that does not exist;
+    it then stated one uid per merchant, which measured a bank that does not exist either, and
+    hid the split of a retailer into a name per branch.) A payment IN is a bank
     transfer: its party is a payee with a sort code and an account number, as a transfer states
     them, and the uid; a card payment states the uid and no account. All invented.
     """
@@ -341,11 +343,16 @@ def _party_fields(name: str, minor: int, transfer_with: str = "") -> dict[str, o
             "counterPartyName": "Space",
             "counterPartySubEntityUid": "sub-1",
         }
-    merchant = name.rsplit(" ", 1)[0]
+    merchant, number = name.rsplit(" ", 1)
     digest = zlib.crc32(merchant.encode())
+    # A card acceptor is identified per LOCATION: one retailer states a uid for each of its
+    # branches (three here, picked by the payment's number), while a payee's uid is the payee's.
+    uid = f"merchant-{digest:08x}"
+    if minor <= 0:
+        uid += f"-branch{int(number) % 3}"
     fields: dict[str, object] = {
         "counterPartyType": "PAYEE" if minor > 0 else "MERCHANT",
-        "counterPartyUid": f"merchant-{digest:08x}",
+        "counterPartyUid": uid,
         "counterPartyName": merchant,
         "counterPartySubEntityUid": "sub-1",
     }
@@ -806,15 +813,24 @@ def cached_large_store(*, waited: float = 1500.0, faithful: bool = False) -> Lar
     """The large store, built once per machine and shared by every test process that asks.
 
     Building takes minutes, and a suite runs across processes, so the first to ask builds into
-    a directory named for the builder's own text, the schema, and the form, and the others wait
-    for its `ready` file. Read-only: a test that writes takes a copy (`copy_of`).
+    a directory named for the builder's own text, the store module's text, the schema number,
+    and the form, and the others wait for its `ready` file. Read-only: a test that writes takes
+    a copy (`copy_of`).
+
+    The store module's text is in the name because the schema number alone is not the schema:
+    two working trees each adding a table under the same next number produced a cached store
+    stamped 30 with no `goals` table, which the other tree opened as current and every one of
+    its large-store tests then failed with "no such table". A change to the store module costs
+    one rebuild; a store that lies about its tables cost an afternoon.
     """
     import hashlib
     import time
 
+    from obdi.ingest import store as store_module
     from obdi.ingest.store import SCHEMA_VERSION
 
-    digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
+    text = Path(__file__).read_bytes() + Path(store_module.__file__).read_bytes()
+    digest = hashlib.sha256(text).hexdigest()[:12]
     form = "-faithful" if faithful else ""
     root = Path(tempfile.gettempdir()) / f"obdi-large-store-{digest}-s{SCHEMA_VERSION}{form}"
     ready = root / "ready"
@@ -843,6 +859,13 @@ def cached_large_store(*, waited: float = 1500.0, faithful: bool = False) -> Lar
                     f"{ready} did not appear: remove {claim} if its builder died"
                 ) from None
             time.sleep(2)
+        return held()
+    # The claim is held: look for `ready` once more, because the builder may have finished and
+    # released its claim between the check above and the mkdir. A worker that skipped this
+    # built a second store into the finished directory, and the two builders then raced to
+    # remove the same claim - one found it gone and the run ended with "cannot find the file".
+    if ready.exists():
+        claim.rmdir()
         return held()
     try:
         built = build_large_store(root, faithful=faithful)

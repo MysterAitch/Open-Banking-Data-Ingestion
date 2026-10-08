@@ -1,8 +1,8 @@
--- The `commitments` tables as they SHIPPED at 0.4.382 (schema version 29): a commitment with its
--- dated windows and the series the owner set aside, and no ownership of accounts, legs, or
--- receivables yet.
+-- The `commitments` tables as they stood at schema version 30 (goals declared there, not repeated
+-- here): a commitment with its dated windows and the series the owner set aside, and no ownership
+-- of accounts, legs, or receivables yet.
 --
--- THIS IS THE SHAPE THE OWNERSHIP, LEGS, AND RECEIVABLES WORK ACTS ON: a store stamped 29 has none
+-- THIS IS THE SHAPE THE OWNERSHIP, LEGS, AND RECEIVABLES WORK ACTS ON: a store stamped 30 has none
 -- of `account_owners`, `commitment_legs`, or `receivables`, which current code makes on open
 -- (`CREATE TABLE IF NOT EXISTS`, so there is no column migration). The commitment kept here must
 -- survive that open with no leg, and read back as a commitment whose money moves in one step.
@@ -65,4 +65,4 @@ CREATE TABLE IF NOT EXISTS obdi_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT INTO obdi_meta (key, value) VALUES ('schema_version', '29');
+INSERT INTO obdi_meta (key, value) VALUES ('schema_version', '30');

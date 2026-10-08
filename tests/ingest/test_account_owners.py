@@ -4,7 +4,7 @@ upgrade.
 KNOWN ANSWERS, decided before the first run: an account with nothing declared has no owners
 listed (the owner's alone); declaring a half share lists two owners with the larger first; declaring
 again replaces them and keeps the old rows as history; clearing returns the account to the default;
-a rebuild from raw leaves the declaration; a store made by the release before this one (schema 29)
+a rebuild from raw leaves the declaration; a store made by the release before this one (schema 30)
 opens, gains the table, and keeps its commitment. Every name is invented.
 """
 
@@ -19,7 +19,7 @@ from landing import rebuild_from_raw
 from obdi.ingest.ownership_records import OwnershipRefused
 from obdi.ingest.store import SCHEMA_VERSION, Store
 
-SNAPSHOT = pathlib.Path(__file__).resolve().parent.parent / "schema_history" / "25-ownership.sql"
+SNAPSHOT = pathlib.Path(__file__).resolve().parent.parent / "schema_history" / "26-ownership.sql"
 
 
 @pytest.fixture
@@ -113,7 +113,7 @@ class TestOwnershipInTheStore:
 
 
 class TestAStoreFromTheReleaseBeforeThisOne:
-    def test_Store_WhenStampedSchema29_OpensGainsTheTableAndKeepsItsCommitment(self, tmp_path):
+    def test_Store_WhenStampedSchema30_OpensGainsTheTableAndKeepsItsCommitment(self, tmp_path):
         path = tmp_path / "old.sqlite3"
         legacy = sqlite3.connect(path)
         legacy.executescript(SNAPSHOT.read_text(encoding="utf-8"))

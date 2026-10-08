@@ -8,13 +8,23 @@ page shows (`EntityRefused`).
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from ..core.models import Transaction
 from ..core.plural import plural
-from ..ingest.entity_records import DECLARED, DESCRIPTION, Entity, EntityRefused, Identifier
+from ..ingest.entity_records import (
+    BEGINS,
+    DECLARED,
+    DESCRIPTION,
+    Entity,
+    EntityRefused,
+    Identifier,
+)
 from .entities import (
+    LEARNED_RULE,
     Alias,
+    Fields,
     LearnedLine,
     Named,
     NameOrigin,
@@ -25,10 +35,12 @@ from .entities import (
     holder_of,
     identifier_for,
     learned_lines,
+    learned_rules,
     resolve_form_value,
     rule_phrase,
 )
 from .external_accounts import declare_external, dismiss, offer_again
+from .learned_rules import keep_rule, record_origin, rule_policy, set_settings
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from ..ingest.store import Store
@@ -52,6 +64,11 @@ DECLARE_EXTERNAL = "declare-external"
 NOT_EXTERNAL = "not-external"
 OFFER_AGAIN = "offer-again"
 EXTERNAL_ACTIONS = (DECLARE_EXTERNAL, NOT_EXTERNAL, OFFER_AGAIN)
+#: The presses about the learned rules (`learned_rules`): the two settings, and ticking an offered
+#: rule. They read the rows the rules are learned from, as the external presses do.
+RULE_SETTINGS = "rule-settings"
+RULE_TICK = "rule-tick"
+RULE_ACTIONS = (RULE_SETTINGS, RULE_TICK)
 ACTIONS = (
     MERGE,
     SPLIT,
@@ -65,6 +82,7 @@ ACTIONS = (
     KEEP_LINK,
     REFUSE_LINK,
     *EXTERNAL_ACTIONS,
+    *RULE_ACTIONS,
 )
 
 
@@ -83,6 +101,38 @@ def apply_external_action(
         return dismiss(store, rows, named, form)
     if action == OFFER_AGAIN:
         return offer_again(store)
+    raise EntityRefused("That press is not one this page makes.")
+
+
+def apply_rule_action(
+    store: Store,
+    fields: Sequence[Fields],
+    action: str,
+    form: Mapping[str, Sequence[str]],
+) -> str:
+    """Do what a press about the learned rules asked and say what was done. `fields` are the
+    rows the rules are learned from; a tick names a rule by its key and is refused if the rows
+    no longer teach it."""
+    if action == RULE_SETTINGS:
+        try:
+            support, confidence = int(_one(form, "support")), int(_one(form, "confidence"))
+            set_settings(store, support, confidence)
+        except ValueError:
+            raise EntityRefused(
+                "Support is two rows or more and confidence is one row or more, as whole numbers."
+            ) from None
+        return (
+            f"Set: a rule needs {support:,} rows to be learned and {confidence:,} other "
+            "identified rows tested to be applied by default."
+        )
+    if action == RULE_TICK:
+        learning, _states = learned_rules(fields, rule_policy(store))
+        wanted = _one(form, "rule")
+        found = next((r for r in learning.rules if r.key == wanted), None)
+        if found is None:
+            raise EntityRefused("The rows no longer teach that rule; reload the page.")
+        keep_rule(store, found)
+        return "Ticked: that rule is applied whatever the confidence setting is."
     raise EntityRefused("That press is not one this page makes.")
 
 
@@ -218,17 +268,37 @@ def apply_action(
     if action in (KEEP_LINK, REFUSE_LINK):
         pressed, line = _learned_line(store, links or {}, form)
         if action == REFUSE_LINK:
-            if line.kept:
-                raise EntityRefused("That description is kept; split it apart first.")
+            if line.kept or line.declared:
+                raise EntityRefused(
+                    "That description is kept; split it apart first, or remove its rule."
+                )
             store.exclude_shape(pressed.id, line.shape)
             return f"Not this: that description is named by itself, apart from {pressed.name}."
-        if line.kept:
+        if line.kept or line.declared:
             raise EntityRefused("That description is already kept.")
+        if line.by == LEARNED_RULE:
+            return _keep_learned_rule(store, pressed, links or {}, line)
         store.attach_shapes(
             pressed.id, [Identifier(DESCRIPTION, line.shape, "", DECLARED, line.rows)]
         )
         return f"Kept that description for {pressed.name}; it no longer depends on the link."
     raise EntityRefused("That press is not one this page makes.")
+
+
+def _keep_learned_rule(
+    store: Store, entity: Entity, links: Mapping[str, Alias], line: LearnedLine
+) -> str:
+    """Keep on an inferred description promotes the rule it came from to a declared "begins with"
+    rule of the entity: from then on it is the owner's claim and no longer a statistic, and its
+    provenance (the rows that taught it, the day it was kept) is remembered beside it."""
+    opening = links[line.shape].opening
+    kind, words = clean_rule(BEGINS, opening)
+    rule_id = store.add_entity_rule(entity.id, kind, words)
+    record_origin(store, rule_id, line.rows, datetime.now(UTC).date().isoformat())
+    return (
+        f"Kept a rule: {rule_phrase(kind, words)} will join {entity.name}, "
+        f"learned from {plural(line.rows, 'identified row')}."
+    )
 
 
 def _learned_line(
@@ -242,7 +312,12 @@ def _learned_line(
     )
     if entity is None:
         raise EntityRefused("There is no such entity; it may have been removed.")
-    line = next((found for found in learned_lines(entity, links) if found.shape == shape), None)
+    declared = {
+        rule.words for rule in store.entity_rules() if rule.entity_id == entity.id
+    }
+    line = next(
+        (found for found in learned_lines(entity, links, declared) if found.shape == shape), None
+    )
     if line is None:
         raise EntityRefused(
             "The rows no longer teach that description for this entity; reload the page."

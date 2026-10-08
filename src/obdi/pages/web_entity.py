@@ -152,7 +152,9 @@ def _learned_block(lines: Iterable[LearnedLine], page: EntityPage) -> str:
     link is not so. A line already kept offers to split it apart again."""
     items = []
     for line in lines:
-        if line.kept:
+        if line.declared:
+            presses = ""
+        elif line.kept:
             presses = split_form(
                 line.shape, page.entity, page.view, SPLIT_ROUTE,
                 extra=_hidden(page.entity.id), kind=DESCRIPTION,
@@ -267,9 +269,10 @@ def _rule_line(line: RuleLine, *, unmasked: bool) -> str:
             f'<input type="hidden" name="rule" value="{rule.id}">{_hidden(rule.entity_id)}'
             '<button class="tap" type="submit">Remove</button></form>'
         )
+    origin = f'<span class="muted">{_esc(line.origin)}</span>' if line.origin else ""
     return (
         f'<li><span class="txt">{label} {words}</span>'
-        f'<span class="ent-count">{matched}</span>{drop}</li>'
+        f'<span class="ent-count">{matched}</span>{origin}{drop}</li>'
     )
 
 

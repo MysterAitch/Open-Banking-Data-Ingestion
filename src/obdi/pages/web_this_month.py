@@ -19,7 +19,8 @@ repeat it.
 
 THE LEGS OF A FLOW (`analysis.flows`) add three sections that are silent when all is well: spaces
 that do not yet hold what the month asks, legs that did not happen, and money owed to the
-household. GOALS DO NOT EXIST YET: `_goals_section` is their place, empty until the records exist.
+household. GOALS (`analysis.goals`) are shown as what each dated goal's line asks of this month,
+apart from the calendar and from what is committed.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from ..analysis.flows import MISSING, label_sentence, missing_sentence
+from ..analysis.goals import AHEAD as GOAL_AHEAD
 from ..analysis.this_month import ENDED, IN, NOT_TAKEN, OVERDUE, PAID, ThisMonth
 from ..core.errors import DataError
 from ..core.logs import say
@@ -332,8 +334,33 @@ def _receivables_section(view: Any, *, unmasked: bool) -> str:
 
 
 def _goals_section(view: Any) -> str:
-    """What each goal sets aside this month: empty until goals exist."""
-    return ""
+    """What each dated goal's line asks of this month, with where it stands. Empty where no goal
+    has a share: none declared, or none dated, or each reached or past its date. The month ahead
+    carries no goals, since a share is this month's figure."""
+    goals = view.goals
+    if goals is None:
+        return ""
+    items = []
+    for goal in goals.goals:
+        if not goal.share:
+            continue
+        pill = ""
+        if goal.stance:
+            css = "pill pill-ok" if goal.stance == GOAL_AHEAD else "pill"
+            pill = f' <span class="{css}">{_esc(goal.stance)}</span>'
+        items.append(
+            f"<li>{_figure('', goal.share)} towards {_esc(goal.name)}{pill} "
+            f'<span class="muted">({_name_of(goal.account, goal.account_label)})</span></li>'
+        )
+    if not items:
+        return ""
+    return (
+        "<h2>Towards goals</h2>"
+        '<p class="muted">Your choice and not an obligation: these are not counted in what is '
+        "committed or in whether an account is funded. See "
+        '<a href="/goals">Goals</a>.</p>'
+        f'<ul class="keylist">{"".join(items)}</ul>'
+    )
 
 
 _NOTE = (
@@ -346,8 +373,10 @@ _NOTE = (
     "<li>A commitment with no usual day cannot be placed, so it is not on the calendar; "
     '<a href="/position">Position</a> counts them.</li>'
     "<li>Money owed to you is listed once its day has come, and stays until a payment from the "
-    "person who owes it is found. Goals are not recorded yet: when they are, each goal&#39;s "
-    "monthly set-aside will join the calendar as a day of its own.</li>"
+    "person who owes it is found.</li>"
+    '<li>A goal with a date shows what its straight line asks of this month and whether it is '
+    'ahead or behind; it is kept on <a href="/goals">Goals</a>, and is not a day of the '
+    "calendar or part of what is committed.</li>"
     "</ul></details>"
 )
 
