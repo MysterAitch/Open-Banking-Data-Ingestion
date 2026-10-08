@@ -40,6 +40,7 @@ from ..analysis.entities import (
     EntitiesView,
     Proposal,
     Suggestion,
+    UnheldAccount,
     derivation_of,
     form_value,
     held_kind,
@@ -48,6 +49,7 @@ from ..analysis.entities import (
     tie_sentence,
 )
 from ..analysis.entity_tokens import COMPARISON_SENTENCE, DROPPED, IGNORED_TRAILING
+from ..analysis.external_accounts import LABEL_LENGTH
 from ..analysis.payment_methods import METHODS
 from ..core.logs import say
 from ..core.masking import mask_text
@@ -71,12 +73,20 @@ RENAME_ROUTE = "/entities-rename"
 FOLD_ROUTE = "/entities-fold"
 CHILD_ROUTE = "/entities-child"
 NEW_ROUTE = "/entities-new"
+EXTERNAL_ROUTE = "/entities-external"
+NOT_EXTERNAL_ROUTE = "/entities-not-external"
+OFFER_AGAIN_ROUTE = "/entities-offer-again"
 #: Where one entity's page is (`web_entity`); the name of each entity here links to it.
 ENTITY_ROUTE = "/entity"
 
 #: How many proposed groups lead the page; the rest are behind one fold, so thirty names stay
 #: within three phone screens (`test_entities_phone_layout`).
 GROUPS_SHOWN = 4
+
+#: How many accounts payments go to that no held account owns lead the page; the rest are behind
+#: one fold. Every account paid by bank transfer is in that list, the owner's own among them, so
+#: on a household with many payees it is long, and the most-paid come first.
+UNHELD_SHOWN = 6
 
 #: The longest an entity's name may be typed.
 NAME_LENGTH = 120
@@ -542,6 +552,63 @@ def _child_form(entity: Entity, view: EntitiesView, *, nested: bool) -> str:
     )
 
 
+def _unheld_account(account: UnheldAccount, *, unmasked: bool) -> str:
+    """One account payments state that nothing owns: how many, and the last characters of its
+    number, said on the masked page as well as the shown one. The number itself is on neither: a
+    press carries `UnheldAccount.key`, and the number is read back from the transactions."""
+    said = (
+        f"{plural(account.payments, 'payment')} to the account ending "
+        f"{_esc(account.ending)}"
+    )
+    if not unmasked:
+        return f'<li class="ent-unheld">{said}</li>'
+    key = f'<input type="hidden" name="account" value="{_esc(account.key)}">'
+    return (
+        f'<li class="ent-unheld">{said}'
+        '<details class="ent-fold"><summary>This account is mine</summary>'
+        f'<form method="post" action="{EXTERNAL_ROUTE}">{key}'
+        '<div class="ent-name-field"><label><span>Call it</span>'
+        f'<input name="label" maxlength="{LABEL_LENGTH}" required></label>'
+        '<button class="tap" type="submit">Declare it</button></div></form></details>'
+        f'<form method="post" action="{NOT_EXTERNAL_ROUTE}">{key}'
+        '<button class="tap" type="submit">Not mine</button></form></li>'
+    )
+
+
+def _unheld(view: EntitiesView, *, unmasked: bool) -> str:
+    """The payments to accounts obdi holds nothing for, with the press that declares one the
+    owner's (`external_accounts`). Empty where there are none and none were declined."""
+    if not view.unheld and not view.declined:
+        return ""
+    first, rest = view.unheld[:UNHELD_SHOWN], view.unheld[UNHELD_SHOWN:]
+    listing = ""
+    if first:
+        items = "".join(_unheld_account(a, unmasked=unmasked) for a in first)
+        listing = f'<ul class="ent-names">{items}</ul>'
+    if rest:
+        more = "".join(_unheld_account(a, unmasked=unmasked) for a in rest)
+        listing += (
+            '<details class="ent-more ent-unheld-more">'
+            f'<summary>{plural(len(rest), "more account")}</summary>'
+            f'<ul class="ent-names">{more}</ul></details>'
+        )
+    declined = ""
+    if view.declined:
+        count = plural(view.declined, "account")
+        declined = f'<p class="ent-why">{count} you said are not yours.</p>'
+        if unmasked:
+            declined += (
+                f'<form method="post" action="{OFFER_AGAIN_ROUTE}">'
+                '<button class="tap" type="submit">Offer them again</button></form>'
+            )
+    return (
+        "<h2>Payments to accounts not held here</h2>"
+        '<p class="ent-why">These payments state an account number that none of the accounts held '
+        "here has. Where it is your own account at another bank, or a pot not fed to this page, "
+        "say so and its payments are shown as transfers to it.</p>" + listing + declined
+    )
+
+
 def _entities(view: EntitiesView, *, unmasked: bool) -> str:
     if not view.entities:
         return ""
@@ -615,6 +682,7 @@ def render_entities(
         lead
         + values_mode(ROUTE, unmasked=unmasked)
         + f'<p class="ent-summary">{_esc(summary_line(view))}</p>'
+        + _unheld(view, unmasked=unmasked)
         + _groups(view, unmasked=unmasked)
         + _too_broad(view, unmasked=unmasked)
         + _entities(view, unmasked=unmasked)

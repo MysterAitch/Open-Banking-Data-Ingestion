@@ -1979,6 +1979,17 @@ class Store:
             )
         }
 
+    def external_labels(self) -> dict[str, str]:
+        """Each external account's canonical name to the label it is shown under, in one
+        statement: what a page that names a row "your <label>" reads (`external_accounts`
+        reads the whole record, with its windows, in three)."""
+        return {
+            str(row["ref"]): str(row["label"])
+            for row in self.connection.execute(
+                "SELECT ref, label FROM declared_accounts WHERE external = 1 ORDER BY ref"
+            )
+        }
+
     def _registry(self, *, external: bool) -> list[AccountRecord]:
         limits: dict[AccountId, list[LimitWindow]] = {}
         for row in self.connection.execute(
@@ -4702,6 +4713,23 @@ class Store:
             "SELECT value FROM preferences WHERE name = ?", (name,)
         ).fetchone()
         return None if row is None else str(row[0])
+
+    def preference_names(self, prefix: str) -> set[str]:
+        """The names the owner has set a preference for that begin with `prefix`, in one
+        statement: for a preference kept per thing (a dismissed offer), where the page asks which
+        things have one."""
+        return {
+            str(row[0])
+            for row in self.connection.execute(
+                "SELECT name FROM preferences WHERE substr(name, 1, ?) = ?",
+                (len(prefix), prefix),
+            )
+        }
+
+    def forget_preference(self, name: str) -> None:
+        """Remove the owner's choice for `name`, and commit; nothing is said if there was none."""
+        self.connection.execute("DELETE FROM preferences WHERE name = ?", (name,))
+        self.connection.commit()
 
     def set_preference(self, name: str, value: str, *, now: datetime | None = None) -> None:
         """Keep `value` as the owner's choice for `name`, and commit. Whether it is a value

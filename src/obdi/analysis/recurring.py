@@ -63,7 +63,7 @@ from __future__ import annotations
 import calendar
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from itertools import pairwise
 from statistics import median_low
@@ -175,7 +175,8 @@ class Series:
     #: Occurrences paid from some other account: the series did not stop or start again, it was
     #: paid from elsewhere that time. Nonzero is the "account changed" mark.
     off_account: int
-    #: Where a transfer's money went; empty for anything else, and for a transfer seen as one leg.
+    #: Where a transfer's money went; empty for anything else, and for a transfer seen as one leg
+    #: whose other side is no account (`held_account` is the account of a leg that states one).
     other_account: str
     #: The normalised payee the occurrences share; empty for a transfer found by its legs.
     shape: str
@@ -257,6 +258,9 @@ class RecurringFindings:
 
     series: list[Series]
     today: date
+    #: The label of each account declared external, by its canonical name, for the transfers to
+    #: accounts no held account stands for (`Series.other_account`, `Series.held_account`).
+    external_labels: Mapping[str, str] = field(default_factory=dict)
 
 
 def _month_index(day: date) -> int:
@@ -650,6 +654,7 @@ def find_recurring(
     closings: Closings | None = None,
     entities: Mapping[tuple[str, str], str] | None = None,
     links: Mapping[str, Alias] | None = None,
+    external: Mapping[str, str] | None = None,
 ) -> list[Series]:
     """Every series the transactions hold, by account and then by what they are called.
 
@@ -660,7 +665,9 @@ def find_recurring(
     named by an identifier is shown by the readable name of its rows (`display_names`); one whose
     payee is a household account carries that account (`Series.held_account`) for the page to
     label.
-    `pairs` is the pairing pass's (leaving entity, arriving entity) for each proved transfer.
+    `pairs` is the pairing pass's (leaving entity, arriving entity) for each proved transfer, and
+    `external` the identifier of each account the owner declared theirs that obdi holds no source
+    for (`entities.held_counterparts`).
     `entities` maps an identifier (its kind and value, `entities.shape_entities`) to the name of
     the entity the owner gathered it under; a row finds its entity by the identifier its name
     and kind link through (`entities.entity_of`). The names of one entity are one payee here,
@@ -674,7 +681,7 @@ def find_recurring(
     """
     rows = [row for row in transactions if counts_as_occurrence(row)]
     pairs = list(pairs)
-    fields, links, named = name_rows(rows, pairs, links)
+    fields, links, named = name_rows(rows, pairs, links, external=external)
     labels = display_names(fields, named)
     by_entity = {row.entity_id: row for row in rows}
     arriving: dict[str, Transaction] = {}
@@ -718,7 +725,11 @@ def find_recurring(
             shapes[payee] = labels.get(shape, shape)
             if shape.startswith(HELD_PREFIX):
                 held_of[payee] = shape[len(HELD_PREFIX) :]
-        groups[payee].append(_Leg(row, ""))
+        # A leg to an account the household owns that no confirmed pair joined is still a
+        # transfer to it: `other` is what makes the series one (`_is_transfer`), not income or a
+        # payee, and a transfer to an account declared external (`held_counterparts`) has no
+        # opposite leg to pair with at all.
+        groups[payee].append(_Leg(row, held_of.get(payee, "")))
 
     found: list[Series] = []
     for key, legs in groups.items():

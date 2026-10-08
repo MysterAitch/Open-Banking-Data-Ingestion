@@ -38,6 +38,7 @@ from .analysis.entities import (
     name_rows,
     refused_links,
 )
+from .analysis.external_accounts import dismissed_keys, unheld_accounts
 from .analysis.recurring import RecurringFindings
 from .core.errors import DataError
 from .core.money import parse_amount
@@ -3912,20 +3913,30 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             from .analysis.recurring import counts_as_occurrence
 
             occurrences = [t for t in transactions if counts_as_occurrence(t)]
-            _fields, links, named = name_rows(occurrences, pairs, refused=refused_links(store))
+            external = store.external_identifiers()
+            _fields, links, named = name_rows(
+                occurrences, pairs, refused=refused_links(store), external=external
+            )
             held_names = {n: o.rows for n, o in name_origins(named).items()}
             gathered = {
                 key: name for key, (_id, name) in shape_entities(store, held_names).items()
             }
+            external_labels = store.external_labels() if external else {}
         closings: dict[str, list[tuple[date, int]]] = {}
         for closing in held:
             owed = (closing.day, closing.balance_minor)
             closings.setdefault(closing.account_ref, []).append(owed)
         today = local_day(datetime.now(UTC))
         found = find_recurring(
-            transactions, pairs, today, closings, entities=gathered, links=links
+            transactions,
+            pairs,
+            today,
+            closings,
+            entities=gathered,
+            links=links,
+            external=external,
         )
-        return RecurringFindings(found, today)
+        return RecurringFindings(found, today, external_labels)
 
     def _held_labels(
         store: Store,
@@ -3939,12 +3950,20 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         wanted = {item.name for item in named if item.name.startswith(HELD_PREFIX)}
         if not wanted:
             return {}
-        shown = names if names is not None else account_names(store)
-        return {
-            ref: shown.of(ref).label
-            for ref in {t.account_id for t in rows}
-            if HELD_PREFIX + ref in wanted
-        }
+        accounts = {t.account_id for t in rows if HELD_PREFIX + t.account_id in wanted}
+        labels: dict[str, str] = {}
+        if accounts:
+            shown = names if names is not None else account_names(store)
+            labels = {ref: shown.of(ref).label for ref in accounts}
+        if len(accounts) < len(wanted):
+            # What is left is a transfer to an account declared external, which no row of its own
+            # is filed under and which `account_names` does not list.
+            labels |= {
+                ref: label
+                for ref, label in store.external_labels().items()
+                if HELD_PREFIX + ref in wanted
+            }
+        return labels
 
     def _held_origins(store: Store) -> dict[str, NameOrigin]:
         """How each name the store holds came to have it, with the source of a stated one."""
@@ -3952,7 +3971,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
         rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
         _fields, _links, named = name_rows(
-            rows, store.confirmed_transfer_pairs(), refused=refused_links(store)
+            rows,
+            store.confirmed_transfer_pairs(),
+            refused=refused_links(store),
+            external=store.external_identifiers(),
         )
         return name_origins(named, [t.source for t in rows])
 
@@ -3963,7 +3985,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
 
         rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
         _fields, links, _named = name_rows(
-            rows, store.confirmed_transfer_pairs(), refused=refused_links(store)
+            rows,
+            store.confirmed_transfer_pairs(),
+            refused=refused_links(store),
+            external=store.external_identifiers(),
         )
         return links
 
@@ -4004,7 +4029,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
             names = account_names(store)
             fields, _links, named = name_rows(
-                rows, store.confirmed_transfer_pairs(), refused=refused_links(store)
+                rows,
+                store.confirmed_transfer_pairs(),
+                refused=refused_links(store),
+                external=store.external_identifiers(),
             )
             listed: dict[str, list[Covered]] = {}
             order = sorted(
@@ -4019,6 +4047,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                     shown.append(_covered(rows[i], named[i], names))
             origins = name_origins(named, [t.source for t in rows])
             counts = {n: o.rows for n, o in origins.items()}
+            unheld, declined = unheld_accounts(rows, named, dismissed_keys(store))
             return view_of(
                 counts,
                 entities_of(store, counts),
@@ -4027,19 +4056,33 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 name_readings(fields, named),
                 display_names(fields, named, _held_labels(store, rows, named, names)),
                 row_ties(fields, named),
+                unheld,
+                declined,
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:
         from .analysis.entity_actions import (
             CHILD,
+            EXTERNAL_ACTIONS,
             KEEP_LINK,
             MERGE,
             REFUSE_LINK,
             SPLIT,
             apply_action,
+            apply_external_action,
         )
+        from .analysis.recurring import counts_as_occurrence
 
         with Store(db_path) as store:
+            if action in EXTERNAL_ACTIONS:
+                rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+                _fields, _links, named = name_rows(
+                    rows,
+                    store.confirmed_transfer_pairs(),
+                    refused=refused_links(store),
+                    external=store.external_identifiers(),
+                )
+                return apply_external_action(store, rows, named, action, form)
             origins = _held_origins(store) if action in (MERGE, SPLIT, CHILD) else {}
             known = {name: origin.rows for name, origin in origins.items()}
             links = _held_links(store) if action in (KEEP_LINK, REFUSE_LINK) else None
@@ -4054,7 +4097,10 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         with Store(db_path) as store:
             rows = [t for t in store.all_transactions() if counts_as_occurrence(t)]
             fields, links, named = name_rows(
-                rows, store.confirmed_transfer_pairs(), refused=refused_links(store)
+                rows,
+                store.confirmed_transfer_pairs(),
+                refused=refused_links(store),
+                external=store.external_identifiers(),
             )
             origins = name_origins(named, [t.source for t in rows])
             counts = {n: o.rows for n, o in origins.items()}

@@ -13,7 +13,9 @@ and number is invented.
     nothing; a row is never its own account's counterpart.
   - "Me" is never reached from a row: no owner entity is made, and no label is "me".
   - The detector keys a pair's legs on the pair, as before: the transfer series is unchanged by
-    naming, and an unpaired leg that states the identifier is a payee series shown "your Savings".
+    naming, and an unpaired leg that states the identifier is a TRANSFER series to the held
+    account, shown "your Savings" (it was a plain payee series before external accounts, which
+    read an incoming one as income).
 """
 
 from __future__ import annotations
@@ -174,13 +176,15 @@ class TestTheDetectorIsUnchangedForPairs:
         ]
         assert found[0].held_account == ""
 
-    def test_UnpairedLegsStatingTheIdentifier_AreOnePayeeSeriesOfTheHeldAccount(self):
+    def test_UnpairedLegsStatingTheIdentifier_AreOneTransferSeriesToTheHeldAccount(self):
         rows, pairs = twelve_transfers(identifier=SAVINGS_IDENTIFIER)
         # Confirm only the first pair, so the identifier is learned and the rest are unpaired.
         found = [
             s for s in find_recurring(rows, pairs[:1], TODAY)
-            if s.account == "current" and not s.is_transfer
+            if s.account == "current" and s.held_account
         ]
 
-        assert [(s.held_account, s.count, s.cadence) for s in found] == [("savings", 11, "monthly")]
+        assert [
+            (s.held_account, s.count, s.cadence, s.is_transfer, s.other_account) for s in found
+        ] == [("savings", 11, "monthly", True, "savings")]
         assert found[0].shape == "your savings"

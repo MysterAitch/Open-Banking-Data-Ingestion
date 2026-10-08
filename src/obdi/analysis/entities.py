@@ -860,21 +860,30 @@ def names_of(rows: Sequence[Fields | tuple[str, str]]) -> list[Named]:
     ]
 
 
-def held_counterparts(rows: Sequence[Transaction], pairs: Iterable[tuple[str, str]]) -> list[str]:
+def held_counterparts(
+    rows: Sequence[Transaction],
+    pairs: Iterable[tuple[str, str]],
+    external: Mapping[str, str] | None = None,
+) -> list[str]:
     """For each row, the household account its other side is, or "" where it is not a transfer
     between the household's own accounts.
 
-    Two kinds of evidence, both already held: the confirmed transfer pair the row is a leg of (its
-    other side is the opposite leg's account), and the account identifier the row states
+    Three kinds of evidence. The confirmed transfer pair the row is a leg of (its other side is
+    the opposite leg's account). The account identifier the row states
     (`Transaction.party_account`) where the pairs show that identifier to be one of the
     household's accounts - a leg that states it is the other account's, so every row that states
     the same identifier is a transfer to that account, paired or not. An identifier the pairs
     show leading to two accounts is ambiguous and counts as neither, and a row is never its own
     account's counterpart.
 
-    The household's own accounts' sort codes and numbers are not held anywhere (`ingest.identifiers`
-    reads them from landed account payloads and keeps nothing), so an identifier is learned only
-    from a pair that has been confirmed; a transfer to an account of the household that has no
+    And `external`, the identifier of each account the owner declared theirs that obdi holds no
+    source for (`Store.external_identifiers`), to that account's name: a row stating one is a
+    transfer to it. A pair is proof and a declaration is a statement, so an identifier the pairs
+    have spoken for (even ambiguously) is never taken from a declaration.
+
+    The held accounts' own sort codes and numbers are not held anywhere (`ingest.identifiers`
+    reads them from landed account payloads and keeps nothing), so an identifier of a held account
+    is learned only from a pair that has been confirmed; a transfer to a held account that has no
     confirmed leg and states an identifier no pair states is not known to be one.
     """
     by_id = {row.entity_id: row for row in rows if row.entity_id}
@@ -892,9 +901,12 @@ def held_counterparts(rows: Sequence[Transaction], pairs: Iterable[tuple[str, st
     known = {
         identifier: next(iter(found)) for identifier, found in leading.items() if len(found) == 1
     }
+    declared = external or {}
     result = []
     for row in rows:
         found = other.get(row.entity_id) or known.get(row.party_account, "")
+        if not found and row.party_account and row.party_account not in leading:
+            found = declared.get(row.party_account, "")
         result.append("" if found == row.account_id else found)
     return result
 
@@ -980,15 +992,18 @@ def name_rows(
     pairs: Iterable[tuple[str, str]] = (),
     links: Mapping[str, Alias] | None = None,
     refused: Collection[tuple[str, str]] = (),
+    external: Mapping[str, str] | None = None,
 ) -> tuple[list[Fields], Mapping[str, Alias], list[Named]]:
     """What each held row states about its other party, the links learned from all of them, and
     the name of each: the one place a row becomes a name, so the Entities page and the detector
     cannot disagree. `pairs` is the pairing pass's (leaving, arriving) entity for each proved
-    transfer (`held_counterparts`); `links` is given where the caller has them already, else
-    they are learned here less those the owner `refused` (`refused_links`), whose rows are named
-    by their description again. A caller that names rows without passing what the store refused
-    would disagree with the pages, so every caller that has a store passes it."""
-    held = held_counterparts(rows, pairs)
+    transfer, and `external` the identifier of each account the owner declared theirs that obdi
+    holds no source for (`held_counterparts`); `links` is given where the caller has them
+    already, else they are learned here less those the owner `refused` (`refused_links`), whose
+    rows are named by their description again. A caller that names rows without passing what the
+    store refused or declared would disagree with the pages, so every caller that has a store
+    passes both."""
+    held = held_counterparts(rows, pairs, external)
     fields = [
         Fields(r.description, r.counterparty, r.party_account, r.party_source_id, account)
         for r, account in zip(rows, held, strict=True)
@@ -1712,6 +1727,18 @@ class Covered:
 
 
 @dataclass(frozen=True)
+class UnheldAccount:
+    """An account number some payments state that no held account owns: how many payments, and
+    the last characters of the number (`external_accounts`). `key` is the name `name_of` gives
+    rows that state it; the number is not carried, since a repr, a traceback, or a template could
+    print it."""
+
+    key: str
+    ending: str
+    payments: int
+
+
+@dataclass(frozen=True)
 class EntitiesView:
     """Everything the Entities page says: every shape with its transactions, the entities the
     owner made, and what the rules propose from the shapes not yet under one."""
@@ -1730,6 +1757,10 @@ class EntitiesView:
     #: The readable name of each name that is an identifier (`display_names`). Such a name groups
     #: rows and is never printed: a page asks `label`.
     labels: Mapping[str, str] = field(default_factory=dict)
+    #: The accounts payments state that no held account owns and the owner has not declined
+    #: (`external_accounts.unheld_accounts`), and how many more they declined.
+    unheld: tuple[UnheldAccount, ...] = ()
+    declined: int = 0
 
     def label(self, name: str) -> str:
         """What a page prints for a name: its label where it is an identifier, the name itself
@@ -1860,8 +1891,12 @@ def view_of(
     readings: Mapping[str, str] | None = None,
     labels: Mapping[str, str] | None = None,
     ties: Sequence[Tie] = (),
+    unheld: tuple[UnheldAccount, ...] = (),
+    declined: int = 0,
 ) -> EntitiesView:
     """The page's view of the names held and the entities made from them.
+
+    `unheld` and `declined` are `external_accounts.unheld_accounts`.
 
     `origins` is `name_origins`: how each name's rows came to have it.
     `readings` is `name_readings`: the text each name is compared on where that is not the name.
@@ -1889,6 +1924,8 @@ def view_of(
         origins=origins or {},
         labels=labels or {},
         suggestions=suggest_for_entities(text_names, made, set_apart | offered, readings),
+        unheld=unheld,
+        declined=declined,
     )
 
 

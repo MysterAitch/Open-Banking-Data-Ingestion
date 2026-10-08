@@ -6440,6 +6440,15 @@ class ConnectionHandler(
         if route == "/entities-new":
             self._entities_press_post(entity_actions.NEW)
             return
+        if route == "/entities-external":
+            self._entities_press_post(entity_actions.DECLARE_EXTERNAL)
+            return
+        if route == "/entities-not-external":
+            self._entities_press_post(entity_actions.NOT_EXTERNAL)
+            return
+        if route == "/entities-offer-again":
+            self._entities_press_post(entity_actions.OFFER_AGAIN)
+            return
         if route == "/entity":
             self._entity_show_post()
             return

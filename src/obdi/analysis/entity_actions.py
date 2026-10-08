@@ -10,11 +10,13 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
+from ..core.models import Transaction
 from ..core.plural import plural
 from ..ingest.entity_records import DECLARED, DESCRIPTION, Entity, EntityRefused, Identifier
 from .entities import (
     Alias,
     LearnedLine,
+    Named,
     NameOrigin,
     clean_rule,
     detach_shape,
@@ -26,6 +28,7 @@ from .entities import (
     resolve_form_value,
     rule_phrase,
 )
+from .external_accounts import declare_external, dismiss, offer_again
 
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from ..ingest.store import Store
@@ -43,9 +46,44 @@ PARENT = "parent"
 #: identifier of the entity, or say it is not so.
 KEEP_LINK = "keep-link"
 REFUSE_LINK = "refuse-link"
+#: The presses about payments to an account obdi holds nothing for (`external_accounts`): these
+#: read the transactions' names, where the others read the names the store keeps.
+DECLARE_EXTERNAL = "declare-external"
+NOT_EXTERNAL = "not-external"
+OFFER_AGAIN = "offer-again"
+EXTERNAL_ACTIONS = (DECLARE_EXTERNAL, NOT_EXTERNAL, OFFER_AGAIN)
 ACTIONS = (
-    MERGE, SPLIT, RENAME, FOLD, CHILD, KEEP_RULE, DROP_RULE, NEW, PARENT, KEEP_LINK, REFUSE_LINK
+    MERGE,
+    SPLIT,
+    RENAME,
+    FOLD,
+    CHILD,
+    KEEP_RULE,
+    DROP_RULE,
+    NEW,
+    PARENT,
+    KEEP_LINK,
+    REFUSE_LINK,
+    *EXTERNAL_ACTIONS,
 )
+
+
+def apply_external_action(
+    store: Store,
+    rows: Sequence[Transaction],
+    named: Sequence[Named],
+    action: str,
+    form: Mapping[str, Sequence[str]],
+) -> str:
+    """Do what a press about an unheld account asked and say what was done (`apply_action` is
+    the same for the others); `named` is `name_rows`' answer for `rows`."""
+    if action == DECLARE_EXTERNAL:
+        return declare_external(store, rows, named, form)
+    if action == NOT_EXTERNAL:
+        return dismiss(store, rows, named, form)
+    if action == OFFER_AGAIN:
+        return offer_again(store)
+    raise EntityRefused("That press is not one this page makes.")
 
 
 def _one(form: Mapping[str, Sequence[str]], field: str) -> str:

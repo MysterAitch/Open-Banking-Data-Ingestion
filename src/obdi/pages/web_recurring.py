@@ -33,7 +33,7 @@ from ..core.logs import say
 from ..core.masking import MASKED_TOTAL, mask_text
 from ..core.page_times import date_with_age, percent_text, span_words
 from ..core.plural import plural
-from ..read.account_names import AccountsShown
+from ..read.account_names import AccountShown, AccountsShown
 from ..read.ledger import Money
 from . import values_sitting
 from .callback import render_page
@@ -233,6 +233,13 @@ def values_mode(route: str, *, unmasked: bool) -> str:
 
 def render_recurring(findings: RecurringFindings, names: AccountsShown, *, unmasked: bool) -> bytes:
     found = findings.series
+    if findings.external_labels:
+        # An account declared external is named only here: the lists of held accounts never meet
+        # it, so a transfer to it is labelled from the findings and not from `names`.
+        external = findings.external_labels
+        names = AccountsShown(
+            [*names, *(AccountShown.named(ref, label) for ref, label in external.items())]
+        )
     if not found:
         listing = (
             "<p>Nothing recurring was found. A recurring series needs the same payee at a "

@@ -32,7 +32,10 @@ def party_stated_by_account(store: Store) -> dict[str, PartyStated]:
     """Every account's `PartyStated`, from one read of the booked transactions."""
     rows = [t for t in store.all_transactions() if t.status is TransactionStatus.BOOKED]
     _fields, _links, named = name_rows(
-        rows, store.confirmed_transfer_pairs(), refused=refused_links(store)
+        rows,
+        store.confirmed_transfer_pairs(),
+        refused=refused_links(store),
+        external=store.external_identifiers(),
     )
     held: dict[str, list[tuple[date, bool]]] = defaultdict(list)
     for row, item in zip(rows, named, strict=True):
