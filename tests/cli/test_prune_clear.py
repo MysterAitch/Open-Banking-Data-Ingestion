@@ -38,17 +38,17 @@ import pytest
 
 from obdi.cli import queue_actual_prune
 from obdi.export.actual_push import build_audit_envelope, build_prune_envelope
-from obdi.ingest.connections import ConnectionStore
-from obdi.ingest.store import Store
-from obdi.pages import web
-from obdi.pages.web import AuthorisationSession, ConnectionHandler, WebConfig
-from obdi.pages.web_prune import (
+from obdi.export.orphan_plan import (
     STATIC_ROWS,
     TOTAL_ROWS,
     OrphanCount,
     high_reasons,
     total_reason,
 )
+from obdi.ingest.connections import ConnectionStore
+from obdi.ingest.store import Store
+from obdi.pages import web
+from obdi.pages.web import AuthorisationSession, ConnectionHandler, WebConfig
 from test_transfer_pairs_payload import BOUND_BOTH, MAIN, POT, _household
 
 

@@ -201,6 +201,7 @@ actual_audit = "export.actual_audit"
 actual_push = "export.actual_push"
 actual_verdict = "export.actual_verdict"
 export_declared = "export.export_declared"
+orphan_plan = "export.orphan_plan"
 replay = "export.replay"
 
 [pages]

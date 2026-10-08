@@ -37,12 +37,12 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 from ..core.plural import plural as counted
-from ..pages.web_prune import align_plan, counts_from_audit
 from .actual_audit import (
     accounts_of,
     count_of,
     differing_accounts,
 )
+from .orphan_plan import align_plan, counts_from_audit
 
 #: Seconds without a heartbeat after which queued work is called stuck. The applier
 #: renews it every 60 seconds while a request runs.

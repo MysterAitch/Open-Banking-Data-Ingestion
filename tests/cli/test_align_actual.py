@@ -37,9 +37,9 @@ from obdi.export.actual_push import (
     latest_results_with_totals,
     queued_requests,
 )
+from obdi.export.orphan_plan import align_plan, counts_from_audit
 from obdi.ingest.store import Store
 from obdi.pages import web
-from obdi.pages.web_prune import align_plan, counts_from_audit
 from test_orphan_classes import classed, total_counts
 from test_prune_clear import account, audit, ordinary, page_of, serve  # noqa: F401
 from test_transfer_pairs_payload import BOUND_BOTH, MAIN, POT, _household

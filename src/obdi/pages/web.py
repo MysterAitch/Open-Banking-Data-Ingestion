@@ -80,6 +80,7 @@ from ..export.actual_audit import (
 )
 from ..export.actual_push import NothingQueued, valid_progress
 from ..export.actual_verdict import APPLIER_STALE_SECONDS
+from ..export.orphan_plan import align_plan, counts_from_audit, removal_split
 from ..ingest.accounts import AccountRecord, ArchiveOutcome
 from ..ingest.asked_coverage import Hole, describe_spans
 from ..ingest.attended_fetch import PRESS_KIND, PressRefused
@@ -142,10 +143,7 @@ from .web_prune import (
     RUN_AN_AUDIT_FIRST,
     STAY_REASONS,
     PruneRefused,
-    align_plan,
     check_prune_post,
-    counts_from_audit,
-    removal_split,
 )
 from .web_recurring import RecurringPages
 from .web_scheduler import scheduler_row

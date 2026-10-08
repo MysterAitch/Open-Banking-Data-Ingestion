@@ -37,6 +37,7 @@ from ..export.actual_verdict import (
     unreadable_verdict,
     when,
 )
+from ..export.orphan_plan import counts_from_audit
 from . import web
 from .web_empty import empty_section
 from .web_marker import (
@@ -49,7 +50,7 @@ from .web_marker import (
     ChainStep,
     marker_steps,
 )
-from .web_prune import align_section, counts_from_audit, prune_section
+from .web_prune import align_section, prune_section
 
 #: How many results other than the newest audit are listed, one line each.
 EARLIER_RESULTS = 3

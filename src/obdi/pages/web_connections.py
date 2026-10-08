@@ -250,8 +250,9 @@ def _out_html(hooks: Hooks, now: datetime) -> str:
     """The budgeting tool: the Actual page's verdict in its own words and tone, when it was last
     pushed to and audited, and the one press that page offers for the state it is in."""
     from ..export.actual_verdict import Press, moment, newest
+    from ..export.orphan_plan import counts_from_audit
     from .web_actual import _press_form, current_verdict
-    from .web_prune import align_section, counts_from_audit
+    from .web_prune import align_section
 
     link = '<a class="tap" href="/actual">Open the Actual page</a>'
     if hooks.actual_status is None:
