@@ -73,6 +73,7 @@ from enum import StrEnum
 from itertools import pairwise
 
 from ..core import instrumentation
+from ..core.instrumentation import SAME_MONEY_PHASE
 from ..core.models import Transaction
 from ..core.money import format_amount
 from ..core.plural import plural as _plural
@@ -86,10 +87,6 @@ from .same_money_outcome import AccountOutcome, dated_list
 
 #: The sources whose rows are a statement's own, as opposed to a feed's.
 STATEMENT_SOURCES = frozenset(parser.source for parser in PDF_PARSERS)
-
-#: The rebuild phase the same-money pass runs under. Its steps record as
-#: sub-phases named `<this>/<step>`, which is how the Admin page finds them.
-SAME_MONEY_PHASE = "same-money-fold"
 
 STATEMENT_SIDE = "statement"
 FEED_SIDE = "feed"

@@ -21,6 +21,10 @@ import threading
 import time
 from types import TracebackType
 
+#: The rebuild phase the same-money pass runs under. Its steps record as
+#: sub-phases named `<this>/<step>`, which is how the Admin page finds them.
+SAME_MONEY_PHASE = "same-money-fold"
+
 
 def _flag_enabled() -> bool:
     return os.environ.get("OBDI_TIMINGS", "").strip().lower() in {"1", "true", "yes"}

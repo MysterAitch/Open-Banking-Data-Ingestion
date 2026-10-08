@@ -44,7 +44,6 @@ from ..core.namespaces import (
     UNASSIGNED_ACCOUNT,
 )
 from ..core.plural import plural
-from ..verify.period_reconciliation import SAME_MONEY_PHASE
 from .accounts import AccountMap
 from .arrival_order import in_arrival_order
 from .declined_items import void_declined_items
@@ -723,7 +722,7 @@ def _rebuild_from_raw(
         report.transfers_paired = pair_transfers_across_store(store, account_map)
     # After pairing, because a confirmed transfer leg is never folded and the
     # pairing table is how the pass knows one.
-    with instrumentation.phase(SAME_MONEY_PHASE):
+    with instrumentation.phase(instrumentation.SAME_MONEY_PHASE):
         report.same_money_folded = fold_same_money(store, account_map).folded
     # Last, so a protected span is compared with the finished derivation. The check only
     # records; `protection` says why a rebuild is never refused or altered by one.

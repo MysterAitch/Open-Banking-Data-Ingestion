@@ -161,10 +161,10 @@ from datetime import date
 from itertools import combinations
 
 from ..core import instrumentation
+from ..core.instrumentation import SAME_MONEY_PHASE
 from ..core.models import Transaction
 from ..verify.period_reconciliation import (
     FEED_SIDE,
-    SAME_MONEY_PHASE,
     STATEMENT_SIDE,
     AccountEvidence,
     Leftover,
