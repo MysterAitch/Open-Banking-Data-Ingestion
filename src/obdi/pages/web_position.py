@@ -331,6 +331,8 @@ def _free_account(account: Any) -> str:
             )
         else:
             parts.append(f"<li><strong>Owed</strong> {_esc(account.held_basis)}.</li>")
+        if account.limit:
+            parts.append(f"<li><strong>Limit</strong> {_figure('', account.limit)}.</li>")
     else:
         if account.held_known:
             held = _figure(_balance_word(account.held_direction), account.held)
@@ -398,6 +400,14 @@ def _free_section(free: Disclosed[FreeFigures]) -> str:
             word="free",
         )
     )
+    if free.goals_share:
+        # Said apart from the committed total on purpose: a goal is the owner's choice.
+        totals += (
+            f"<li>and {_figure('', free.goals_share)} towards goals this month, from "
+            f'{_plural(int(free.goals_sharing), "dated goal")}. A goal is your choice and not an '
+            'obligation, so it is not in what is committed or free. <a href="/goals">Goals</a>'
+            "</li>"
+        )
     return (
         "<h2>Held, owed, committed, and free</h2>"
         f'<p class="muted">As at {_esc(free.as_of)}. A figure that cannot be made is not shown as '

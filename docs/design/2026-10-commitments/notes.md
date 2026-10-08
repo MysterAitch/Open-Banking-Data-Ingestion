@@ -354,7 +354,8 @@ Position's own `FreeFigures`).
   (`Series.explained`, not stopped, the slot at or after `next_expected`); it is not counted overdue.
 - FUNDED is Position's `AccountFigures`, not recomputed: "Holds H; C leaves before D. Funded until
   the next income on D." or "Short by X before D." Judged accounts are those leaving an open
-  outgoing commitment, and a card only where a limit is declared (none can be yet). An account whose
+  outgoing commitment, and a card only where a limit is declared (a declared limit window is read
+since "Goals as built"; until then none could be). An account whose
   figure cannot be made says so and the headline says "N accounts cannot be judged" instead of
   "all accounts funded". An overdue commitment on an account is not in "what leaves" (Position
   counts from today); the page says so beside the account.
@@ -364,8 +365,9 @@ Position's own `FreeFigures`).
   ("Bills is short before D; 1 commitment overdue. See this month"), never an amount.
 - MASKED GET: days, states, counts, account names, and "short before D" show; payee names are
   masked text and every amount is the sealed token. The month query holds no value.
-- RECEIVABLES and GOALS: `_receivables_section` and `_goals_section` exist, empty; the footnote
-  says receivables will join each account's funded line and goals' accruals the calendar.
+- RECEIVABLES and GOALS: `_receivables_section` and `_goals_section` were built empty. Goals are
+  filled since "Goals as built" (as a "Towards goals" list beside the calendar and not as days of
+  it, which corrects the footnote's first promise); receivables are still empty.
 
 Where it lives in the navigation: under More, not a sixth tab. The strip is a five-column grid
 whose test (`test_phone_layout`) holds one row of whole labels at 360 and 390 px; six columns were
@@ -390,6 +392,61 @@ reads the held month, so it is as fresh as the position's memo key; the recurrin
 whole-table on the first GET after any change (about 15 statements and a little time on the large
 store, not the 800 of the position); no weekly commitment's phase was tried across a window change.
 
+## Goals as built: debts to clear, funds to build, savings (roadmap item 5, schema 30)
+
+Built 2026-10-08. A declared `goals` table (`ingest/goal_records.py`, `Store.declare_goal`,
+`edit_goal`, `remove_goal`, `goals`), kept across the rebuild and counted by `irreplaceable()`;
+progress in `analysis/goals.py`; the page `/goals` under More (`pages/web_goals.py`); wired by
+`WebConfig.goals_data` and `goals_act`.
+
+- KINDS. CLEAR a debt (target nil, measured against what was owed when declared), BUILD a fund
+  (held against an amount), SAVE for a thing (an amount by a date, counted from nothing at the
+  declaration, since what the account already held is not the owner's effort). The goal stores the
+  day declared and the balance it started from, so a later edit of the target moves the end of
+  the line and not its start.
+- THE LINE is whole calendar months and pence (`amount * elapsed // total`), the amortisation of
+  worked example A made general. Ahead is on or above it ("ahead by nil" is on it); no date, or
+  an unknown balance, gives no stance and says why. The monthly rate needed from now is shown
+  beside this month's step along the line, because catching up is the owner's choice.
+- SEVERAL GOALS ON ONE ACCOUNT are funded in the order declared.
+- A DEBT cannot be declared on an account whose owed balance is not known or is nil (nothing to
+  measure against); a fund can, and then has no stance.
+- PRESSES add, change, and remove; answered masked unless the page pressed on was shown. The
+  change form never carries an amount. The masked GET shows names, kinds, accounts, dates, and the
+  words ahead and behind, and no amount.
+- THIS MONTH shows "N towards <goal> ahead/behind" for each dated goal, and Position says "and N
+  towards goals this month" beside the totals, in neither committed nor free: a goal is the owner's
+  choice and a commitment is an obligation.
+- A CARD'S DECLARED LIMIT (the account edit page already kept limit windows) is read by Position:
+  free is the limit in force today less what is owed, and a card with none in force says "No limit
+  declared." This also lets This month judge a card.
+
+Measured (invented worlds, answers decided first, clock pinned to 2026-09-15): a card owing 300.00
+that owed 500.00 two months before a date four months out is 200.00 cleared of 500.00, 33.34 ahead
+of a line of 166.66, with 75.00 a month needed and 83.34 this month's step; a fund of 400.00 of
+1,000.00 with no date has no stance; a saving of 1,200.00 declared four months into twelve is
+ahead by 0.00 with 400.00 held and behind by 100.00 with 300.00, its share 100.00 either way.
+(The first reckoning of the debt's figures in whole pounds gave 34.00 and 84.00 and was wrong by
+the pence the floor division drops.) A card with 500.00 owed and a 2,000.00 limit is 1,500.00
+free. Over the large invented store the Goals page is 810 statements first and 18 held, with no
+statement per goal; Position 804 and This month 16, held. Goals page at 390 px, twelve goals in
+five accounts: 3,276 px masked and 3,366 shown, no sideways scroll.
+
+Not done or not proven: nothing was read from the real store, so no real goal has been declared
+or compared with the owner's own reckoning. The household funding stance of section 3 ("behind
+until the debt is clear") is not derived from the goals; nothing consumes it until R4. Goals are not
+in the exported declared files (nor are commitments). A goal cannot be moved to another account by
+the edit form, and interest on a debt is not projected. A declared limit window that exists but
+does not cover today reads as "No limit declared."; an overdraft limit on a current account is not
+read. The large-store test cache is keyed on the corpus text and the schema number alone, so two
+working copies that both take schema 30 for different tables share one cached store and the later
+fails with "no such table"; found here, not fixed.
+
+Rejected: requiring the store to hold a declaration for a goal's account (an account that only ever
+held rows has none, and the large store's accounts are such); a day-count line (404.38 where the
+owner reckons 400.00); folding goals' share into committed (an account would look short for
+something never agreed to).
+
 ## Measured on the real store (counts only, read from the page after each deploy)
 
 | Version | Recurring series | Kinds (pulled / scheduled / habit) | Payments / transfers / incomes | Stopped (over a year) | Changed | Entities: names / proposals / covered / too broad |
@@ -404,7 +461,15 @@ store, not the 800 of the position); no weekly commitment's phase was tried acro
 | 0.4.369 (R2c: the stated party names a row; the learned link joins) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 867 (777 stated, 90 description, 34 rows linked) / 99 / 298 / 0 |
 | 0.4.371 (exact-match rung; both dates; per-kind fit) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 866 (777 stated, 89 description, 34 linked, 17 exact) / 99 / 297 / 0 |
 | 0.4.382 (party account and id on the row; the ladder reads them) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 972 (45 account, 651 source id, 207 stated, 69 description, 210 linked, 54 exact) |
+| 0.4.383 (learned-rule rung, SUPPORT 2, CONFIDENCE 300; branches grouped) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 967 (45 account, 651 source id, 207 stated, 64 description; 9,195 transactions identified and 7 inferred; 210 linked) |
 | Next release (party account and id on the row; the ladder reads them; own accounts named "your <account>"): PREDICTED, NOT MEASURED | about 62 | 54 / 8 / 0 to 1 | about 47 / 7 / 8 | about 36 (17), falling if the habit returns | 4 | names fall where one person was paid under several spellings and rise where people share a stated name; the net on mostly card spending is small |
+
+0.4.383 on the real store: the learned rule reached 7 transactions and retired 5 description
+names (69 to 64); nothing on Recurring moved, so the habit is still not reached by this rung at
+the default settings. Whether raising CONFIDENCE's population or lowering it changes that is
+for the owner to try on the settings form once it lands (0.4.384 or after); the page's counts
+line will say how many rules are applied and how many offered. The rung's other measurement -
+rows a later identifier confirms or refutes - is not yet built.
 
 0.4.382's rise (867 to 972 names, Recurring-stopped 31 to 38) was a false premise, not a fault in
 the ladder: Starling's counterparty uid is per merchant LOCATION for card payments. The owner

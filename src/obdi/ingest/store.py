@@ -76,6 +76,7 @@ from .entity_records import (
     EntityRule,
     Identifier,
 )
+from .goal_records import CLEAR, GOAL_KINDS, SAVE, Goal, GoalRefused
 from .payment_links import stated_link_of
 from .stated_times import recorded_for
 from .stated_words import recorded_words
@@ -173,7 +174,11 @@ from .stated_words import recorded_words
 #: commitments. Declared state, kept across the rebuild from raw.
 #: All are new tables, which `CREATE TABLE IF NOT EXISTS` makes on open, so there is no column
 #: migration; a store stamped 28 would never have grown them.
-SCHEMA_VERSION = 29
+#:
+#: 29 -> 30: the `goals` table: the debts the owner means to clear, the funds to build, and the
+#: savings to make, each with its target and the balance it started from. Declared state, kept
+#: across the rebuild from raw. A new table, so no column migration, as for 29.
+SCHEMA_VERSION = 30
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -852,6 +857,26 @@ CREATE TABLE IF NOT EXISTS commitment_windows (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commitment_windows_open
     ON commitment_windows(commitment_id) WHERE to_day IS NULL;
 
+-- DECLARED: a goal the owner set (`goal_records.Goal`): a debt on `account` to clear, a fund in it
+-- to build, or a saving drawn from it. `target_minor` is a magnitude (nil for a debt, which is
+-- cleared when nothing is owed); `target_date` is NULL where the owner set none. `declared_on` and
+-- `start_minor` are where the goal's straight line starts: the day, and the amount owed or held
+-- then (NULL where the balance was not known, which a page says instead of drawing a line).
+-- Removing is a stamp, so a removed goal's history stays.
+CREATE TABLE IF NOT EXISTS goals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    account      TEXT NOT NULL,
+    target_minor INTEGER NOT NULL DEFAULT 0,
+    target_date  TEXT,
+    declared_on  TEXT NOT NULL,
+    start_minor  INTEGER,
+    created_at   TEXT NOT NULL,
+    removed_at   TEXT,
+    basis        TEXT NOT NULL DEFAULT ''
+);
+
 -- DECLARED: a series the owner said is not a commitment (`commitment_records.Dismissal`), found
 -- again the way a commitment is (entity or name key, account, direction) and by cadence. Putting
 -- it back is a stamp. Its count over the series found is the detector's measured precision. A
@@ -943,6 +968,11 @@ NOT_STANDING_TABLES: dict[str, str] = {
     "series_dismissals": (
         "the series the owner said are not commitments, read where `commitments` is and for the "
         "same reason"
+    ),
+    "goals": (
+        "the debts to clear, funds to build, and savings the owner declared, read by the Goals "
+        "and This month pages, which set them against a balance; no balance, agreement, or "
+        "protection reads one"
     ),
     "events": "the outbox of changes to publish, written after the change it describes",
     "fetch_attempts": (
@@ -1103,6 +1133,10 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
     'same_money_outcomes': ['account', 'outcome'],
     'sighting_times': ['artefact_digest', 'entity_id', 'field', 'kind', 'source', 'stated', 'zone'],
     'sighting_words': ['artefact_digest', 'entity_id', 'field', 'source', 'word'],
+    'goals': [
+        'account', 'basis', 'created_at', 'declared_on', 'id', 'kind', 'name', 'removed_at',
+        'start_minor', 'target_date', 'target_minor',
+    ],
     'series_dismissals': [
         'account', 'cadence', 'direction', 'dismissed_at', 'entity_id', 'id', 'name_key',
         'removed_at',
@@ -2189,6 +2223,25 @@ class Store:
             identifier=str(row["identifier"] or ""),
             external=bool(row["external"]),
         )
+
+    def declared_limit_windows(self) -> dict[str, list[LimitWindow]]:
+        """Every declared account's limit windows by canonical name, accounts without one left
+        out: the one statement Position's free figure asks, where `declared_accounts` is three."""
+        found: dict[str, list[LimitWindow]] = {}
+        for row in self.connection.execute(
+            "SELECT a.ref, l.kind, l.window_from, l.window_to, l.amount_minor "
+            "FROM declared_account_limits l JOIN declared_accounts a ON a.stable_id = l.stable_id "
+            "ORDER BY a.ref, l.position"
+        ):
+            found.setdefault(str(row["ref"]), []).append(
+                LimitWindow(
+                    kind=str(row["kind"]),
+                    window_from=_read_date(row["window_from"]),
+                    window_to=_read_date(row["window_to"]),
+                    amount_minor=int(row["amount_minor"]),
+                )
+            )
+        return found
 
     def declared_kind(self, ref: str) -> str:
         """The kind an account is declared with, or "" when it is not declared.
@@ -5623,6 +5676,185 @@ class Store:
         )
         self.connection.commit()
 
+    # --- goals: declared, and kept across the rebuild from raw -------------------------------
+
+    def declare_goal(
+        self,
+        name: str,
+        *,
+        kind: str,
+        account: str,
+        target_minor: int,
+        target_date: date | None,
+        declared_on: date,
+        start_minor: int | None,
+        basis: str = "declared",
+        now: datetime | None = None,
+    ) -> int:
+        """Keep a goal, in one commit; returns its id.
+
+        Refused whole, with nothing written, for no name, a kind outside `goal_records`, no account
+        or one declared external, a target date that is not after `declared_on`, a fund or saving
+        whose target is not more than nothing, a saving with no date, a debt whose balance owed
+        was not known or was nil when it was declared (there is nothing to measure clearing
+        against), a negative starting balance, and a second goal of the same name on the same
+        account. Whether the account is one the household holds is the caller's to check: an
+        account that only ever held rows has no declaration, so the store cannot tell.
+
+        A debt's target is nil whatever `target_minor` says: it is cleared when nothing is owed."""
+        clean = " ".join(name.split())
+        if not clean:
+            raise GoalRefused("A goal needs a name.")
+        if kind not in GOAL_KINDS:
+            raise GoalRefused("A goal is a debt to clear, a fund to build, or a saving.")
+        if not account:
+            raise GoalRefused("A goal is about an account.")
+        if (
+            self.connection.execute(
+                "SELECT 1 FROM declared_accounts WHERE ref = ? AND external = 1", (account,)
+            ).fetchone()
+            is not None
+        ):
+            raise GoalRefused(
+                "A goal is about an account you hold, and that one is held elsewhere."
+            )
+        if target_date is not None and target_date <= declared_on:
+            raise GoalRefused("A goal's date must be after the day it is declared.")
+        if start_minor is not None and start_minor < 0:
+            raise GoalRefused("A goal cannot start from a negative balance.")
+        if kind == CLEAR:
+            if start_minor is None:
+                raise GoalRefused(
+                    "The balance owed on that account is not known, so there is nothing to "
+                    "measure clearing it against."
+                )
+            if start_minor == 0:
+                raise GoalRefused("Nothing is owed on that account, so there is nothing to clear.")
+            target_minor = 0
+        elif target_minor <= 0:
+            raise GoalRefused("A fund or a saving needs a target of more than nothing.")
+        if kind == SAVE and target_date is None:
+            raise GoalRefused("A saving needs the date it is wanted by.")
+        self._refuse_duplicate_goal(clean, account, ignoring=None)
+        cursor = self.connection.execute(
+            "INSERT INTO goals (name, kind, account, target_minor, target_date, declared_on, "
+            "start_minor, created_at, basis) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                clean,
+                kind,
+                account,
+                target_minor,
+                target_date.isoformat() if target_date else None,
+                declared_on.isoformat(),
+                start_minor,
+                (now or datetime.now(UTC)).isoformat(),
+                basis,
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid or 0)
+
+    def goals(self) -> list[Goal]:
+        """Every goal not removed, oldest first: one select."""
+        return [
+            Goal(
+                id=int(row["id"]),
+                name=str(row["name"]),
+                kind=str(row["kind"]),
+                account=str(row["account"]),
+                target_minor=int(row["target_minor"]),
+                target_date=_read_date(row["target_date"]),
+                declared_on=date.fromisoformat(str(row["declared_on"])),
+                start_minor=None if row["start_minor"] is None else int(row["start_minor"]),
+                created_at=str(row["created_at"]),
+                basis=str(row["basis"]),
+            )
+            for row in self.connection.execute(
+                "SELECT id, name, kind, account, target_minor, target_date, declared_on, "
+                "start_minor, created_at, basis FROM goals WHERE removed_at IS NULL ORDER BY id"
+            )
+        ]
+
+    def edit_goal(
+        self,
+        goal: int,
+        *,
+        name: str | None = None,
+        target_minor: int | None = None,
+        target_date: date | None = None,
+        no_date: bool = False,
+    ) -> None:
+        """Change a goal's name, amount, or date, and commit; what is not given is kept.
+
+        The day it was declared and the balance it started from are kept too, so a changed target
+        moves the straight line's end and not its start. Refused, with nothing changed, for a goal
+        that is missing or removed, an empty name, a debt given an amount (its target is nil), a
+        fund or saving given an amount of nothing or less, a date not after the day it was
+        declared, a date given and removed at once, a saving's date removed, and a name another
+        goal on the account already has."""
+        row = self.connection.execute(
+            "SELECT kind, account, declared_on FROM goals WHERE id = ? AND removed_at IS NULL",
+            (goal,),
+        ).fetchone()
+        if row is None:
+            raise GoalRefused("There is no such goal; it may have been removed.")
+        kind, account = str(row["kind"]), str(row["account"])
+        declared_on = date.fromisoformat(str(row["declared_on"]))
+        clean = ""
+        if name is not None:
+            clean = " ".join(name.split())
+            if not clean:
+                raise GoalRefused("A goal needs a name.")
+            self._refuse_duplicate_goal(clean, account, ignoring=goal)
+        if target_minor is not None:
+            if kind == CLEAR:
+                raise GoalRefused("A debt is cleared when nothing is owed; it has no amount.")
+            if target_minor <= 0:
+                raise GoalRefused("A fund or a saving needs a target of more than nothing.")
+        if target_date is not None and no_date:
+            raise GoalRefused("A goal's date cannot be both set and removed.")
+        if target_date is not None and target_date <= declared_on:
+            raise GoalRefused("A goal's date must be after the day it was declared.")
+        if no_date and kind == SAVE:
+            raise GoalRefused("A saving needs the date it is wanted by.")
+        # Every refusal is above, so the statements below are all or nothing.
+        if name is not None:
+            self.connection.execute("UPDATE goals SET name = ? WHERE id = ?", (clean, goal))
+        if target_minor is not None:
+            self.connection.execute(
+                "UPDATE goals SET target_minor = ? WHERE id = ?", (target_minor, goal)
+            )
+        if target_date is not None:
+            self.connection.execute(
+                "UPDATE goals SET target_date = ? WHERE id = ?", (target_date.isoformat(), goal)
+            )
+        if no_date:
+            self.connection.execute("UPDATE goals SET target_date = NULL WHERE id = ?", (goal,))
+        self.connection.commit()
+
+    def remove_goal(self, goal: int, *, now: datetime | None = None) -> None:
+        """Stop tracking a goal, and commit; its row stays as a stamp. Refused for a goal that is
+        missing or already removed."""
+        found = self.connection.execute(
+            "SELECT 1 FROM goals WHERE id = ? AND removed_at IS NULL", (goal,)
+        ).fetchone()
+        if found is None:
+            raise GoalRefused("There is no such goal; it may have been removed.")
+        self.connection.execute(
+            "UPDATE goals SET removed_at = ? WHERE id = ?",
+            ((now or datetime.now(UTC)).isoformat(), goal),
+        )
+        self.connection.commit()
+
+    def _refuse_duplicate_goal(self, name: str, account: str, *, ignoring: int | None) -> None:
+        taken = self.connection.execute(
+            "SELECT 1 FROM goals WHERE removed_at IS NULL AND account = ? AND id IS NOT ? "
+            "AND lower(name) = lower(?)",
+            (account, ignoring, name),
+        ).fetchone()
+        if taken is not None:
+            raise GoalRefused("That account already has a goal of that name.")
+
     def _refuse_missing_commitment(self, commitment: int) -> None:
         found = self.connection.execute(
             "SELECT 1 FROM commitments WHERE id = ? AND removed_at IS NULL", (commitment,)
@@ -6047,7 +6279,13 @@ class Store:
         dismissed = self.connection.execute(
             "SELECT COUNT(*) FROM series_dismissals WHERE removed_at IS NULL"
         ).fetchone()[0]
+        # A goal is a decision of the same kind: only the owner knows what he means to clear,
+        # build, or save, and no row says so.
+        meant = self.connection.execute(
+            "SELECT COUNT(*) FROM goals WHERE removed_at IS NULL"
+        ).fetchone()[0]
         return {
+            "goals to clear, build, or save for": int(meant),
             "counterparty identifiers gathered into entities": int(gathered),
             "entity rules and names split from them": int(ruled),
             "recurring payments confirmed as commitments": int(confirmed),

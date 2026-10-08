@@ -323,6 +323,12 @@ MORE_GROUPS: tuple[tuple[str, tuple[tuple[str, str, str], ...]], ...] = (
                 "Each commitment on the day it falls due, paid or not, and whether its account "
                 "is funded until the next income.",
             ),
+            (
+                "/goals",
+                "Goals",
+                "The debts to clear, funds to build, and savings to make, and whether each is "
+                "ahead of or behind its line.",
+            ),
             ("/review", "Categorise", "Give transactions a category, account by account."),
             (
                 "/recurring",

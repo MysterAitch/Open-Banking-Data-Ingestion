@@ -24,7 +24,8 @@ into by no income, so its commitments are counted to the earliest next income ac
 household. A commitment due on the income's own day is not counted before it.
 
 FREE is held less committed. For a card it is the limit less what is owed, where a limit is
-handed in (`limits`; nothing declares one yet, so the page says "no limit declared").
+handed in (`limits`, made by `limit_in_force` from the account's declared limit windows); a card
+with none in force on the day says "No limit declared."
 
 A FIGURE THAT CANNOT BE MADE IS SAID, never dashed: `*_said` holds the sentence naming what is
 missing. A total counts only the accounts its figure was made for, and carries how many that was
@@ -43,6 +44,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 
 from ..core.masking import Structural, Total
+from ..ingest.accounts import LimitWindow
 from ..ingest.commitment_records import Commitment, Window
 from ..read.ledger import Money, direction_of
 from ..read.position import AccountPosition, Position
@@ -68,6 +70,32 @@ def owes_kind(kind: str) -> bool:
     """Whether a declared kind says the account's balance is owed (a card, a loan)."""
     lowered = kind.casefold()
     return any(word in lowered for word in _OWING_WORDS)
+
+
+@dataclass(frozen=True)
+class DeclaredLimit:
+    """The limit in force on a day: its amount, and the day it came into force where the window
+    names one."""
+
+    amount_minor: int
+    since: date | None
+
+
+def limit_in_force(windows: Sequence[LimitWindow], today: date) -> DeclaredLimit | None:
+    """The declared limit window covering `today` (the newest-starting where several do), or None.
+
+    A window with no first day has always held and one with no last day holds still; the kind
+    (credit, overdraft) is not asked, since the account's own kind already says what it is."""
+    covering = [
+        w
+        for w in windows
+        if (w.window_from is None or w.window_from <= today)
+        and (w.window_to is None or today <= w.window_to)
+    ]
+    if not covering:
+        return None
+    newest = max(covering, key=lambda w: (w.window_from or date.min, w.amount_minor))
+    return DeclaredLimit(newest.amount_minor, newest.window_from)
 
 
 def _on_month(index: int, day: int) -> date:
@@ -160,6 +188,8 @@ class AccountFigures:
     free: Total[Money | None]
     free_short: Structural[bool]
     free_said: Structural[str]
+    #: A card's declared limit in force today, or None where there is none.
+    limit: Total[Money | None] = None
 
 
 @dataclass(frozen=True)
@@ -185,6 +215,11 @@ class FreeFigures:
     owed: Structural[FigureTotal]
     committed: Structural[FigureTotal]
     free: Structural[FigureTotal]
+    #: This month's share of the goals that have a date (`analysis.goals`), and how many goals it
+    #: is made from. Counted apart from `committed` and never in `free`: a goal is the owner's
+    #: choice and a commitment is an obligation.
+    goals_share: Total[Money | None] = None
+    goals_sharing: Structural[int] = 0
 
 
 def _ago(day: date, today: date) -> str:
@@ -308,7 +343,7 @@ def _figures_of(
     commitments: Sequence[Commitment],
     detected: Sequence[Series],
     household: _Next,
-    limits: Mapping[str, int],
+    limits: Mapping[str, DeclaredLimit],
     today: date,
 ) -> AccountFigures:
     card = owes_kind(account.kind)
@@ -351,16 +386,17 @@ def _figures_of(
     owed = Money(max(-minor, 0), CURRENCY) if card and known else None
     free: Money | None = None
     short = False
+    limit = limits.get(account.ref) if card else None
     if card:
-        limit = limits.get(account.ref)
         if not known:
             free_said = "Free: cannot be worked out, the balance owed is not known."
         elif limit is None:
             free_said = "No limit declared."
         else:
-            left = limit - max(-minor, 0)
+            left = limit.amount_minor - max(-minor, 0)
             free, short = Money(abs(left), CURRENCY), left < 0
-            free_said = "The declared limit less what is owed."
+            since = f" in force from {limit.since.isoformat()}" if limit.since else ""
+            free_said = f"The limit you declared{since}, less what is owed."
     elif not known:
         free_said = "Cannot be worked out: the balance is not known."
     elif committed is None:
@@ -388,6 +424,7 @@ def _figures_of(
         free=free,
         free_short=short,
         free_said=free_said,
+        limit=Money(limit.amount_minor, CURRENCY) if limit is not None else None,
     )
 
 
@@ -407,12 +444,15 @@ def build_free(
     detected: Sequence[Series],
     *,
     today: date,
-    limits: Mapping[str, int] | None = None,
+    limits: Mapping[str, DeclaredLimit] | None = None,
+    goals_share: Money | None = None,
+    goals_sharing: int = 0,
 ) -> FreeFigures:
     """The four figures for every live (not archived) account and their totals.
 
     `detected` are the detector's series, read only where `wants_detector` said so; handing none
-    is the honest answer that no income was detected."""
+    is the honest answer that no income was detected. `goals_share` is this month's share of the
+    dated goals, carried beside the totals and not in them."""
     wanted = limits or {}
     live = _live(position)
     household = _next_income(
@@ -445,4 +485,6 @@ def build_free(
             ],
             len(accounts),
         ),
+        goals_share=goals_share,
+        goals_sharing=goals_sharing,
     )

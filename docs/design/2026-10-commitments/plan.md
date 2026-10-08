@@ -760,8 +760,12 @@ obdi each day, and the projection to Actual moves to the end as an export. The s
    the account it leaves and whether that account is funded for it before the next income,
    receivables owed, goals' accruals. The budgeting core without envelopes - "can I afford
    this?" answered from facts. The page the owner is expected to open first.
-5. **Goals** (new, R4's accrual engine made general): debts to clear, funds to build, savings,
-   with target types and progress; the stance default from them.
+5. **Goals** (new, R4's accrual engine made general; **built 2026-10-08**, see "Goals as built"
+   in `notes.md`; nothing is compared with the owner's own reckoning yet): debts to clear, funds
+   to build, savings, with target types and progress; the stance default from them. Built: the
+   three kinds with a straight line in whole months, ahead or behind it, shown on `/goals`, on
+   This month, and beside Position's committed figure. NOT built: YNAB's "top up each month" and
+   "keep a minimum" target types, and the household funding stance derived from open debts.
 6. **R3** flows and shares, then **R4** prepaid periods, **R5** the overview by provider and
    product, **R9** the card's own commitments, **R10** windows that change.
 7. **R6** categories and rules, **R6a labels** (the second axis: any number per transaction or
