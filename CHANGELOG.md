@@ -26,6 +26,48 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.387] - 2026-10-08
+
+R3 of the commitments roadmap (ownership, legs, receivables), schema 31.
+
+### Added
+- **A joint account counts only the owner's share.** Position counted every
+  account's whole balance and every commitment leaving it, so an account shared
+  with a partner would have overstated what is held and free. An account's
+  ownership is now declared (which entities, in whole percentages adding to
+  100, the owner among them); held, owed, committed, and free scale by the
+  owner's share and the basis says "your half of the balance". The form is in
+  the account page's About fold. Nothing declared means the owner alone, and no
+  row is written for that.
+- **A commitment's money can move in legs, and each is checked.** A shared rent
+  is a stash into a space, the partner's half in, and the payment out; a leg is
+  an amount or a share of the commitment by a day (in the month before, if
+  need be). The matcher reuses the detector's placing, amount tolerance, and
+  naming: a transaction on the leg's account, the right way, to or from the
+  leg's entity. A leg that has not happened is said ("<name>'s half for
+  October has not arrived (expected by D)", "October's Rent did not go out on
+  D") only once the account's transactions reach past its day; an external leg
+  (neither end held) is never checked or reported. No form declares legs yet.
+- **The bills space says when it is short.** The sum of what the commitments
+  stash there for the draw-downs still to come, by the earliest day: this month
+  until the 25th, then next month alone. Today says so from the 25th with the
+  figures sealed and is silent once it is funded; This month lists it; the
+  account page's Expected fold shows what is asked, what is held, and any
+  surplus.
+- **Money owed back on one transaction.** One press on a ledger row declares it
+  owed by an entity, with an optional label ("volunteering") that is a second
+  axis beside the category. It is met by a transfer from that entity (the same
+  matcher; oldest first, so one transfer closes the older of two), or closed by
+  hand as written off or received elsewhere with a reason that is kept. This
+  month and Position sum what is owed and name each; Today asks once it is past
+  its expected day; the label's year says what is reimbursed and what is owed.
+  That a transfer met it is worked out on every read and never stored.
+
+### Changed
+- The card account page's statement budget moved from 130 to 132 and the Recurring page's by
+  one: the account page asks whether a leg touches it and what is owed back on its rows, and the
+  matcher reads every entity's name.
+
 ## [0.4.386] - 2026-10-08
 
 ### Changed

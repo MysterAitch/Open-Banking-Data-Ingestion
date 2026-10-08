@@ -21,6 +21,7 @@ from ..ingest.accounts import (
     LimitWindow,
     RateWindow,
 )
+from ..ingest.ownership_records import OwnerShare
 from ..ingest.statement_terms import AccountReading, account_readings
 from ..ingest.store import Store
 from .account_names import AccountShown, AccountsShown
@@ -80,6 +81,36 @@ class SourceFacts:
 
 
 @dataclass(frozen=True)
+class ExpectedLine:
+    """One thing expected of an account: money to stash in it, or to arrive in it, by a day.
+
+    `what` names the commitment and `party` the person it comes from (both values, masked on a
+    masked page); `direction` is "stash" for money the household moves in, "in" for money
+    another person pays in."""
+
+    what: str
+    party: str
+    day: str
+    amount_minor: int
+    direction: str
+    late: bool = False
+
+
+@dataclass(frozen=True)
+class ExpectedFold:
+    """What an account is expected to hold or receive (the account page's "Expected" fold): for
+    a space, what its bills ask of it this month against what it holds and the surplus beyond;
+    for any account, the shares others owe it and have not yet paid. Built by `analysis.flows`."""
+
+    lines: tuple[ExpectedLine, ...]
+    #: The space's need and holding, in minor units; None for an account that is no space's.
+    needed_minor: int | None = None
+    held_minor: int | None = None
+    surplus_minor: int = 0
+    by: str = ""
+
+
+@dataclass(frozen=True)
 class AccountAbout:
     """What the page needs of one account: its declared record, where there is one, and the
     parent's name as pages show it."""
@@ -90,6 +121,11 @@ class AccountAbout:
     #: read what is declared never looks like one with nothing declared.
     unread: str = ""
     facts: SourceFacts = SourceFacts()
+    #: Who owns the account, as declared (`Store.account_owners`); empty for the owner alone.
+    owners: tuple[OwnerShare, ...] = ()
+    #: What the account is expected to hold or receive (`analysis.flows.expected_for`), or None
+    #: where no commitment's flow touches it.
+    expected: ExpectedFold | None = None
 
 
 @dataclass(frozen=True)
@@ -139,11 +175,12 @@ def read_about(store: Store, ref: str, names: AccountsShown) -> AccountAbout:
     try:
         record = store.declared_account(AccountRef(ref))
         facts = facts_from_readings(account_readings(store, ref))
+        owners = store.account_owners().get(ref, ())
     except Exception as fault:
         say("account_about.fault", kind=type(fault).__name__)
         return AccountAbout(None, unread="What is declared could not be read just now.")
     parent = names.of(str(record.parent)) if record is not None and record.parent else None
-    return AccountAbout(record, parent, facts=facts)
+    return AccountAbout(record, parent, facts=facts, owners=owners)
 
 
 def _same_rate(first: float, second: float) -> bool:

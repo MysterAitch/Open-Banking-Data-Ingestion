@@ -46,12 +46,17 @@ from datetime import date, timedelta
 from ..core.masking import Structural, Total
 from ..ingest.accounts import LimitWindow
 from ..ingest.commitment_records import Commitment, Window
+from ..ingest.ownership_records import WHOLE, OwnerShare
 from ..read.ledger import Money, direction_of
 from ..read.position import AccountPosition, Position
 from ..verify.balance_anchors import BANK, EXPORT, STATED, STATEMENT, STATEMENT_OPENING
+from .ownership import scaled, share_of, your_share_of
 from .recurring import Series
 
 CURRENCY = "GBP"
+
+#: Nothing, as the default of a total that is not made.
+NO_MONEY = Money(0, CURRENCY)
 
 #: Words in a declared kind that say the balance is owed: a card, a loan, a mortgage.
 _OWING_WORDS = ("card", "loan", "mortgage", "credit")
@@ -190,6 +195,10 @@ class AccountFigures:
     free_said: Structural[str]
     #: A card's declared limit in force today, or None where there is none.
     limit: Total[Money | None] = None
+    #: The whole percent of the account that counts as the owner's (`ownership.share_of`); every
+    #: figure above is already that share of the account's, and 100 for an account the owner has
+    #: alone.
+    share: Structural[int] = 100
 
 
 @dataclass(frozen=True)
@@ -208,6 +217,23 @@ class FigureTotal:
 
 
 @dataclass(frozen=True)
+class OwedLine:
+    """Money owed to the household: who owes it, for what, by when, and how much. Made by
+    `flows` from a share of a commitment's flow not yet arrived, or from a receivable declared on
+    a transaction; it sits here because Position carries it and `flows` reads Position."""
+
+    who: str
+    what: str
+    due: Structural[str]
+    amount: Total[Money]
+    overdue: Structural[bool]
+    #: "leg" for a share of a commitment, "transaction" for one declared on a transaction.
+    source: Structural[str]
+    #: The receivable's id for the press that closes it by hand; 0 for a leg.
+    receivable: Structural[int] = 0
+
+
+@dataclass(frozen=True)
 class FreeFigures:
     as_of: Structural[str]
     accounts: Structural[tuple[AccountFigures, ...]]
@@ -215,6 +241,10 @@ class FreeFigures:
     owed: Structural[FigureTotal]
     committed: Structural[FigureTotal]
     free: Structural[FigureTotal]
+    #: What other people owe the household and it has not been paid (`flows`): not part of any
+    #: account's balance, and so not in the figures above, but part of the position.
+    owed_to_you: Structural[tuple[OwedLine, ...]] = ()
+    owed_to_you_total: Total[Money] = NO_MONEY
     #: This month's share of the goals that have a date (`analysis.goals`), and how many goals it
     #: is made from. Counted apart from `committed` and never in `free`: a goal is the owner's
     #: choice and a commitment is an obligation.
@@ -345,10 +375,11 @@ def _figures_of(
     household: _Next,
     limits: Mapping[str, DeclaredLimit],
     today: date,
+    share: int,
 ) -> AccountFigures:
     card = owes_kind(account.kind)
     known = account.balance is not None
-    minor = account.balance.minor if account.balance is not None else 0
+    minor = scaled(account.balance.minor, share) if account.balance is not None else 0
     income = household if card else _next_income([account.ref], commitments, detected, today)
     mine = [
         (c, w)
@@ -364,7 +395,7 @@ def _figures_of(
         if due is None:
             unplaced += 1
         elif income.on is not None and due < income.on:
-            amount = Money(window.amount_minor, CURRENCY)
+            amount = Money(scaled(window.amount_minor, share), CURRENCY)
             lines.append(DueLine(commitment.name, due.isoformat(), amount))
     lines.sort(key=lambda line: (line.due, line.name))
     income_said = _income_said(income, today, card=card)
@@ -393,7 +424,7 @@ def _figures_of(
         elif limit is None:
             free_said = "No limit declared."
         else:
-            left = limit.amount_minor - max(-minor, 0)
+            left = scaled(limit.amount_minor, share) - max(-minor, 0)
             free, short = Money(abs(left), CURRENCY), left < 0
             since = f" in force from {limit.since.isoformat()}" if limit.since else ""
             free_said = f"The limit you declared{since}, less what is owed."
@@ -409,7 +440,8 @@ def _figures_of(
         ref=account.ref,
         label=account.label,
         is_card=card,
-        held_basis=held_basis(account, today) if known else _unknown_basis(account),
+        held_basis=_shared_basis(held_basis(account, today), share) if known
+        else _unknown_basis(account),
         held_known=known,
         held=Money(abs(minor), CURRENCY) if known else None,
         held_direction=direction_of(minor) if known else "",
@@ -425,7 +457,16 @@ def _figures_of(
         free_short=short,
         free_said=free_said,
         limit=Money(limit.amount_minor, CURRENCY) if limit is not None else None,
+        share=share,
     )
+
+
+def _shared_basis(basis: str, share: int) -> str:
+    """The basis of a held figure, led by whose share it is where that is not the whole: "your
+    half of the balance, stated by you on D"."""
+    if share >= WHOLE:
+        return basis
+    return f"{your_share_of(share, 'the balance')}, {basis}"
 
 
 def _total(values: Sequence[int | None], of: int) -> FigureTotal:
@@ -445,15 +486,19 @@ def build_free(
     *,
     today: date,
     limits: Mapping[str, DeclaredLimit] | None = None,
+    owners: Mapping[str, Sequence[OwnerShare]] | None = None,
     goals_share: Money | None = None,
     goals_sharing: int = 0,
 ) -> FreeFigures:
     """The four figures for every live (not archived) account and their totals.
 
     `detected` are the detector's series, read only where `wants_detector` said so; handing none
-    is the honest answer that no income was detected. `goals_share` is this month's share of the
-    dated goals, carried beside the totals and not in them."""
+    is the honest answer that no income was detected. `owners` are the declared ownerships
+    (`Store.account_owners`); an account in them has only the owner's share counted, in every
+    figure, and an account not in them is the owner's alone. `goals_share` is this month's share
+    of the dated goals, carried beside the totals and not in them."""
     wanted = limits or {}
+    held_by = owners or {}
     live = _live(position)
     household = _next_income(
         sorted({a.ref for a in live} | {c.account for c in commitments}),
@@ -461,7 +506,10 @@ def build_free(
         detected,
         today,
     )
-    accounts = tuple(_figures_of(a, commitments, detected, household, wanted, today) for a in live)
+    accounts = tuple(
+        _figures_of(a, commitments, detected, household, wanted, today, share_of(held_by, a.ref))
+        for a in live
+    )
     plain = [a for a in accounts if not a.is_card]
     cards = [a for a in accounts if a.is_card]
 

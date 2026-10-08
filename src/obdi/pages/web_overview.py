@@ -26,10 +26,13 @@ import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
+from typing import Any
 from urllib.parse import quote
 
+from ..analysis.flows import missing_sentence
 from ..analysis.this_month import MonthNote
 from ..core.logs import say
+from ..core.masking import Disclosed
 from ..core.page_times import (
     clock_text,
     date_with_age,
@@ -435,16 +438,67 @@ def month_line_html(
     which owns the rule for both)."""
     if note is None or not note.worth_saying():
         return ""
+    # Today is always the masked page, so the sentences that name a payee or hold a figure are
+    # drawn from the masked view of the record.
+    view = Disclosed(note, unmasked=False)
     parts = []
     for account in note.short:
         before = f" before {_esc(str(account.before))}" if str(account.before) else ""
         parts.append(f"{shown(str(account.ref)).as_name()} is short{before}")
     if int(note.overdue):
         parts.append(f"{plural(int(note.overdue), 'commitment')} overdue")
-    return (
+    first = (
         f'<p class="muted monthline">{"; ".join(parts)}. '
         '<a class="tap" href="/this-month">See this month</a></p>'
+        if parts
+        else ""
     )
+    more = _flow_lines(view, shown)
+    if more and not first:
+        more += (
+            '<p class="muted monthline"><a class="tap" href="/this-month">See this month</a></p>'
+        )
+    return first + more
+
+
+def _flow_lines(view: Any, shown: Callable[[str], AccountShown]) -> str:
+    """What the legs of a flow ask of the owner on Today, each in its own quiet line, and nothing
+    for a space that is funded or a leg that happened: a space short of what the month asks, a
+    leg that did not happen, and what is owed. The amounts are the sealed token."""
+    lines = []
+    for need in view.spaces:
+        held = (
+            f'<span class="mono nowrap">{_esc(str(need.held))}</span>'
+            if need.held_known
+            else "an amount not known"
+        )
+        lines.append(
+            f"{shown(str(need.ref)).as_name()}: "
+            f'<span class="mono nowrap">{_esc(str(need.needed))}</span> needed by '
+            f"{_esc(str(need.by))}; {held} held."
+        )
+    for leg in view.missing:
+        space = shown(str(leg.space)).as_name() if leg.space else ""
+        lines.append(
+            missing_sentence(
+                str(leg.kind),
+                _esc(str(leg.commitment)),
+                _esc(str(leg.party)),
+                _esc(str(leg.share_word)),
+                _esc(str(leg.month)),
+                _esc(str(leg.due)),
+                space,
+            )
+        )
+    if view.owed:
+        names = ", ".join(
+            f"{_esc(str(line.who))} ({_esc(str(line.what))})" for line in view.owed
+        )
+        lines.append(
+            f'Owed to you: <span class="mono nowrap">{_esc(str(view.owed_total))}</span> - '
+            f"{names}."
+        )
+    return "".join(f'<p class="muted monthline">{line}</p>' for line in lines)
 
 
 # ------------------------------------------------------------------------------------ Accounts

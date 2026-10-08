@@ -71,7 +71,11 @@ class TestTheFoldOnTheAccountPage:
     def test_Fold_OnAnAccountDeclaredWithOnlyAName_SaysNothingBeyondItsNameIsDeclared(self, base):
         page = masked(base, BARE)
 
-        assert lines_of(page) == ["Nothing beyond its name is declared. Declare its terms"]
+        said = lines_of(page)
+
+        # What is declared is one sentence; the ownership and reclaim controls follow it.
+        assert said[0] == "Nothing beyond its name is declared. Declare its terms"
+        assert any("shared account" in line for line in said[1:])
         link = next(iter(elements(fold_of(page), "a")))
         assert link.attrs["href"] == f"/edit-account?ref={BARE}"
 

@@ -335,6 +335,17 @@ class LedgerRow:
     transfer_other_anchor: Structural[str] = ""
     transfer_other_month: Structural[str] = ""
     transfer_other_label: Structural[str] = ""
+    #: What the owner declared is owed back on this row (`ingest.receivable_records`): "" for
+    #: none, "declared" while it is not closed by hand, else the way it was closed. Whether a
+    #: transfer has met it is worked out where the transfers are read, not on a ledger page, so a
+    #: row says only what was declared and never that it is still open.
+    owed_state: Structural[str] = ""
+    owed_expected: Structural[str] = ""
+    #: The entity that owes it, the label, the reason it was closed, and the amount: values.
+    owed_by: str = ""
+    owed_label: str = ""
+    owed_reason: str = ""
+    owed_amount: Total[Money | None] = None
 
 
 def row_anchor(entity_id: str) -> str:
@@ -1162,8 +1173,11 @@ def _ledger_for(
         ref, [t.entity_id for t in rows if first <= t.value_date <= last]
     )
 
+    owed = {r.row_ref: r for r in store.receivables(account=ref)}
+    debtors = store.entity_names() if owed else {}
     built: list[tuple[Transaction, LedgerRow]] = []
     for t in rows:
+        claim = owed.get(t.entity_id)
         seen = sightings.get(t.entity_id) or {t.source: ""}
         withheld = withheld_reason(t, bound=bound) or ""
         unsendable, refusal = False, ""
@@ -1247,6 +1261,12 @@ def _ledger_for(
                     feed_at=feed.time_of(t.entity_id) if feed is not None else None,
                     sightings=sighting_views(details.get(t.entity_id, ())),
                     anchor=row_anchor(t.entity_id),
+                    owed_state=(claim.closed_how or "declared") if claim else "",
+                    owed_expected=claim.expected_day.isoformat() if claim else "",
+                    owed_by=debtors.get(claim.debtor, "") if claim else "",
+                    owed_label=claim.label if claim else "",
+                    owed_reason=claim.closed_reason if claim else "",
+                    owed_amount=Money(claim.amount_minor, t.currency) if claim else None,
                 ),
             )
         )
