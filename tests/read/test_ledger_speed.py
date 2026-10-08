@@ -254,8 +254,11 @@ class TestMaskingAWrappedRecord:
 #: statement per row.
 #: The first load was 700 at most until the page read the overview and the files still to fetch
 #: for its things to do; measured then (2026-10-06) 780 statements first and 119 later. The first
-#: pays for assembling what Today shares, held for later loads by the same cache.
-FIRST_LEDGER_STATEMENTS = 800
+#: pays for assembling what Today shares, held for later loads by the same cache. It is 801 since
+#: "party stated" names its rows through `name_rows`, which reads the confirmed transfer pairs (one
+#: statement) so that a transfer between the household's own accounts is named by the account it
+#: went to and not counted as described.
+FIRST_LEDGER_STATEMENTS = 810
 #: The faithful large store's first load of the main account page: measured 1,027 (see
 #: `TestTheAccountPagesOverTheFaithfulLargeStore` for what the extra reads are).
 FAITHFUL_FIRST_LEDGER_STATEMENTS = 1100

@@ -5,9 +5,9 @@ alone? - is answered by `entities.name_of` and nobody else: a row is DESCRIBED e
 name's kind is the bottom rung, so this cannot disagree with the Entities page's "from the
 description" count. What a stated party IS is `read.party_coverage`'s to say.
 
-The rows are the ones the Entities page names (booked, not history), read as three columns in one
-statement for the whole store, because the links that name a described row from a stated one are
-learned across accounts (a payment seen by a feed in one account's month and a statement in
+The rows are the booked ones, read for the whole store at once through `name_rows` (the one place
+a row becomes a name), because the links that name a described row from a stated one are learned
+across accounts (a payment seen by a feed in one account's month and a statement in
 another's). The result is the same for every account and is held by the caller while the
 transactions are unchanged.
 """
@@ -17,11 +17,12 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date
 
+from ..core.models import TransactionStatus
 from ..ingest.entity_records import DESCRIPTION
 from ..ingest.store import Store
 from ..read.coverage_timeline import AGGREGATOR, EXPORT, FEED, kind_of_source
 from ..read.party_coverage import PartyStated, party_stated
-from .entities import learned_links, name_of
+from .entities import name_rows
 
 #: The ways in that can carry a stated party where a statement reader states none.
 _CAN_STATE = frozenset({FEED, AGGREGATOR, EXPORT})
@@ -29,17 +30,11 @@ _CAN_STATE = frozenset({FEED, AGGREGATOR, EXPORT})
 
 def party_stated_by_account(store: Store) -> dict[str, PartyStated]:
     """Every account's `PartyStated`, from one read of the booked transactions."""
-    rows = store.connection.execute(
-        "SELECT account_id, value_date, description, counterparty FROM transactions "
-        "WHERE status = 'booked'"
-    ).fetchall()
-    links = learned_links((str(r["description"]), str(r["counterparty"])) for r in rows)
+    rows = [t for t in store.all_transactions() if t.status is TransactionStatus.BOOKED]
+    _fields, _links, named = name_rows(rows, store.confirmed_transfer_pairs())
     held: dict[str, list[tuple[date, bool]]] = defaultdict(list)
-    for r in rows:
-        named = name_of(str(r["description"]), str(r["counterparty"]), links)
-        held[str(r["account_id"])].append(
-            (date.fromisoformat(str(r["value_date"])), named.kind != DESCRIPTION)
-        )
+    for row, item in zip(rows, named, strict=True):
+        held[row.account_id].append((row.value_date, item.kind != DESCRIPTION))
     ways: dict[str, set[str]] = defaultdict(set)
     for r in store.connection.execute(
         "SELECT DISTINCT t.account_id AS account, s.source AS source "

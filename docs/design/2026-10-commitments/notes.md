@@ -250,6 +250,31 @@ A split whose parts do not sum to the amount is refused where it is made.
 | 0.4.367 (key reverted; common by position; function words) | 63 | 54 / 8 / 1 | 51 / 7 / 5 | 31 (19) | 5 | 1,297 / 185 / 776 / 2 groups of 20 |
 | 0.4.369 (R2c: the stated party names a row; the learned link joins) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 867 (777 stated, 90 description, 34 rows linked) / 99 / 298 / 0 |
 | 0.4.371 (exact-match rung; both dates; per-kind fit) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 866 (777 stated, 89 description, 34 linked, 17 exact) / 99 / 297 / 0 |
+| Next release (party account and id on the row; the ladder reads them; own accounts named "your <account>"): PREDICTED, NOT MEASURED | about 62 | 54 / 8 / 0 to 1 | about 47 / 7 / 8 | about 36 (17), falling if the habit returns | 4 | names fall where one person was paid under several spellings and rise where people share a stated name; the net on mostly card spending is small |
+
+The predicted row above is a prediction and not a result, written before any real store was read,
+in the words of the build that makes it (invented stores, counts only: the faithful large store
+went from 40 names to 51, 3 proposals, 14 series, 6 stopped, with the same proposals, series, and
+stopped as before the build; the three synthetic worlds from 9 names to 10, 0 proposals, 3 series,
+0 stopped, 1 transfer series; measured again on the merged tree with the same figures):
+- Starling transfers to a person collapse their spellings and references into one name each, and
+  names fall where one person was paid under several spellings; people sharing a stated name are
+  separated by account, so names rise there. The net on a store of mostly card spending is small.
+- Card merchants are named by the bank's id for the party. If the bank's counterparty id is the
+  merchant's (the premise of the corpus), the merchant count is unchanged and the labels are the
+  stated names; if it is per branch, one brand becomes several names with one label, which the
+  page would show as duplicates. This is the main unproven assumption, and the first look at the
+  real store should count distinct ids per stated name.
+- Statement-only months (descriptions with no stated party) join a party only where a row seen by
+  both carries the same description-shape, or the description equals the stated name. The
+  Nationwide months, whose reader now states the party, will be named by it and join a feed party
+  by the stated-name join where the feed also states an id for that name.
+- Rows from before any feed (export-only) keep their stated names and join nothing unless the same
+  name was stated with an id later.
+- The numbers to read off the real store, by kind: names by account, by source id, by stated name,
+  by matched or truncated name, by description; series; stopped (a rise past 36 is the 0.4.361
+  signature: a party split into a stopped half and a new half); and the habit (1 before, 0 when a
+  party's months split).
 
 What the rows say: the four-slot rule removed sixteen fragments, thirteen of them stopped
 (0.4.357); keying the shape on a source-dependent field split one payee by source and cost the
