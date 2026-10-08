@@ -196,12 +196,27 @@ a hypothesis, and the record of it says what was tested and what was not:
 - Tested against every OTHER identified row in the store: the rule must match none of them.
   That is the only estimate of P(U given Y) available, and its strength is the size of the
   population it was tested against, so the sentence carries both numbers: "every one of U's 14
-  rows opens Y; none of the other 2,310 identified rows does". A rule tested against a small
-  population is a weak one and is shown as such (below a floor, not offered at all).
+  rows opens Y; none of the other 2,310 identified rows does".
+- Confidence, not a gate. The owner, 2026-10-08: "it is more a confidence issue - we could draw
+  on p values or something similar and still show low confidence / 'unable to definitively
+  confirm' results but just be honest about it. It could be the entry is shown but defaults
+  to unticked." So a weak rule is never hidden: every rule is SHOWN with its two numbers and a
+  confidence derived from them, and the confidence decides only the DEFAULT. With k = 0
+  matches among N other identified rows, the one-sided 95% bound on the share of such rows
+  that would match is about 3/N (the rule of three), so N is the figure that matters and the
+  page says it plainly: "tested against 2,310 other identified rows, none opened so - if the
+  unidentified rows are like them, fewer than 1 in 770 would belong to someone else", and
+  below the line, in the same sentence, the caveat that the unidentified rows need not be like
+  them. Above a stated confidence threshold (a named constant with its reason) the rule is
+  applied by default - ticked; below it the rule is offered unticked, its inferred rows listed
+  but NOT linked until the owner ticks it, and the sentence says "unable to confirm from the
+  rows held: tested against only 41 other identified rows". Ticking is a Keep; the unticked
+  state is the honest answer, not an absence.
 - Applied to description-only rows: a row opening Y is linked to U with kind `LEARNED_RULE`,
   BELOW truncation (which checks a name against a name on the same row) and above the bare
-  description. The row's sentence names it as inferred, not stated: "from the description,
-  which opens as every one of U's 14 identified rows does and no other identified row does".
+  description. The row's sentence names it as inferred, not stated, and carries the
+  confidence: "from the description, which opens as every one of U's 14 identified rows does
+  and none of the other 2,310 identified rows does".
 - Falsifiable by the owner: Not this on one inferred row is a counterexample, and a single
   counterexample withdraws the rule (P(U given Y) is no longer one on the only labelled
   evidence there is); the refusal is kept so the rule is not re-learned tomorrow. Keep
