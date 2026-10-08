@@ -26,6 +26,70 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.375] - 2026-10-08
+
+### Changed
+- **The strongest evidence about the other party reaches the row, and the
+  ladder reads it first.** Item 2 of `entities.md`: each transaction row
+  carries `party_account` (the other party's sort code and account number,
+  or an IBAN, in one canonical form - Starling's sub-entity identifiers and
+  TrueLayer's counterparty IBAN, so a feed's two fields and an aggregator's
+  IBAN compare equal) and `party_source_id` (a source's own id for the
+  party, prefixed by the source), filled from raw at derive time, kept
+  first-wins when sightings fold, and outside the content key, so no row's
+  identity moves (schema 27). A row's name is then its account identifier
+  where it has one, else the source's id, else the stated name, and so on
+  down; the name is an identity key (`acct-` plus a digest of the account;
+  `<source>:<id>`) and the page shows a readable label beside it - the
+  stated name most rows carry, else the description-shape, never the
+  number, which appears on no page in full, masked or shown. Two people
+  with one stated name are two keys and one label; one person across
+  twelve references and two spellings is one. The learned links learn from
+  these kinds too, and a stated name stands for the one identifier it was
+  stated with - the first measured run on the invented store turned 40
+  names into 78 by letting a name stated with a uid and the same name from
+  an older export stand apart, and this joins them; a name stated with two
+  identifiers joins neither.
+- **A transfer between the household's own accounts is a transfer.** The
+  owner, 2026-10-07: "The account being owned or controlled by me is a
+  second order fact which indirectly links 'me' (the entity) by virtue of
+  the counterparty account's attributes... ie not via the transaction
+  itself." A leg of a confirmed transfer pair, or a row whose party
+  identifier the pairs show leads to exactly one household account, is
+  named "your <account label>", with no proposal; the owner group of
+  0.4.361 - which attached transfer legs' printed names to a "Me" entity -
+  is withdrawn with its press and section, and the owner is reached through
+  an account's ownership (R3) when that is declared. Twelve transfers with
+  twelve references are one name, "your Savings". Not done: declaring an
+  account obdi does not hold as the owner's ("N payments to an account not
+  held here - This account is mine"), which needs an identifier column and
+  an external flag on the declared accounts; recorded as the next piece.
+- **The Nationwide reader states the party.** Its two-line layout prints
+  `<method> <party>` and then the reference or an effective date, so the
+  reader sets the row's counterparty from line one with the method phrase
+  removed, keeps the reference as the description, takes "Effective Date …"
+  as the posting date, and records the method the way a feed's coded type
+  is recorded, so a statement-only series is told pulled or scheduled by
+  type. Only a known method phrase followed by a second line states a
+  party: a long name that wraps looks like a second line and must not. A
+  statement's content key still reads the whole printed line, so identity
+  does not move; the migration that re-keys recognises a key that agrees
+  with the printed line.
+- **The invented large store describes a bank that exists.** It had hashed
+  each payment's whole name into the merchant's uid, giving 979 "parties"
+  from 29 merchants; a merchant now has one uid and a payment in states a
+  sort code and number. On it, after this release: 51 names (25 by source
+  id, 13 by account, 11 by description, 2 stated), 14 series, 6 stopped -
+  the series and stopped figures matching the tree before the columns.
+  Predicted for the real store, unmeasured: names fall further as feed
+  rows take their uid and transfers take their account; the habit and
+  stopped lines must not move; and the first thing to count there is
+  distinct uids per stated name, since the one unproven assumption is that
+  Starling's counterparty uid is per merchant and not per branch.
+- The first account-page load reads 801 statements, one more than its
+  budget of 800, because the "Party stated" row reads the confirmed
+  transfer pairs; the budget is 810 with the reason beside it.
+
 ## [0.4.374] - 2026-10-08
 
 ### Changed
