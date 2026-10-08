@@ -109,7 +109,7 @@ class TestAStoreFromBeforeKinds:
 
         assert "entity_shapes" not in tables
         assert "entity_identifiers" in tables
-        assert stamped == str(SCHEMA_VERSION) == "27"
+        assert stamped == str(SCHEMA_VERSION) == "26"
 
     def test_Store_WhenOpenedTwice_DoesNotMoveTheAttachmentsAgain(self, old_path):
         with Store(old_path):

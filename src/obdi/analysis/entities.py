@@ -780,6 +780,7 @@ def _origin_has(origin: NameOrigin, kind: str) -> bool:
             STATED_NAME: origin.stated,
             ALIAS: origin.linked,
             MATCHED_NAME: origin.matched,
+            TRUNCATED_NAME: origin.truncated,
             DESCRIPTION: origin.described,
         }[kind]
     )

@@ -360,8 +360,10 @@ def _axis_html(today: date) -> str:
     )
 
 
-def _file_html(item: WantedFile, today: date) -> str:
+def _file_html(item: WantedFile, today: date, *, who: str = "") -> str:
     what = "Export" if item.export else "Statement"
+    if who:
+        what = f"{who} &middot; {what}"
     days = f"{item.first.isoformat()} to {item.last.isoformat()}"
     why = _esc(item.words)
     if item.since is not None:
@@ -417,6 +419,28 @@ def _account_html(
     )
 
 
+def _party_html(data: BringInData, party: Sequence[WantedFile]) -> str:
+    """The exports wanted only for the party they would state, in one closed fold at the foot:
+    such a file tests no balance, and listing each beside the files that do - with a section,
+    a trust line, and a strip for an account that wanted nothing else - took the invented
+    household's page from 3.15 to 3.74 screens."""
+    if not party:
+        return ""
+    rows = sum(item.rows for item in party)
+    accounts = {item.account for item in party}
+    plural = "" if len(party) == 1 else "s"
+    items = "".join(
+        _file_html(item, data.today, who=data.names.of(item.account).as_name())
+        for item in party
+    )
+    return (
+        f'<details class="bi-party"><summary>{len(party)} export{plural} would state the party '
+        f"for {rows} transaction{'' if rows == 1 else 's'} across "
+        f"{len(accounts)} account{'' if len(accounts) == 1 else 's'}</summary>"
+        f'<ul class="bi-files">{items}</ul></details>'
+    )
+
+
 def _wanted_html(data: BringInData, *, still: bool, fold: bool = False) -> str:
     if data.report is None:
         said = data.unread or "What is wanted could not be worked out just now."
@@ -424,10 +448,14 @@ def _wanted_html(data: BringInData, *, still: bool, fold: bool = False) -> str:
     files = files_wanted(data.report)
     if not files:
         return "" if still else '<p class="quiet-ok bi-clear">Nothing is wanted.</p>'
-    groups = by_account(files)
+    testing = [item for item in files if not item.tests_nothing]
+    party = [item for item in files if item.tests_nothing]
+    groups = by_account(testing)
     heading = _esc(wanted_heading(files, still=still))
-    body = _axis_html(data.today) + "".join(
-        _account_html(ref, items, data) for ref, items in groups.items()
+    body = (
+        (_axis_html(data.today) if groups else "")
+        + "".join(_account_html(ref, items, data) for ref, items in groups.items())
+        + _party_html(data, party)
     )
     if fold:
         return f'<details class="bi-fold"><summary>{heading}</summary>{body}</details>'

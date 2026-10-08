@@ -112,6 +112,18 @@ def wanted_sections(text: str) -> dict[str, str]:
     return found
 
 
+def party_fold(text: str) -> tuple[str, list[str]]:
+    """The closed fold at the foot of Bring in that holds the exports wanted only for the party
+    they would state: its summary, and each row's words (the account's name leads the row)."""
+    found = re.search(
+        r'<details class="bi-party"><summary>(.*?)</summary>(.*?)</details>', text, re.S
+    )
+    if found is None:
+        return "", []
+    rows = re.findall(r'<li class="bi-file[^"]*">(.*?)</li>', found.group(2), re.S)
+    return found.group(1), [" ".join(re.sub(r"<[^>]+>", " ", row).split()) for row in rows]
+
+
 def notes_of(text: str) -> list[str]:
     return re.findall(r'<p class="muted party-note">([^<]*)</p>', text)
 
@@ -202,16 +214,26 @@ class TestTheNoteOnToday:
 
 class TestTheWantOnBringIn:
     def test_Mixed_IsAskedForAnExportCoveringExactlyItsDescribedMonths(self, base):
-        sections = wanted_sections(page(base, "/bring-in"))
+        """The want sits in one closed fold at the foot, not in an account section of its own:
+        a file that states the party tests no balance, and a section with a trust line and a
+        strip for it took the invented household's page over its budget."""
+        text = page(base, "/bring-in")
+        summary, rows = party_fold(text)
 
-        assert sections[MIXED] == (
+        assert MIXED not in wanted_sections(text)
+        assert summary == "1 export would state the party for 18 transactions across 1 account"
+        assert len(rows) == 1 and rows[0].endswith(
             f"Export {MIXED_DESCRIBED_FIRST.isoformat()} to {MIXED_DESCRIBED_LAST.isoformat()} "
             f"(2 months) {MIXED_DESCRIBED_ROWS} transactions there are named by the "
             "description only"
         )
 
     def test_PdfOnlyAndStated_AreAskedForNothing(self, base):
-        assert set(wanted_sections(page(base, "/bring-in"))) == {MIXED}
+        text = page(base, "/bring-in")
+        _summary, rows = party_fold(text)
+
+        assert wanted_sections(text) == {}
+        assert len(rows) == 1
 
     def test_TheWant_CannotBeSetAside(self, base):
         files = re.findall(r'<li class="bi-file[^"]*">.*?</li>', page(base, "/bring-in"), re.S)

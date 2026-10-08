@@ -144,14 +144,11 @@ from .stated_words import recorded_words
 #: Both are hand decisions, kept across the rebuild from raw. A store stamped 24 would never have
 #: grown them.
 #:
-#: 25 -> 27: `entity_identifiers` replaces `entity_shapes`: an entity holds identifiers WITH KINDS
+#: 25 -> 26: `entity_identifiers` replaces `entity_shapes`: an entity holds identifiers WITH KINDS
 #: (a stated name, a description-shape, an account number, a source's id) instead of bare shapes,
 #: so an attachment can say what it was attached as. Every `entity_shapes` row moves across as a
-#: description-kind identifier (`_migrate_entity_identifiers`) and the old table is dropped. 26 is
-#: not used here: it is the version of the change that gave the derived rows their account and
-#: source-id columns, built apart from this one, and the number is left free so the two merge
-#: without either renumbering.
-SCHEMA_VERSION = 27
+#: description-kind identifier (`_migrate_entity_identifiers`) and the old table is dropped.
+SCHEMA_VERSION = 26
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
