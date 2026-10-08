@@ -47,11 +47,24 @@ from .payment_methods import strip_leading_methods
 if TYPE_CHECKING:  # pragma: no cover - imported for types alone
     from ..ingest.store import Store
 
-#: The rules that can join two shapes into one proposed group, said once here and by name
-#: everywhere else. OPENING_WORDS: they begin with the same two or more words. SAME_WORDS: once
-#: one-letter codes are set aside, they are made of the same words in whatever order.
+#: The reasons that can join names into one proposed group, said once here and by name everywhere
+#: else. OPENING_WORDS: they begin with the same two or more words. SAME_WORDS: once one-letter
+#: codes are set aside, they are made of the same words in whatever order. Both are similarity of
+#: text. SAME_ROWS is evidence and not similarity: payments carry identifiers of two different
+#: kinds that these names stand for (`entity_ties.row_ties`), and a group of it outranks the two
+#: text reasons.
 OPENING_WORDS = "opening words"
 SAME_WORDS = "same words"
+SAME_ROWS = "same rows"
+
+#: Fewest payments that must carry two identifiers for them to be offered as one party. Two is the
+#: smallest count a coincidence is not the only explanation of: one payment carrying a merchant's
+#: id beside another merchant's name is an error, a payment made on somebody's behalf, or a
+#: processor shared by two shops, and a proposal is ticked by default, so a single such row would
+#: put a wrong merge one press from done. Three was rejected as a floor because a party seen for
+#: two months (a short habit, a new landlord) would never be offered; the figure is a threshold
+#: to relax or tighten on evidence from the real store, not a property of payees.
+MIN_SHARED_ROWS = 2
 
 #: Fewest words at the start that two shapes must share to be one proposed group. A single shared
 #: word is two retailers that begin alike far more often than one retailer, and a wrong merge is
@@ -293,6 +306,29 @@ KIND_SENTENCES: dict[str, str] = {
     DESCRIPTION: "description",
     RULE: "rule",
 }
+
+#: What each kind of identifier is called in the reason a group of `SAME_ROWS` gives
+#: (`tie_sentence`): the one table the page reads, as the sentences above are.
+TIE_NOUNS: dict[str, str] = {
+    ACCOUNT: "the other party's account number",
+    SOURCE_ID: "the bank's own id for the party",
+    STATED_NAME: "the stated name",
+    DESCRIPTION: "the printed description",
+}
+
+
+def tie_sentence(payments: int, kinds: Sequence[str]) -> str:
+    """The reason a `SAME_ROWS` group is offered: how many payments carry two of the identifiers
+    and which kinds those are ("4 payments carry both the stated name and the printed
+    description"). Refused for fewer than two kinds, since one kind ties nothing to another."""
+    if len(kinds) < 2:
+        raise ValueError(f"a tie joins two kinds of identifier at least: {tuple(kinds)!r}")
+    nouns = [TIE_NOUNS[kind] for kind in kinds]
+    count = plural(payments, "payment")
+    if len(nouns) == 2:
+        return f"{count} carry both {nouns[0]} and {nouns[1]}"
+    return f"{count} carry two of {', '.join(nouns[:-1])}, and {nouns[-1]}"
+
 
 #: How a transaction is said to be linked to an entity, by the kind of identifier that linked it:
 #: the one table every page reads (NF-TRACE-01), so no page words a link itself.
@@ -605,6 +641,26 @@ def _strong_name(row: Fields) -> Named | None:
         if stated:
             return Named(stated, kind)
     return None
+
+
+def identifiers_of(row: Fields) -> tuple[tuple[str, str], ...]:
+    """Every identifier a row carries, as (kind, value) strongest first: the party's account, a
+    source's id for it, the counterparty name it states, and the shape of its description, each
+    as a name would be made of it. A transfer between the household's own accounts carries none,
+    since its other party is an account and nothing about the row's text is evidence of it."""
+    if row.held:
+        return ()
+    found: list[tuple[str, str]] = []
+    for kind, text in (
+        (ACCOUNT, row.account),
+        (SOURCE_ID, row.source_id),
+        (STATED_NAME, row.counterparty),
+        (DESCRIPTION, row.description),
+    ):
+        value = _shape(text) if kind == DESCRIPTION else _identifier_name(kind, text)
+        if value:
+            found.append((kind, value))
+    return tuple(found)
 
 
 def learned_links(rows: Iterable[Fields | tuple[str, str]]) -> dict[str, Alias]:
@@ -1361,6 +1417,10 @@ class Proposal:
     #: The distinctive words every shape in the group holds, in the order the commonest one prints
     #: them; what a "contains" rule is made of where the group has no opening.
     shared: str = ""
+    #: For a `SAME_ROWS` group: the kinds of identifier (`IDENTIFIER_KINDS`) the payments tie
+    #: together, strongest first, and how many payments carry two of them.
+    kinds: tuple[str, ...] = ()
+    shared_rows: int = 0
 
     def rule(self) -> tuple[str, str] | None:
         """The rule that joined the group, in the form the store keeps it, or None where the
@@ -1379,6 +1439,69 @@ class Proposal:
             except EntityRefused:
                 return None
         return None
+
+
+@dataclass(frozen=True)
+class Tie:
+    """Names that payments tie together: the rows carry identifiers of different kinds that these
+    names stand for, on at least `MIN_SHARED_ROWS` payments (`entity_ties.row_ties` finds them)."""
+
+    names: tuple[str, ...]
+    #: The kinds of identifier that join them, strongest first.
+    kinds: tuple[str, ...]
+    #: The payments that carry two of those identifiers.
+    rows: int
+
+
+def evidence_proposals(
+    ties: Sequence[Tie],
+    counts: Mapping[str, int],
+    origins: Mapping[str, NameOrigin],
+    shown_as: Mapping[str, str],
+    taken: Collection[str],
+) -> tuple[Proposal, ...]:
+    """The groups payments themselves say are one party (`SAME_ROWS`), for the owner to accept.
+
+    A name is in at most one group (the tie of more payments takes it), and one the owner has
+    already placed under an entity is left where it is. Members are listed strongest kind first,
+    then most used, so a tick attaches each as the kind its rows carry (`identifier_for`) in that
+    order. A group is named by the readable label of its first member.
+    """
+    rank = {kind: position for position, kind in enumerate(LADDER)}
+
+    def strength(name: str) -> tuple[int, int, str]:
+        origin = origins.get(name)
+        return (rank[origin.kind] if origin else len(rank), -counts[name], name)
+
+    def readable(name: str) -> str:
+        found = shown_as.get(name)
+        if found is not None:
+            return found
+        return UNNAMED_PARTY if is_identifier_key(name) else name
+
+    assigned: set[str] = set()
+    found: list[Proposal] = []
+    for tie in sorted(ties, key=lambda t: (-t.rows, t.names)):
+        free = [n for n in tie.names if n in counts and n not in taken and n not in assigned]
+        if len(free) < 2:
+            continue
+        assigned.update(free)
+        ordered = tuple(sorted(free, key=strength))
+        label = next(
+            (readable(n) for n in ordered if readable(n) != UNNAMED_PARTY), UNNAMED_PARTY
+        )
+        found.append(
+            Proposal(
+                name=" ".join(word.capitalize() for word in label.split()),
+                shapes=ordered,
+                rules=frozenset({SAME_ROWS}),
+                transactions=sum(counts[n] for n in ordered),
+                kinds=tie.kinds,
+                shared_rows=tie.rows,
+            )
+        )
+    found.sort(key=lambda p: (-p.transactions, p.name, p.shapes))
+    return tuple(found)
 
 
 def _words(named: Sequence[Token]) -> frozenset[str]:
@@ -1627,6 +1750,7 @@ def view_of(
     origins: Mapping[str, NameOrigin] | None = None,
     readings: Mapping[str, str] | None = None,
     labels: Mapping[str, str] | None = None,
+    ties: Sequence[Tie] = (),
 ) -> EntitiesView:
     """The page's view of the names held and the entities made from them.
 
@@ -1636,11 +1760,17 @@ def view_of(
     it is never proposed for a merge by what its label looks like: nothing is asked of the owner
     about a party the account or the bank's own id already settled. That includes a transfer
     between the household's own accounts, whose other party is an account (`held_accounts`).
+    `ties` is what payments say, not what names look like (`entity_ties.row_ties`): the one thing
+    that can propose an identifier name beside another, and it leads the proposals, the names it
+    holds being left out of the text reasons.
     """
     made = tuple(entities)
     set_apart = {shape for entity in made for shape in entity.shapes}
+    evidence = evidence_proposals(ties, counts, origins or {}, labels or {}, set_apart)
+    tied = {name for group in evidence for name in group.shapes}
     text_names = {name: n for name, n in counts.items() if not is_identifier_key(name)}
-    proposals = propose_groups(text_names, taken=set_apart, readings=readings)
+    text = propose_groups(text_names, taken=set_apart | tied, readings=readings)
+    proposals = Proposals(groups=(*evidence, *text.groups), too_broad=text.too_broad)
     offered = {s for g in (*proposals.groups, *proposals.too_broad) for s in g.shapes}
     return EntitiesView(
         counts=counts,

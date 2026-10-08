@@ -3977,6 +3977,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             name_readings,
             view_of,
         )
+        from .analysis.entity_ties import row_ties
         from .analysis.recurring import counts_as_occurrence
 
         with Store(db_path) as store:
@@ -4003,6 +4004,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
                 origins,
                 name_readings(fields, named),
                 display_names(fields, named, _held_labels(store, rows, named, names)),
+                row_ties(fields, named),
             )
 
     def entities_act(action: str, form: dict[str, list[str]]) -> str:

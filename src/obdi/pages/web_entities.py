@@ -31,6 +31,7 @@ from ..analysis.entities import (
     MATCHED_NAME,
     OPENING_WORDS,
     RULE,
+    SAME_ROWS,
     SAME_WORDS,
     SHAPE_STEPS,
     TRUNCATED_NAME,
@@ -44,6 +45,7 @@ from ..analysis.entities import (
     held_kind,
     name_shown,
     rule_phrase,
+    tie_sentence,
 )
 from ..analysis.entity_tokens import COMPARISON_SENTENCE, DROPPED, IGNORED_TRAILING
 from ..analysis.payment_methods import METHODS
@@ -166,6 +168,8 @@ def _why(group: Proposal) -> str:
     rule to state is refused here, so a page never shows a proposal with no reason.
     """
     both = "both" if len(group.shapes) == 2 else "all"
+    if SAME_ROWS in group.rules:
+        return tie_sentence(group.shared_rows, group.kinds)
     if OPENING_WORDS in group.rules and group.opening:
         return f"{both} begin with “{group.opening}”"
     if SAME_WORDS in group.rules and group.shared:
@@ -382,9 +386,14 @@ def _group(group: Proposal, view: EntitiesView, *, unmasked: bool, checked: bool
     press never merges names the owner has not chosen."""
     across = _across(len(group.shapes), group.transactions)
     if not unmasked:
+        # What payments carry is a count and a kind of field, never a value, so it is said masked.
+        evidence = ""
+        if SAME_ROWS in group.rules:
+            evidence = f"; {tie_sentence(group.shared_rows, group.kinds)}"
         return (
             f'<section class="ent-group"><h3>{_sealed(group.name)}</h3>'
-            f'<p class="ent-why">{across}.</p>{_masked_days(group.shapes, view)}</section>'
+            f'<p class="ent-why">{across}{evidence}.</p>'
+            f"{_masked_days(group.shapes, view)}</section>"
         )
     return (
         f'<section class="ent-group"><form method="post" action="{MERGE_ROUTE}">'

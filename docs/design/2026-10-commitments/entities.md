@@ -209,6 +209,22 @@ series).
    them", from section 4's evidence, replacing text-similarity proposals except as the last
    rung for description-only rows.
 
+   Built as the reason `SAME_ROWS` (`analysis/entity_ties.py`, shown by `tie_sentence`), leading
+   the proposals above the two text reasons. Two identifiers are tied when at least
+   `MIN_SHARED_ROWS` (2) payments carry both, and a proposal is the names that remain distinct
+   after `name_of` and `learned_links` although payments tie them. That is narrower than the
+   note above first read: a description-shape seen beside an id on two payments is ALREADY a
+   learned link, so the statement rows are one name with the id and nothing is left to ask. What
+   remains is a merchant with two ids for one stated name, an account and an id seen together on
+   some payments and apart on others, and a shape seen mostly with one id and once with another
+   (`learned_links` refuses the shape as ambiguous; two payments still tie it to the first id).
+   A description-shape tying payments named for more than one party is dropped, as
+   `learned_links` drops it: two housemates paid under one reference are not one person.
+   Rejected: a floor of 1 (a single payment is an error or a payment on somebody's behalf, and
+   the group starts ticked); a floor of 3 (a party seen for two months would never be offered).
+   Not done: a stated name shared by two PEOPLE who each have their own account is offered like
+   a merchant with two ids, since the payments cannot tell them apart; the owner unticks it.
+
 Rejected: keeping description-shapes as the identity with better cleaning (three releases
 showed the limit, and the rent case is not a cleaning problem); asking the owner to join a
 party's spellings by hand where a payment seen by two sources already answers it; a single
