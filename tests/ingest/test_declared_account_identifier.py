@@ -23,8 +23,8 @@ from dataclasses import replace
 
 import pytest
 
+from landing import rebuild_from_raw
 from obdi.ingest.accounts import AccountRecord, AccountRef
-from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import SCHEMA_VERSION, Store
 
 SNAPSHOT = (
