@@ -294,6 +294,112 @@ class TestAnEditedCommitment:
         assert (found.name, found.kind) == ("Zephyrine Streaming", "pulled")
 
 
+def dismiss(store: Store, **given: Any) -> int:
+    arguments: dict[str, Any] = {
+        "entity_id": None,
+        "name_key": "zephyrine quokka",
+        "account": "current-main",
+        "direction": "out",
+        "cadence": "monthly",
+        "now": NOW,
+    }
+    arguments.update(given)
+    return store.dismiss_series(**arguments)
+
+
+class TestASeriesSaidNotToBeACommitment:
+    def test_Dismissal_WhenKept_ReadsBack(self, store):
+        made = dismiss(store)
+
+        (found,) = store.dismissals()
+
+        assert (found.id, found.name_key, found.account, found.direction, found.cadence) == (
+            made,
+            "zephyrine quokka",
+            "current-main",
+            "out",
+            "monthly",
+        )
+        assert found.entity_id is None and found.dismissed_at == NOW.isoformat()
+
+    @pytest.mark.parametrize(
+        "given",
+        [
+            {"name_key": ""},
+            {"account": ""},
+            {"cadence": ""},
+            {"direction": "sideways"},
+            {"entity_id": 999},
+        ],
+        ids=["no-payee", "no-account", "no-cadence", "direction", "missing-entity"],
+    )
+    def test_Dismissal_WhenMalformed_IsRefusedAndKeptNowhere(self, store, given):
+        with pytest.raises(CommitmentRefused):
+            dismiss(store, **given)
+
+        assert store.dismissals() == []
+
+    def test_Dismissal_WhenKeptTwice_IsRefusedTheSecondTime(self, store):
+        dismiss(store)
+
+        with pytest.raises(CommitmentRefused, match="already"):
+            dismiss(store)
+
+        assert len(store.dismissals()) == 1
+
+    def test_Dismissals_ForTwoCadencesOfOnePayee_AreBothKept(self, store):
+        dismiss(store)
+        dismiss(store, cadence="yearly")
+
+        assert [d.cadence for d in store.dismissals()] == ["monthly", "yearly"]
+
+    def test_Dismissal_WhenPutBack_ListsNoMoreButKeepsItsRow(self, store):
+        made = dismiss(store)
+
+        store.restore_dismissal(made, now=NOW)
+
+        assert store.dismissals() == []
+        rows = store.connection.execute("SELECT removed_at FROM series_dismissals").fetchall()
+        assert [r[0] for r in rows] == [NOW.isoformat()]
+
+    def test_Dismissal_WhenPutBackTwiceOrUnknown_IsRefused(self, store):
+        made = dismiss(store)
+        store.restore_dismissal(made)
+
+        with pytest.raises(CommitmentRefused):
+            store.restore_dismissal(made)
+        with pytest.raises(CommitmentRefused):
+            store.restore_dismissal(404)
+
+    def test_Dismissal_WhenPutBack_CanBeKeptAgain(self, store):
+        store.restore_dismissal(dismiss(store))
+
+        dismiss(store)
+
+        assert len(store.dismissals()) == 1
+
+    def test_Dismissal_ForAnEntity_IsKeptAgainstIt(self, store):
+        entity = store.create_entity("Zephyrine", ["zephyrine quokka"], now=NOW)
+
+        dismiss(store, entity_id=entity, name_key="")
+
+        assert [d.entity_id for d in store.dismissals()] == [entity]
+
+    def test_Dismissals_WhenTheStoreIsRebuiltFromRaw_AreUntouched(self, store):
+        dismiss(store)
+
+        rebuild_from_raw(store)
+
+        assert len(store.dismissals()) == 1
+
+    def test_Irreplaceable_WhenASeriesIsSetAside_CountsIt(self, store):
+        key = "recurring payments said not to be commitments"
+        before = store.irreplaceable()[key]
+        dismiss(store)
+
+        assert store.irreplaceable()[key] == before + 1
+
+
 class TestDeclaredCommitmentsAcrossTheRebuild:
     def test_Commitments_WhenTheStoreIsRebuiltFromRaw_AreUntouched(self, store):
         made = declare(store)

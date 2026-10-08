@@ -28,7 +28,16 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
-from ..analysis.commitments import ENDED, MISSING, Confirmation, match_series, series_refs
+from ..analysis.commitments import (
+    ENDED,
+    MISSING,
+    Confirmation,
+    Tally,
+    match_dismissals,
+    match_series,
+    series_refs,
+    tally_of,
+)
 from ..analysis.recurring import (
     DATED_POSTED,
     HABIT,
@@ -41,7 +50,7 @@ from ..core.logs import say
 from ..core.masking import MASKED_TOTAL, mask_text
 from ..core.page_times import date_with_age, percent_text, span_words
 from ..core.plural import plural
-from ..ingest.commitment_records import CommitmentRefused
+from ..ingest.commitment_records import CommitmentRefused, Dismissal
 from ..read.account_names import AccountShown, AccountsShown
 from ..read.ledger import Money
 from . import values_sitting
@@ -57,6 +66,8 @@ _esc = html.escape
 ROUTE = "/recurring"
 CONFIRM_ROUTE = "/recurring-confirm"
 PRICE_ROUTE = "/recurring-price"
+DISMISS_ROUTE = "/recurring-dismiss"
+RESTORE_ROUTE = "/recurring-restore"
 
 _WEEKDAYS = ("Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays")
 
@@ -197,6 +208,7 @@ class _Line:
     series: Series
     ref: str
     confirmation: Confirmation | None
+    dismissal: Dismissal | None = None
 
 
 def _press(route: str, ref: str, label: str, *, unmasked: bool, **fields: str) -> str:
@@ -240,13 +252,17 @@ def _actions(line: _Line, *, unmasked: bool) -> str:
             f"{_esc(offer.from_day.isoformat())}</span>"
             + _press(PRICE_ROUTE, line.ref, "Record it", unmasked=unmasked)
         )
+    if line.dismissal is not None:
+        return _press(RESTORE_ROUTE, line.ref, "Put back", unmasked=unmasked)
+    not_one = _press(DISMISS_ROUTE, line.ref, "Not a commitment", unmasked=unmasked)
     if line.series.stopped:
         return (
             '<span class="recur-ask">ended, or missing?</span>'
-            + _press(CONFIRM_ROUTE, line.ref, "It ended", unmasked=unmasked, how=ENDED)
-            + _press(CONFIRM_ROUTE, line.ref, "It is missing", unmasked=unmasked, how=MISSING)
+            + _press(CONFIRM_ROUTE, line.ref, "Ended", unmasked=unmasked, how=ENDED)
+            + _press(CONFIRM_ROUTE, line.ref, "Missing", unmasked=unmasked, how=MISSING)
+            + not_one
         )
-    return _press(CONFIRM_ROUTE, line.ref, "Confirm", unmasked=unmasked)
+    return _press(CONFIRM_ROUTE, line.ref, "Confirm", unmasked=unmasked) + not_one
 
 
 def _row(line: _Line, names: AccountsShown, today: date, *, unmasked: bool) -> str:
@@ -286,6 +302,39 @@ def _list(rows: list[_Line], names: AccountsShown, today: date, *, unmasked: boo
     return f'<ul class="recur-list">{items}</ul>'
 
 
+def tally_words(answers: Tally) -> str:
+    """`3 found: 1 confirmed, 1 not a commitment, 1 still to look at`: how the series found have
+    been answered, so the share said not to be commitments at all (the detector's precision) is
+    read off the page."""
+    return (
+        f"{answers.found} found: {answers.confirmed} confirmed, "
+        f"{answers.dismissed} not a commitment, {answers.to_look_at} still to look at"
+    )
+
+
+def _dismissed_fold(
+    dismissed: list[_Line], names: AccountsShown, today: date, *, unmasked: bool
+) -> str:
+    """The series said not to be commitments, in a closed fold at the foot of the page, each with
+    the press that puts it back. Empty where there are none."""
+    if not dismissed:
+        return ""
+    count = len(dismissed)
+    said = "you said is not a commitment" if count == 1 else "you said are not commitments"
+    by_account: dict[str, list[_Line]] = {}
+    for line in dismissed:
+        by_account.setdefault(line.series.account, []).append(line)
+    groups = "".join(
+        f"<h3>{names.of(ref).as_name()}</h3>"
+        + _list(by_account[ref], names, today, unmasked=unmasked)
+        for ref in sorted(by_account, key=lambda r: names.of(r).label.casefold() or r.casefold())
+    )
+    return (
+        f'<details class="recur-dismissed"><summary>{plural(count, "series", "series")} {said}'
+        f"</summary>{groups}</details>"
+    )
+
+
 def values_mode(route: str, *, unmasked: bool) -> str:
     """The page's own "show values" press, or its "values are shown" notice, for the page at
     `route`; the Entities page reads the same block."""
@@ -314,15 +363,15 @@ def render_recurring(
 ) -> bytes:
     """The page: `said` leads it as a quiet outcome, or `refused` as what was not done."""
     found = findings.series
+    confirmations = match_series(found, findings.commitments)
+    dismissals = match_dismissals(found, findings.dismissals)
     lines = [
-        _Line(series, ref, confirmation)
-        for series, ref, confirmation in zip(
-            found,
-            series_refs(found),
-            match_series(found, findings.commitments),
-            strict=True,
+        _Line(series, ref, confirmation, None if confirmation else dismissal)
+        for series, ref, confirmation, dismissal in zip(
+            found, series_refs(found), confirmations, dismissals, strict=True
         )
     ]
+    answers = tally_of(confirmations, dismissals)
     if findings.external_labels:
         # An account declared external is named only here: the lists of held accounts never meet
         # it, so a transfer to it is labelled from the findings and not from `names`.
@@ -338,9 +387,12 @@ def render_recurring(
         lead = ""
     else:
         lead = f'<p class="recur-summary">{_esc(summary_line(findings))}</p>'
+        if answers.answered:
+            lead += f'<p class="recur-tally">{_esc(tally_words(answers))}</p>'
         by_account: dict[str, list[_Line]] = {}
         for line in lines:
-            by_account.setdefault(line.series.account, []).append(line)
+            if line.dismissal is None:
+                by_account.setdefault(line.series.account, []).append(line)
         sections = []
         for ref in sorted(by_account, key=lambda r: names.of(r).label.casefold() or r.casefold()):
             rows = sorted(
@@ -364,7 +416,12 @@ def render_recurring(
             sections.append(
                 f'<section class="recur-account"><h2>{names.of(ref).as_name()}</h2>{body}</section>'
             )
-        listing = "".join(sections)
+        listing = "".join(sections) + _dismissed_fold(
+            [line for line in lines if line.dismissal is not None],
+            names,
+            findings.today,
+            unmasked=unmasked,
+        )
     outcome = ""
     if said:
         outcome = f'<p class="ok"><strong>{_esc(said)}</strong></p>'

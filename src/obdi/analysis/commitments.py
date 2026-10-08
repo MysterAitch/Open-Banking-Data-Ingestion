@@ -26,7 +26,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 
-from ..ingest.commitment_records import Commitment, CommitmentRefused, Window, WindowTerms
+from ..ingest.commitment_records import (
+    Commitment,
+    CommitmentRefused,
+    Dismissal,
+    Window,
+    WindowTerms,
+)
 from ..ingest.store import Store
 from .recurring import CHANGE_PERCENT, Series, tolerance_days
 
@@ -41,6 +47,8 @@ HOWS = (CONFIRM, ENDED, MISSING)
 #: The presses the Recurring page makes, said once here and by name everywhere else.
 ACT_CONFIRM = "confirm"
 ACT_PRICE = "price"
+ACT_DISMISS = "dismiss"
+ACT_RESTORE = "restore"
 
 
 @dataclass(frozen=True)
@@ -165,6 +173,63 @@ def match_series(
     return matched
 
 
+def match_dismissals(
+    found: Sequence[Series], dismissals: Sequence[Dismissal]
+) -> list[Dismissal | None]:
+    """The dismissal each series falls under, in step with `found`; None for one that is none.
+
+    A dismissal covers every series of the same payee (`same_payee`), account, direction, and
+    cadence, whatever the amount: it answers "is this payee's rhythm a commitment", and two prices
+    to one payee on one rhythm are not separately asked about."""
+    return [
+        next(
+            (
+                d
+                for d in dismissals
+                if d.account == series.account
+                and d.direction == series.direction
+                and d.cadence == series.cadence
+                and same_payee(d.entity_id, d.name_key, series)
+            ),
+            None,
+        )
+        for series in found
+    ]
+
+
+@dataclass(frozen=True)
+class Tally:
+    """How the series found have been answered. The measured precision of the detector is
+    `dismissed` over `found`: the share the owner said are not commitments at all."""
+
+    found: int
+    confirmed: int
+    dismissed: int
+
+    @property
+    def to_look_at(self) -> int:
+        """Series not yet answered either way."""
+        return self.found - self.confirmed - self.dismissed
+
+    @property
+    def answered(self) -> bool:
+        """Whether any series has been answered, which is when the page says so."""
+        return bool(self.confirmed or self.dismissed)
+
+
+def tally_of(
+    confirmations: Sequence[Confirmation | None], dismissals: Sequence[Dismissal | None]
+) -> Tally:
+    """Count the series by answer. A confirmed series is counted as confirmed even where a
+    dismissal also covers it (the later answer is the commitment: a dismissal is only ever
+    made on a series not yet confirmed)."""
+    confirmed = sum(c is not None for c in confirmations)
+    dismissed = sum(
+        d is not None and c is None for c, d in zip(confirmations, dismissals, strict=True)
+    )
+    return Tally(len(confirmations), confirmed, dismissed)
+
+
 def price_offer(series: Series, commitment: Commitment) -> PriceOffer | None:
     """The new window to offer where the series' newest payments are at a price the open window
     does not hold, or None.
@@ -266,6 +331,33 @@ def change_price(store: Store, found: Sequence[Series], ref: str, *, today: date
     )
 
 
+def dismiss(store: Store, found: Sequence[Series], ref: str) -> None:
+    """Keep that the series named by `ref` is not a commitment, and commit. Refused where it is a
+    commitment already (it is not set aside behind the owner's back) or is set aside already."""
+    index = series_index(found, ref)
+    series = found[index]
+    if match_series(found, store.commitments())[index] is not None:
+        raise CommitmentRefused("That payment is already a commitment.")
+    keys = sorted(series.name_keys)
+    store.dismiss_series(
+        entity_id=series.party_entity or None,
+        name_key=keys[0] if keys else "",
+        account=series.account,
+        direction=series.direction,
+        cadence=series.cadence,
+    )
+
+
+def restore(store: Store, found: Sequence[Series], ref: str) -> None:
+    """Put the dismissed series named by `ref` back among those to look at, and commit. Refused
+    where it is not dismissed."""
+    index = series_index(found, ref)
+    dismissal = match_dismissals(found, store.dismissals())[index]
+    if dismissal is None:
+        raise CommitmentRefused("That payment is not set aside; it may have been put back.")
+    store.restore_dismissal(dismissal.id)
+
+
 def _field(form: dict[str, list[str]], name: str) -> str:
     return (form.get(name) or [""])[0].strip()
 
@@ -298,4 +390,10 @@ def apply_press(
     if action == ACT_PRICE:
         change_price(store, found, ref, today=today)
         return "New price recorded; the earlier price is kept as it was."
+    if action == ACT_DISMISS:
+        dismiss(store, found, ref)
+        return "Set aside as not a commitment."
+    if action == ACT_RESTORE:
+        restore(store, found, ref)
+        return "Put back among the payments to look at."
     raise CommitmentRefused("That is not something this page does.")

@@ -100,6 +100,14 @@ def press_on(row: Node) -> list[dict[str, str]]:
     return forms_of(row)
 
 
+def confirm_press(row: Node) -> dict[str, str]:
+    """The plain Confirm press on a line: not "it ended", not "it is missing"."""
+    (press,) = [
+        p for p in forms_of(row) if p["action"] == "/recurring-confirm" and "how" not in p
+    ]
+    return press
+
+
 def shown(base: str) -> str:
     """The page with values shown."""
     return httpx.post(f"{base}/recurring", timeout=60).text

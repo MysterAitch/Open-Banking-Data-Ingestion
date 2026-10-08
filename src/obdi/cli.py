@@ -3945,6 +3945,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             entity_ids = {name: ident for ident, name in held_entities.values()}
             external_labels = store.external_labels() if external else {}
             commitments = store.commitments()
+            dismissals = store.dismissals()
         closings: dict[str, list[tuple[date, int]]] = {}
         for closing in held:
             owed = (closing.day, closing.balance_minor)
@@ -3960,7 +3961,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             external=external,
             entity_ids=entity_ids,
         )
-        return RecurringFindings(found, today, external_labels, commitments)
+        return RecurringFindings(found, today, external_labels, commitments, dismissals)
 
     def recurring_act(action: str, form: dict[str, list[str]]) -> str:
         """One press on the Recurring page: the series it names is found again from the

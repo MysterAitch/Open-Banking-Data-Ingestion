@@ -28,6 +28,7 @@ import pytest
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
 from recurring_press_support import (
+    confirm_press,
     months_back,
     press_on,
     presses,
@@ -60,7 +61,7 @@ class TestConfirmingALiveSeries:
         self, world
     ):
         base, db, rows, _ = world
-        (press,) = press_on(row_of(shown(base), "quokka"))
+        press = confirm_press(row_of(shown(base), "quokka"))
 
         response = httpx.post(f"{base}{press['action']}", data=press, timeout=60)
 
@@ -82,7 +83,7 @@ class TestConfirmingALiveSeries:
         self, world
     ):
         base, _db, _rows, _ = world
-        (press,) = press_on(row_of(shown(base), "quokka"))
+        press = confirm_press(row_of(shown(base), "quokka"))
 
         page = httpx.post(f"{base}{press['action']}", data=press, timeout=60).text
 
@@ -93,7 +94,7 @@ class TestConfirmingALiveSeries:
 
     def test_Confirm_OnALaterRead_TheLineStillReadsConfirmedAndOffersNoPress(self, world):
         base, _db, _rows, _ = world
-        (press,) = press_on(row_of(shown(base), "quokka"))
+        press = confirm_press(row_of(shown(base), "quokka"))
         httpx.post(f"{base}{press['action']}", data=press, timeout=60)
 
         line = row_of(shown(base), "quokka")
@@ -102,7 +103,7 @@ class TestConfirmingALiveSeries:
 
     def test_Confirm_WhenPressedTwice_IsRefusedTheSecondTimeAndKeepsOne(self, world):
         base, db, _rows, _ = world
-        (press,) = press_on(row_of(shown(base), "quokka"))
+        press = confirm_press(row_of(shown(base), "quokka"))
         httpx.post(f"{base}{press['action']}", data=press, timeout=60)
 
         again = httpx.post(f"{base}{press['action']}", data=press, timeout=60)
@@ -135,7 +136,7 @@ class TestConfirmingALiveSeries:
 
     def test_Confirm_WhenTheWayIsNotOneTheyKnow_ChangesNothing(self, world):
         base, db, _rows, _ = world
-        (press,) = press_on(row_of(shown(base), "quokka"))
+        press = confirm_press(row_of(shown(base), "quokka"))
 
         response = httpx.post(
             f"{base}{press['action']}", data={**press, "how": "perhaps"}, timeout=60
@@ -162,11 +163,16 @@ class TestAStoppedSeriesIsAskedOnce:
         line = row_of(shown(base), "cedarwick")
 
         assert "ended, or missing?" in line.text()
-        assert sorted(p.get("how", "") for p in press_on(line)) == ["ended", "missing"]
+        assert sorted(p["action"] + p.get("how", "") for p in press_on(line)) == [
+            "/recurring-confirmended",
+            "/recurring-confirmmissing",
+            "/recurring-dismiss",
+        ]
 
     def test_Confirm_AsEnded_ClosesTheWindowAtTheLastPaymentAndIsNotAskedAgain(self, world):
         base, db, _rows, gym_end = world
-        ended = next(p for p in press_on(row_of(shown(base), "cedarwick")) if p["how"] == "ended")
+        line = row_of(shown(base), "cedarwick")
+        ended = next(p for p in press_on(line) if p.get("how") == "ended")
 
         page = httpx.post(f"{base}{ended['action']}", data=ended, timeout=60).text
 
@@ -179,9 +185,8 @@ class TestAStoppedSeriesIsAskedOnce:
 
     def test_Confirm_AsMissing_LeavesTheWindowOpenAndIsNotAskedAgain(self, world):
         base, db, _rows, _ = world
-        missing = next(
-            p for p in press_on(row_of(shown(base), "cedarwick")) if p["how"] == "missing"
-        )
+        line = row_of(shown(base), "cedarwick")
+        missing = next(p for p in press_on(line) if p.get("how") == "missing")
 
         page = httpx.post(f"{base}{missing['action']}", data=missing, timeout=60).text
 
@@ -197,14 +202,18 @@ class TestTheMaskedPage:
 
         text = httpx.get(f"{base}/recurring", timeout=60).text
 
-        assert len(presses(text)) == 3
+        # The subscription: Confirm and Not a commitment. The gym: It ended, It is missing, and
+        # Not a commitment.
+        assert len(presses(text)) == 5
         for hidden in ("quokka", "cedarwick", USUAL, GYM_USUAL, "41.37", "25.00"):
             assert hidden not in text.casefold()
 
     def test_Press_WhenMadeOnTheMaskedPage_IsAnsweredMaskedAndKeepsTheCommitment(self, world):
         base, db, _rows, _ = world
         masked = httpx.get(f"{base}/recurring", timeout=60).text
-        press = next(p for p in presses(masked) if "how" not in p)
+        press = next(
+            p for p in presses(masked) if p["action"] == "/recurring-confirm" and "how" not in p
+        )
         assert "shown" not in press
 
         response = httpx.post(f"{base}{press['action']}", data=press, timeout=60)
@@ -219,7 +228,7 @@ class TestTheMaskedPage:
 
     def test_Press_WhenMadeOnAShownPage_IsAnsweredShown(self, world):
         base, _db, _rows, _ = world
-        (press,) = press_on(row_of(shown(base), "quokka"))
+        press = confirm_press(row_of(shown(base), "quokka"))
         assert press["shown"] == "1"
 
         response = httpx.post(f"{base}{press['action']}", data=press, timeout=60)
@@ -241,7 +250,7 @@ class TestTheMaskedPage:
 class TestWhatIsKept:
     def test_Commitment_WhenTheStoreIsRebuiltFromRaw_IsStillConfirmedOnThePage(self, world):
         base, db, _rows, _ = world
-        (press,) = press_on(row_of(shown(base), "quokka"))
+        press = confirm_press(row_of(shown(base), "quokka"))
         httpx.post(f"{base}{press['action']}", data=press, timeout=60)
 
         with Store(db) as store:

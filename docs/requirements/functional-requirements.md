@@ -100,7 +100,7 @@ produced it. The use cases these serve are in [use-cases.md](use-cases.md).
 | Id | Requirement | Status |
 |---|---|---|
 | FR-RECUR-01 | A recurring series is identified by its payee shape across every account; an occurrence paid from another account is marked, never counted as missed plus new. | NOT YET (in build) |
-| FR-RECUR-02 | A commitment is declared state: payee entity, usual amount, currency billed in, cadence, day, account, from when - as dated windows, so a price rise, a tier change, or a move to yearly is a new window and the history stays. The owner, 2026-10-07: "subscriptions/recurring payments can evolve". | NOT YET |
+| FR-RECUR-02 | A commitment is declared state: payee entity, usual amount, currency billed in, cadence, day, account, from when - as dated windows, so a price rise, a tier change, or a move to yearly is a new window and the history stays. The owner, 2026-10-07: "subscriptions/recurring payments can evolve". | PARTLY (R1: confirmed from a series on the Recurring page, with a new window on a price change; not yet edited by hand, no period covered or share) |
 | FR-RECUR-03 | A subscription billed in a foreign currency has its foreign amount as the constant; its GBP amount is expected to vary with the exchange rate and is not "changed". | NOT YET |
 | FR-RECUR-04 | Display text is a layer: a payee entity carries one human name over the variants each source prints; every source's own text is kept and shown; a commitment points at the entity, not a string. | NOT YET |
 | FR-RECUR-05 | A bank's own category is evidence with a basis, shown and offered, never applied as truth; a rule or a confirmation outranks it. | NOT YET |

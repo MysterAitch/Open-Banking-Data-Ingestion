@@ -69,7 +69,7 @@ from itertools import pairwise
 from statistics import median_low
 
 from ..core.models import Transaction, TransactionStatus
-from ..ingest.commitment_records import Commitment
+from ..ingest.commitment_records import Commitment, Dismissal
 from ..ingest.stated_words import words_in
 from .entities import HELD_PREFIX, Alias, display_names, entity_of, name_rows
 from .payment_methods import METHODS
@@ -274,6 +274,8 @@ class RecurringFindings:
     #: The commitments the owner confirmed, which the page sets the series against
     #: (`commitments.match_series`); the detector itself reads none.
     commitments: Sequence[Commitment] = ()
+    #: The series the owner said are not commitments, which the page folds away and counts.
+    dismissals: Sequence[Dismissal] = ()
 
 
 def tolerance_days(cadence: str) -> int:

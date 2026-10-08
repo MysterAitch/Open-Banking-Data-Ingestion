@@ -30,7 +30,9 @@ from obdi.ingest.store import Store
 #: Measured 30 once the commitments the owner confirmed were read (`Store.commitments`, one select
 #: joining their windows); the bound is raised by that one statement, which does not grow with
 #: the commitments or the series.
-RECURRING_STATEMENTS = 30
+#: Measured 31 once the series set aside as not commitments were read as well
+#: (`Store.dismissals`, one select), again not growing with either.
+RECURRING_STATEMENTS = 31
 SECONDS = 20.0
 
 

@@ -1,9 +1,10 @@
 -- The `declared_accounts` table as it SHIPPED at 0.4.378 (schema version 28): the registry with its
 -- account identifier and external flag, and no commitments or terms of commitments yet.
 --
--- THIS IS THE SHAPE THE COMMITMENTS WORK ACTS ON: a store stamped 28 has neither `commitments` nor
--- `commitment_windows`, which current code makes on open (`CREATE TABLE IF NOT EXISTS`, so there is
--- no column migration) and which the Recurring page reads at once. Partial on purpose, like
+-- THIS IS THE SHAPE THE COMMITMENTS WORK ACTS ON: a store stamped 28 has none of `commitments`,
+-- `commitment_windows`, or `series_dismissals`, which current code makes on open (`CREATE TABLE IF
+-- NOT EXISTS`, so there is no column migration) and which the Recurring page reads at once.
+-- Partial on purpose, like
 -- 23-declared-account-identifier.sql: nothing else changed between 27 and 28 that a migration acts
 -- on, and the other tables are made by the schema itself.
 --

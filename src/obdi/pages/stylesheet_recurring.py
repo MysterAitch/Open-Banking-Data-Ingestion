@@ -29,4 +29,6 @@ RECURRING_STYLES = """
                 color: var(--act); font: inherit; text-decoration: underline; cursor: pointer; }
  .recur-press::after { content: ""; position: absolute; inset: -.5rem -.4rem; }
  .recur-ask { margin-left: var(--s2); color: var(--ink-2); }
+ .recur-tally { margin: var(--s2) 0; color: var(--ink-2); }
+ .recur-dismissed > summary { padding: var(--s2) 0; cursor: pointer; }
 """

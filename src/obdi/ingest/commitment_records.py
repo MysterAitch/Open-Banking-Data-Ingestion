@@ -65,6 +65,22 @@ class WindowTerms:
 
 
 @dataclass(frozen=True)
+class Dismissal:
+    """A series the owner said is not a commitment, found again by who is paid and where the
+    money leaves, as a commitment is (`Commitment.entity_id` and `name_key`). It carries the
+    cadence too, so a payee who also takes a different rhythm of payment is a different question.
+    The count of dismissals over the series found is the detector's measured precision."""
+
+    id: int
+    entity_id: int | None
+    name_key: str
+    account: str
+    direction: str
+    cadence: str
+    dismissed_at: str
+
+
+@dataclass(frozen=True)
 class Commitment:
     """One commitment not removed, with all its windows, oldest first.
 

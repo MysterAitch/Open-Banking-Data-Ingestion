@@ -30,9 +30,13 @@ from obdi.analysis.commitments import (
     apply_press,
     change_price,
     confirm,
+    dismiss,
+    match_dismissals,
     match_series,
+    restore,
     series_index,
     series_refs,
+    tally_of,
 )
 from obdi.analysis.entities import shape_of
 from obdi.analysis.recurring import HABIT, PULLED, SCHEDULED, Series, find_recurring
@@ -505,6 +509,129 @@ class TestAChangedPrice:
             change_price(store, found, series_refs(found)[0], today=TODAY)
 
         assert len(store.commitments()[0].windows) == 1
+
+
+class TestADismissedSeries:
+    """KNOWN ANSWERS. Three series are found (a gym, a streaming service, a cleaner); the owner
+    says the cleaner is not a commitment and confirms the gym. The tally is 3 found, 1 confirmed,
+    1 dismissed, 1 to look at, and the detector's measured precision is 1 of 3. The dismissal
+    follows the payee into an entity, stays on its own account and cadence, and never covers a
+    series that has been confirmed."""
+
+    def rows(self) -> list[Transaction]:
+        return [
+            *monthly(A, range(4, 10), 15, -1000, "MARMALADE FOUNDRY STUDIO"),
+            *monthly(A, range(4, 10), 21, -1200, "WINDOW CLEANER"),
+            *monthly(A, range(4, 10), 9, -2500, "CEDARWICK GYM"),
+        ]
+
+    def by(self, found: list[Series], fragment: str) -> int:
+        return next(i for i, s in enumerate(found) if fragment in s.shape)
+
+    def test_Tally_WithOneConfirmedOneDismissedAndOneOpen_CountsEachOnce(self, store):
+        found = find_recurring(self.rows(), [], TODAY)
+        refs = series_refs(found)
+        confirm(store, found, refs[self.by(found, "cedarwick")], CONFIRM, today=TODAY)
+        dismiss(store, found, refs[self.by(found, "window")])
+
+        answers = tally_of(
+            match_series(found, store.commitments()),
+            match_dismissals(found, store.dismissals()),
+        )
+
+        assert (answers.found, answers.confirmed, answers.dismissed, answers.to_look_at) == (
+            3,
+            1,
+            1,
+            1,
+        )
+        assert answers.answered
+
+    def test_Tally_BeforeAnyAnswer_IsNotAnswered(self, store):
+        found = find_recurring(self.rows(), [], TODAY)
+
+        answers = tally_of(
+            match_series(found, store.commitments()),
+            match_dismissals(found, store.dismissals()),
+        )
+
+        assert (answers.found, answers.to_look_at, answers.answered) == (3, 3, False)
+
+    def test_Dismissal_CoversOnlyItsOwnSeries(self, store):
+        found = find_recurring(self.rows(), [], TODAY)
+        dismiss(store, found, series_refs(found)[self.by(found, "window")])
+
+        covered = [d is not None for d in match_dismissals(found, store.dismissals())]
+
+        assert covered == [i == self.by(found, "window") for i in range(3)]
+
+    def test_Dismissal_WhenTheNameIsGatheredIntoAnEntityAfterwards_StillCoversIt(self, store):
+        rows = [tx(A, date(2026, m, 15), -999, FIRST_PRINT) for m in range(1, 7)]
+        found = find_recurring(rows, [], TODAY)
+        dismiss(store, found, series_refs(found)[0])
+        entity = store.create_entity(ENTITY, [shape_of(FIRST_PRINT)])
+
+        gathered_again = find_recurring(
+            [*rows, tx(A, date(2026, 7, 15), -999, SECOND_PRINT)],
+            [],
+            TODAY,
+            entities=gathered(FIRST_PRINT, SECOND_PRINT),
+            entity_ids={ENTITY: entity},
+        )
+
+        assert match_dismissals(gathered_again, store.dismissals()) != [None]
+
+    def test_Dismissal_ForTheSamePayeeInAnotherAccount_DoesNotCoverIt(self, store):
+        found = find_recurring(self.rows(), [], TODAY)
+        dismiss(store, found, series_refs(found)[self.by(found, "window")])
+        elsewhere = find_recurring(
+            [replace(row, account_id=B) for row in self.rows()], [], TODAY
+        )
+
+        assert match_dismissals(elsewhere, store.dismissals()) == [None, None, None]
+
+    def test_Dismissal_ForTheSamePayeeOnAnotherCadence_DoesNotCoverIt(self, store):
+        found = find_recurring(self.rows(), [], TODAY)
+        dismiss(store, found, series_refs(found)[self.by(found, "window")])
+        quarterly = [
+            tx(A, date(2025, m, 21), -1200, "WINDOW CLEANER") for m in (1, 4, 7, 10)
+        ] + [tx(A, date(2026, m, 21), -1200, "WINDOW CLEANER") for m in (1, 4, 7)]
+
+        again = find_recurring(quarterly, [], TODAY)
+
+        assert only(again).cadence == "quarterly"
+        assert match_dismissals(again, store.dismissals()) == [None]
+
+    def test_Dismiss_ForAConfirmedSeries_IsRefusedAndKeepsNothing(self, store):
+        found = find_recurring(self.rows(), [], TODAY)
+        ref = series_refs(found)[self.by(found, "window")]
+        confirm(store, found, ref, CONFIRM, today=TODAY)
+
+        with pytest.raises(CommitmentRefused, match="already a commitment"):
+            dismiss(store, found, ref)
+
+        assert store.dismissals() == []
+
+    def test_Restore_PutsTheSeriesBackAndAFurtherRestoreIsRefused(self, store):
+        found = find_recurring(self.rows(), [], TODAY)
+        ref = series_refs(found)[self.by(found, "window")]
+        dismiss(store, found, ref)
+
+        restore(store, found, ref)
+
+        assert store.dismissals() == []
+        with pytest.raises(CommitmentRefused, match="not set aside"):
+            restore(store, found, ref)
+
+    def test_Dismiss_WhenPutBackAndPressedAgain_KeepsOneLiveDismissal(self, store):
+        found = find_recurring(self.rows(), [], TODAY)
+        ref = series_refs(found)[0]
+        dismiss(store, found, ref)
+        restore(store, found, ref)
+
+        dismiss(store, found, ref)
+
+        assert len(store.dismissals()) == 1
 
 
 class TestTheKindsTheStoreKnows:

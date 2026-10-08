@@ -143,6 +143,8 @@ SECTION_OF_ROUTE: dict[str, str] = {
     "/recurring": "more",
     "/recurring-confirm": "more",
     "/recurring-price": "more",
+    "/recurring-dismiss": "more",
+    "/recurring-restore": "more",
     "/entities": "more",
     "/entities-merge": "more",
     "/entities-split": "more",

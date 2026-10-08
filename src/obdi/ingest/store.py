@@ -62,6 +62,7 @@ from .commitment_records import (
     DIRECTIONS,
     Commitment,
     CommitmentRefused,
+    Dismissal,
     Window,
     WindowTerms,
 )
@@ -167,9 +168,10 @@ from .stated_words import recorded_words
 #: declaration, kept across the rebuild from raw; a table that already exists is not altered by
 #: `CREATE TABLE IF NOT EXISTS`, so a store stamped 27 would refuse the first read of the registry.
 #:
-#: 28 -> 29: the `commitments` and `commitment_windows` tables: the recurring payments the owner
-#: confirmed, and their terms as dated windows. Declared state, kept across the rebuild from raw.
-#: Both are new tables, which `CREATE TABLE IF NOT EXISTS` makes on open, so there is no column
+#: 28 -> 29: the `commitments`, `commitment_windows`, and `series_dismissals` tables: the recurring
+#: payments the owner confirmed, their terms as dated windows, and the series he said are not
+#: commitments. Declared state, kept across the rebuild from raw.
+#: All are new tables, which `CREATE TABLE IF NOT EXISTS` makes on open, so there is no column
 #: migration; a store stamped 28 would never have grown them.
 SCHEMA_VERSION = 29
 
@@ -850,6 +852,22 @@ CREATE TABLE IF NOT EXISTS commitment_windows (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_commitment_windows_open
     ON commitment_windows(commitment_id) WHERE to_day IS NULL;
 
+-- DECLARED: a series the owner said is not a commitment (`commitment_records.Dismissal`), found
+-- again the way a commitment is (entity or name key, account, direction) and by cadence. Putting
+-- it back is a stamp. Its count over the series found is the detector's measured precision. A
+-- table and not a `preferences` row because a preference name is one string, which a payee later
+-- gathered into an entity would no longer match: the dismissal would silently return.
+CREATE TABLE IF NOT EXISTS series_dismissals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_id    INTEGER,
+    name_key     TEXT NOT NULL DEFAULT '',
+    account      TEXT NOT NULL,
+    direction    TEXT NOT NULL DEFAULT 'out',
+    cadence      TEXT NOT NULL,
+    dismissed_at TEXT NOT NULL,
+    removed_at   TEXT
+);
+
 -- One row, moved by a trigger on every table whose writes can change an account's standing
 -- (EPOCH_TABLES). The pages that hold a standing between requests key it on this number.
 CREATE TABLE IF NOT EXISTS standing_epoch (
@@ -920,6 +938,10 @@ NOT_STANDING_TABLES: dict[str, str] = {
     ),
     "commitment_windows": (
         "the terms of a commitment between two days, read where `commitments` is and for the "
+        "same reason"
+    ),
+    "series_dismissals": (
+        "the series the owner said are not commitments, read where `commitments` is and for the "
         "same reason"
     ),
     "events": "the outbox of changes to publish, written after the change it describes",
@@ -1081,6 +1103,10 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
     'same_money_outcomes': ['account', 'outcome'],
     'sighting_times': ['artefact_digest', 'entity_id', 'field', 'kind', 'source', 'stated', 'zone'],
     'sighting_words': ['artefact_digest', 'entity_id', 'field', 'source', 'word'],
+    'series_dismissals': [
+        'account', 'cadence', 'direction', 'dismissed_at', 'entity_id', 'id', 'name_key',
+        'removed_at',
+    ],
     'standing_epoch': ['epoch', 'id'],
     'statement_extractions': [
         'cells', 'digest', 'extractor_version', 'failure', 'lines', 'masked_shape', 'names',
@@ -5504,6 +5530,89 @@ class Store:
         )
         self.connection.commit()
 
+    def dismiss_series(
+        self,
+        *,
+        entity_id: int | None,
+        name_key: str,
+        account: str,
+        direction: str,
+        cadence: str,
+        now: datetime | None = None,
+    ) -> int:
+        """Keep that a series is not a commitment, and commit; returns the dismissal's id.
+
+        Refused, with nothing written, for no way to find the series again (neither an entity nor
+        a name key), no account or cadence, a direction outside `commitment_records.DIRECTIONS`,
+        an entity that is missing or removed, and the same payee, account, direction, and cadence
+        already dismissed (a second press on one line)."""
+        if entity_id is None and not name_key:
+            raise CommitmentRefused("A dismissal needs the payee it is found by.")
+        if not account or not cadence:
+            raise CommitmentRefused("A dismissal needs the account and the cadence.")
+        if direction not in DIRECTIONS:
+            raise CommitmentRefused("A series is money out or money in.")
+        if (
+            entity_id is not None
+            and self.connection.execute(
+                "SELECT 1 FROM entities WHERE id = ? AND removed_at IS NULL", (entity_id,)
+            ).fetchone()
+            is None
+        ):
+            raise CommitmentRefused("There is no such entity; it may have been removed.")
+        if self.connection.execute(
+            "SELECT 1 FROM series_dismissals WHERE removed_at IS NULL AND name_key = ? "
+            "AND account = ? AND direction = ? AND cadence = ? AND entity_id IS ?",
+            (name_key, account, direction, cadence, entity_id),
+        ).fetchone():
+            raise CommitmentRefused("That payment is already set aside as not a commitment.")
+        cursor = self.connection.execute(
+            "INSERT INTO series_dismissals (entity_id, name_key, account, direction, cadence, "
+            "dismissed_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                entity_id,
+                name_key,
+                account,
+                direction,
+                cadence,
+                (now or datetime.now(UTC)).isoformat(),
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid or 0)
+
+    def dismissals(self) -> list[Dismissal]:
+        """Every series said not to be a commitment and not put back, oldest first: one select."""
+        return [
+            Dismissal(
+                id=int(row["id"]),
+                entity_id=None if row["entity_id"] is None else int(row["entity_id"]),
+                name_key=str(row["name_key"]),
+                account=str(row["account"]),
+                direction=str(row["direction"]),
+                cadence=str(row["cadence"]),
+                dismissed_at=str(row["dismissed_at"]),
+            )
+            for row in self.connection.execute(
+                "SELECT id, entity_id, name_key, account, direction, cadence, dismissed_at "
+                "FROM series_dismissals WHERE removed_at IS NULL ORDER BY id"
+            )
+        ]
+
+    def restore_dismissal(self, dismissal: int, *, now: datetime | None = None) -> None:
+        """Put a dismissed series back among those to look at, and commit; the row stays as a
+        stamp. Refused for a dismissal that is missing or already put back."""
+        found = self.connection.execute(
+            "SELECT 1 FROM series_dismissals WHERE id = ? AND removed_at IS NULL", (dismissal,)
+        ).fetchone()
+        if found is None:
+            raise CommitmentRefused("That payment is not set aside; it may have been put back.")
+        self.connection.execute(
+            "UPDATE series_dismissals SET removed_at = ? WHERE id = ?",
+            ((now or datetime.now(UTC)).isoformat(), dismissal),
+        )
+        self.connection.commit()
+
     def _refuse_missing_commitment(self, commitment: int) -> None:
         found = self.connection.execute(
             "SELECT 1 FROM commitments WHERE id = ? AND removed_at IS NULL", (commitment,)
@@ -5925,10 +6034,14 @@ class Store:
         confirmed = self.connection.execute(
             "SELECT COUNT(*) FROM commitments WHERE removed_at IS NULL"
         ).fetchone()[0]
+        dismissed = self.connection.execute(
+            "SELECT COUNT(*) FROM series_dismissals WHERE removed_at IS NULL"
+        ).fetchone()[0]
         return {
             "counterparty identifiers gathered into entities": int(gathered),
             "entity rules and names split from them": int(ruled),
             "recurring payments confirmed as commitments": int(confirmed),
+            "recurring payments said not to be commitments": int(dismissed),
             "hand-entered categories": int(categories),
             "deferred decisions": int(deferrals),
             "other hand-entered notes": int(other),

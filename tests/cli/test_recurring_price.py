@@ -26,6 +26,7 @@ import pytest
 from obdi.ingest.store import Store
 from page_dom import parse
 from recurring_press_support import (
+    confirm_press,
     forms_of,
     months_back,
     press_on,
@@ -57,7 +58,7 @@ def risen(tmp_path, monkeypatch):
 
 def confirm(base: str) -> str:
     """Press Confirm on the line, and return the reference that names it."""
-    (press,) = press_on(row_of(shown(base), "quokka"))
+    press = confirm_press(row_of(shown(base), "quokka"))
     assert httpx.post(f"{base}{press['action']}", data=press, timeout=60).status_code == 200
     return press["ref"]
 
@@ -74,7 +75,7 @@ class TestAnOfferToRecordAChangedPrice:
         line = row_of(shown(base), "quokka")
 
         assert "Price changed" not in line.text()
-        assert [p["action"] for p in press_on(line)] == ["/recurring-confirm"]
+        assert [p["action"] for p in press_on(line)] == ["/recurring-confirm", "/recurring-dismiss"]
 
     def test_Line_WhenConfirmedAndRisen_OffersTheNewPriceFromTheDayItBegan(self, risen):
         base, _db, days = risen
@@ -132,10 +133,9 @@ class TestAnOfferToRecordAChangedPrice:
 
     def test_Press_ForASeriesNotConfirmed_IsRefusedAndKeepsNothing(self, risen):
         base, db, _days = risen
-        (press,) = press_on(row_of(shown(base), "quokka"))
+        press = confirm_press(row_of(shown(base), "quokka"))
 
         response = httpx.post(f"{base}/recurring-price", data=press, timeout=60)
-
         assert response.status_code == 400
         with Store(db) as store:
             assert store.commitments() == []

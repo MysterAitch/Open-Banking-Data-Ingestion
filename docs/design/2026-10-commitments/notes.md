@@ -237,6 +237,47 @@ The split is declared state on the transaction and never alters the source row. 
 marks a split and its fold lists the parts. The projection to Actual sends a split transaction.
 A split whose parts do not sum to the amount is refused where it is made.
 
+## R1 as built: confirming a series (schema 29)
+
+Declared tables `commitments` and `commitment_windows` (a window per price, one open at most) and
+`series_dismissals`; kept across the rebuild, counted in `Store.irreplaceable()`. The Recurring
+page carries, on every line, a press that confirms it (`analysis/commitments.py`):
+
+- **Confirm** copies the series' history as the first window (usual amount, cadence, usual day or
+  weekday, the fit's tolerance, from the first sighting), name pre-filled from the series. A stopped
+  series is asked once, "ended, or missing?": Ended closes the window at the last occurrence,
+  Missing leaves it open so a later "This month" can call it overdue.
+- **A commitment finds its series again** by the entity its payee was gathered under or the name
+  key it was confirmed under, plus account, direction, currency, and cadence; two products to one
+  payee go to the commitment of the nearest amount.
+- **Price changed to X from D**: the open window is compared with the newest payments (not with the
+  series' usual amount, which becomes the new price and silences the detector's own "changed");
+  the press closes the old window the day before D and opens the new one. D is the first day of the
+  run of newest payments at that amount (`Series.latest_from`).
+- **Not a commitment** folds the line into a closed fold at the foot of the page and the page says
+  "N found: A confirmed, D not a commitment, T still to look at". The precision the plan asks for
+  is D over N, read from that line. A table and not a preference, because a dismissal must follow
+  the payee into an entity and a preference name is one string.
+- **Presses are on the masked page.** A press carries no value; it names its line by a reference
+  made from what the masked page already shows (account, cadence and day, kind, first sighting),
+  never the payee or an amount, since a hash holding an amount can be run against every plausible
+  amount. A press is answered masked unless the page pressed on was shown.
+
+Measured on the large invented store and the three synthetic worlds (18, 4, 4, 4 series): the
+series found are identical to the tree before this change; confirming every series through the
+store keeps 18, 4, 4, 4 commitments with one window each and a second read matches every one. The
+page's statement budget moved 29 to 31 (one select for commitments with their windows, one for
+dismissals); the phone layout allowance for the all-folds-open page moved from four screens to five.
+
+Not done: nothing is measured on the real store (the owner's sitting is the measurement); a page
+of commitments (a confirmed line links to nothing); editing a window or a name from the page (the
+store can); a "one-off" answer to a price offer; the dismissal covers every amount of a payee on
+one cadence, so a merged pair of products dismissed together is one answer.
+
+Rejected: matching a commitment by (name, account) alone (loses it when the name is gathered into
+an entity, and cannot tell two products apart); a full-width button for each press (5,907 px for
+thirty lines against a 3,376 px budget).
+
 ## Measured on the real store (counts only, read from the page after each deploy)
 
 | Version | Recurring series | Kinds (pulled / scheduled / habit) | Payments / transfers / incomes | Stopped (over a year) | Changed | Entities: names / proposals / covered / too broad |

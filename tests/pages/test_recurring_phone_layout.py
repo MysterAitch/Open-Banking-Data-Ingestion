@@ -47,9 +47,15 @@ SCREENS = 4
 #: pair of "It ended" and "It is missing" on a stopped one): closed, shown 2,869 (masked within
 #: 2,800); opened, masked 3,148 and shown 3,256, still under four screens. A press styled as the
 #: shared full-width button was 5,907, which is why it is a link on the line.
-MEASURED_CLOSED = 2880
-MEASURED_OPEN = 3270
-SCREENS_OPEN = 4
+#: With "Not a commitment" beside it on every unconfirmed row as well (and "Ended" and "Missing"
+#: for the stopped): closed, masked 2,957 and shown 3,065, under four screens; every fold opened,
+#: masked 3,403 and shown 3,511, which is over four screens (3,376) and under five (4,220). The
+#: allowance for the all-folds-open rendering, which a real store reaches only by opening every
+#: fold, moves to five; the closed page, which is what is read, stays within four. A cost the
+#: owner is to judge against the second press on each line.
+MEASURED_CLOSED = 3080
+MEASURED_OPEN = 3520
+SCREENS_OPEN = 5
 
 TODAY = date(2026, 10, 7)
 
