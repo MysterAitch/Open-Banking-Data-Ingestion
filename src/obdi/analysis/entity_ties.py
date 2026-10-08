@@ -18,7 +18,7 @@ from collections import Counter
 from collections.abc import Sequence
 from itertools import combinations
 
-from ..ingest.entity_records import DESCRIPTION, IDENTIFIER_KINDS
+from ..ingest.entity_records import ACCOUNT, DESCRIPTION, IDENTIFIER_KINDS
 from .entities import MIN_SHARED_ROWS, Fields, Named, Tie, identifiers_of
 
 _Token = tuple[str, str]
@@ -107,6 +107,13 @@ def row_ties(fields: Sequence[Fields], named: Sequence[Named]) -> tuple[Tie, ...
         tied_rows = {i for pair, found in live.items() if pair[0] in members for i in found}
         names = names_of(sorted(tied_rows)) | {token[1] for token in members if token in own}
         if len(names) < 2:
+            continue
+        # Two ACCOUNTS are two parties: a bank account is somebody's by definition, and a stated
+        # name shared across two of them is two people who print alike (two housemates with one
+        # name, or one person and a namesake), not evidence of one party. A source's own id may
+        # be per branch, so two ids under one name are still offered; an account beside an id is
+        # offered, since the id's merchant may well be paid by transfer.
+        if sum(1 for kind, _value in members if kind == ACCOUNT) > 1:
             continue
         kinds = {kind for kind, _value in members}
         ties.append(

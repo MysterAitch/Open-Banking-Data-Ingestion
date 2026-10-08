@@ -119,6 +119,17 @@ class TestNoEvidenceNoProposal:
 
         assert ties_of(rows) == ()
 
+    def test_TwoAccountsUnderOneStatedName_AreTwoPartiesAndNotProposed(self):
+        """Two housemates who print alike, or a person and a namesake: a bank account is
+        somebody's by definition, so a stated name shared across two accounts is no evidence of
+        one party. (A stated name across two source ids is still offered: an id may be per
+        branch.)"""
+        rows = [Fields("RENT", "Sam Okafor", "20-00-00 11111111")] * 3 + [
+            Fields("RENT", "Sam Okafor", "20-00-00 22222222")
+        ] * 3
+
+        assert ties_of(rows) == ()
+
     def test_AnIdAndAnAccountSeenTogetherOnOnePayment_AreBelowTheFloor(self):
         rows = (
             [Fields("RENT JAN", "", "20-00-00 11111111", "starling:uid-lena")]
