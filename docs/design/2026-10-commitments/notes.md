@@ -331,6 +331,65 @@ wrapper.
 Rejected: reading the detector on every GET (a whole-table detection to say nothing when incomes
 are confirmed), and a figure that dashes when it cannot be made.
 
+## This month as built: the forward calendar (roadmap item 4)
+
+`/this-month`: `analysis/this_month.py` (the record and the states), `pages/web_this_month.py` (the
+page), wired by `WebConfig.this_month_data` and `this_month_note`, both read from one held value
+(`month_memo` in `cli.py`: the held position, the commitments, the detector's series, and
+Position's own `FreeFigures`).
+
+- CALENDAR: every confirmed commitment's due days in the month, over every window that overlaps it
+  (`free_position.due_days`, which asks `next_due` repeatedly, so the calendar and Position place a
+  payment on the same day), grouped by day, with name, account, amount, and state. Incomes are the
+  same lines, said "expected / received / late". A commitment whose last window closed in the month
+  is marked ENDED on that day and not counted. The month ahead is a view (`?month=next`, or a field
+  on the POST that shows values) and goes no further.
+- STATE of a due day is read from `Series.seen_days` (new: the days of the newest ten occurrences,
+  set by `commitments.match_series`), not from the detector's `stopped`: PAID if a payment was seen
+  within the window's tolerance of the day; DUE until the day plus tolerance passes; OVERDUE after,
+  but only where the account's transactions (`rows_through`) reach past that deadline, else DUE
+  with the sentence saying the account's rows stop earlier (trust: absence of a row is not absence
+  of a payment). A commitment with no matching series at all is OVERDUE once past, saying so.
+  NOT TAKEN (a fifth state) is a pulled series whose card owed nothing for the cycle
+  (`Series.explained`, not stopped, the slot at or after `next_expected`); it is not counted overdue.
+- FUNDED is Position's `AccountFigures`, not recomputed: "Holds H; C leaves before D. Funded until
+  the next income on D." or "Short by X before D." Judged accounts are those leaving an open
+  outgoing commitment, and a card only where a limit is declared (none can be yet). An account whose
+  figure cannot be made says so and the headline says "N accounts cannot be judged" instead of
+  "all accounts funded". An overdue commitment on an account is not in "what leaves" (Position
+  counts from today); the page says so beside the account.
+- HEADLINE: "N commitments this month: P paid, D due, O overdue; all accounts funded" or "...;
+  <account> short by X before D". N counts due days, so a weekly commitment counts four or five.
+- TODAY: one quiet line under the lock line, only where something is overdue or an account is short
+  ("Bills is short before D; 1 commitment overdue. See this month"), never an amount.
+- MASKED GET: days, states, counts, account names, and "short before D" show; payee names are
+  masked text and every amount is the sealed token. The month query holds no value.
+- RECEIVABLES and GOALS: `_receivables_section` and `_goals_section` exist, empty; the footnote
+  says receivables will join each account's funded line and goals' accruals the calendar.
+
+Where it lives in the navigation: under More, not a sixth tab. The strip is a five-column grid
+whose test (`test_phone_layout`) holds one row of whole labels at 360 and 390 px; six columns were
+not measured to fit "Connections". The decision whether it replaces a tab (Bring in and Connections
+are the less daily) is the owner's; until then Today's line is the way in when it matters.
+Deviations from the brief, for the owner to rule on: payee names are masked rather than shown on the
+masked GET (a payee is private everywhere else); the funded sentence says "until the next income"
+and not "for the month", since that is what is compared; NOT TAKEN is a fifth state.
+
+Measured (invented household of `tests/this_month_world.py`, clock pinned to 2026-09-15, answers
+decided before the first run): 3 commitments, 1 paid (the 3rd), 1 due (the 20th), 1 overdue (the
+5th); salary expected the 25th; Everyday 1,000.00 less 45.00 leaving before the salary is funded;
+a second account holding 50.00 against 80.00 is short by 30.00 before the 25th. Over the large
+invented store: 824 statements for a first GET with no commitment, 839 with one (the detector
+once), 14 once held, the month ahead 14, and Today gains 14 (57 to 71). Page at 390 px, thirty
+commitments in five accounts: 3,188 px masked and 3,193 shown, no sideways scroll.
+
+Not done or not proven: no real store was read, so the page has not been compared with the owner's
+own reckoning; `explained` cannot tell an old explained slot from a trailing one when a series has
+both; a commitment confirmed with no payment ever seen is called overdue once past; Today's line
+reads the held month, so it is as fresh as the position's memo key; the recurring detector runs
+whole-table on the first GET after any change (about 15 statements and a little time on the large
+store, not the 800 of the position); no weekly commitment's phase was tried across a window change.
+
 ## Measured on the real store (counts only, read from the page after each deploy)
 
 | Version | Recurring series | Kinds (pulled / scheduled / habit) | Payments / transfers / incomes | Stopped (over a year) | Changed | Entities: names / proposals / covered / too broad |

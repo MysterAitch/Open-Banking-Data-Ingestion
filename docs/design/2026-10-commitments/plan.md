@@ -755,7 +755,8 @@ obdi each day, and the projection to Actual moves to the end as an export. The s
    committed before the next income, and what is free, per account and in total, each figure
    with its basis beside it. The "available to spend" of a budgeting tool collapsed to one
    number from facts obdi verifies. Measured against the owner's own reckoning for a month.
-4. **This month** (new) - the forward calendar as a page: each commitment due, paid or not yet,
+4. **This month** (new; **built 2026-10-08**, see "This month as built" in `notes.md`; receivables
+   and goals are not built, so their sections are named and empty) - the forward calendar as a page: each commitment due, paid or not yet,
    the account it leaves and whether that account is funded for it before the next income,
    receivables owed, goals' accruals. The budgeting core without envelopes - "can I afford
    this?" answered from facts. The page the owner is expected to open first.
