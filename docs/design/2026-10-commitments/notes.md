@@ -461,7 +461,15 @@ something never agreed to).
 | 0.4.369 (R2c: the stated party names a row; the learned link joins) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 867 (777 stated, 90 description, 34 rows linked) / 99 / 298 / 0 |
 | 0.4.371 (exact-match rung; both dates; per-kind fit) | 62 | 54 / 8 / 0 | 47 / 7 / 8 | 36 (17) | 4 | 866 (777 stated, 89 description, 34 linked, 17 exact) / 99 / 297 / 0 |
 | 0.4.382 (party account and id on the row; the ladder reads them) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 972 (45 account, 651 source id, 207 stated, 69 description, 210 linked, 54 exact) |
+| 0.4.383 (learned-rule rung, SUPPORT 2, CONFIDENCE 300; branches grouped) | 63 | 54 / 9 scheduled / 0 habit | 48 / 8 / 7 | 38 (18) | 4 | 967 (45 account, 651 source id, 207 stated, 64 description; 9,195 transactions identified and 7 inferred; 210 linked) |
 | Next release (party account and id on the row; the ladder reads them; own accounts named "your <account>"): PREDICTED, NOT MEASURED | about 62 | 54 / 8 / 0 to 1 | about 47 / 7 / 8 | about 36 (17), falling if the habit returns | 4 | names fall where one person was paid under several spellings and rise where people share a stated name; the net on mostly card spending is small |
+
+0.4.383 on the real store: the learned rule reached 7 transactions and retired 5 description
+names (69 to 64); nothing on Recurring moved, so the habit is still not reached by this rung at
+the default settings. Whether raising CONFIDENCE's population or lowering it changes that is
+for the owner to try on the settings form once it lands (0.4.384 or after); the page's counts
+line will say how many rules are applied and how many offered. The rung's other measurement -
+rows a later identifier confirms or refutes - is not yet built.
 
 0.4.382's rise (867 to 972 names, Recurring-stopped 31 to 38) was a false premise, not a fault in
 the ladder: Starling's counterparty uid is per merchant LOCATION for card payments. The owner
