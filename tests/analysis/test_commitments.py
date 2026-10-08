@@ -26,7 +26,9 @@ from obdi.analysis.commitments import (
     CONFIRM,
     ENDED,
     MISSING,
+    PriceOffer,
     apply_press,
+    change_price,
     confirm,
     match_series,
     series_index,
@@ -384,6 +386,125 @@ class TestAPressNamesItsSeriesWithoutNamingThePayeeOrTheAmount:
 
         with pytest.raises(CommitmentRefused):
             apply_press(store, found, "explode", {"ref": [series_refs(found)[0]]}, today=TODAY)
+
+
+def priced(amounts: list[int], first_month: int = 3) -> list[Transaction]:
+    return [
+        tx(A, date(2026, first_month + i, 3), -minor, "ZEPHYRINE STREAMING")
+        for i, minor in enumerate(amounts)
+    ]
+
+
+class TestAChangedPrice:
+    """KNOWN ANSWERS. A subscription on the 3rd: £10.00 from March to June, £12.00 in July and
+    August. Confirmed from that history the window is 1000; the newest run (July and August) began
+    on 2026-07-03, so the offer is 1200 from then. Pressing it makes windows (2026-03-03 to
+    2026-07-02 at 1000) and (2026-07-03 open at 1200). A later rise to 1500 for the payments of
+    August and September (the 1200 window then ending 2026-08-02) makes a third; nothing is ever
+    merged or overwritten."""
+
+    def test_Offer_ForARiseAfterConfirming_IsTheNewAmountFromTheFirstDayOfTheRun(self, store):
+        before = find_recurring(priced([1000] * 4), [], TODAY)
+        confirmed(store, before, only(before))
+        after = find_recurring(priced([1000] * 4 + [1200] * 2), [], TODAY)
+
+        (match,) = match_series(after, store.commitments())
+
+        assert match is not None and match.offer == PriceOffer(1200, date(2026, 7, 3))
+
+    def test_Press_OnTheOffer_ClosesTheOldWindowTheDayBeforeAndKeepsBoth(self, store):
+        before = find_recurring(priced([1000] * 4), [], TODAY)
+        confirmed(store, before, only(before))
+        after = find_recurring(priced([1000] * 4 + [1200] * 2), [], TODAY)
+
+        change_price(store, after, series_refs(after)[0], today=TODAY)
+
+        (commitment,) = store.commitments()
+        old, new = commitment.windows
+        assert (old.amount_minor, old.from_day, old.to_day) == (
+            1000,
+            date(2026, 3, 3),
+            date(2026, 7, 2),
+        )
+        assert (new.amount_minor, new.from_day, new.to_day) == (1200, date(2026, 7, 3), None)
+        assert new.basis == "price changed from 2026-07-03, confirmed on 2026-10-07"
+
+    def test_Offer_AfterThePress_IsGoneEvenWhileTheDetectorStillSaysChanged(self, store):
+        before = find_recurring(priced([1000] * 4), [], TODAY)
+        confirmed(store, before, only(before))
+        after = find_recurring(priced([1000] * 4 + [1200] * 2), [], TODAY)
+        assert only(after).changed
+        change_price(store, after, series_refs(after)[0], today=TODAY)
+
+        (match,) = match_series(after, store.commitments())
+
+        assert match is not None and match.offer is None
+
+    def test_Offer_WhenTheNewPriceHasBecomeTheUsualOne_IsStillMadeUntilTheWindowHoldsIt(
+        self, store
+    ):
+        before = find_recurring(priced([1000] * 4), [], TODAY)
+        confirmed(store, before, only(before))
+        long_after = find_recurring(priced([1000] * 3 + [1200] * 4), [], TODAY)
+        assert not only(long_after).changed
+
+        (match,) = match_series(long_after, store.commitments())
+
+        assert match is not None and match.offer == PriceOffer(1200, date(2026, 6, 3))
+
+    def test_Window_WhenAnotherRiseFollows_BecomesTheThirdAndTheFirstTwoStay(self, store):
+        before = find_recurring(priced([1000] * 4), [], TODAY)
+        confirmed(store, before, only(before))
+        second = find_recurring(priced([1000] * 4 + [1200] * 2), [], TODAY)
+        change_price(store, second, series_refs(second)[0], today=TODAY)
+        third = find_recurring(priced([1200] * 6 + [1500] * 2, 2), [], date(2026, 10, 20))
+
+        change_price(store, third, series_refs(third)[0], today=date(2026, 10, 20))
+
+        (commitment,) = store.commitments()
+        assert [(w.amount_minor, w.to_day) for w in commitment.windows] == [
+            (1000, date(2026, 7, 2)),
+            (1200, date(2026, 8, 2)),
+            (1500, None),
+        ]
+
+    def test_Offer_WithinTheDetectorsToleranceOfTheWindow_IsNotMade(self, store):
+        before = find_recurring(priced([1000] * 4), [], TODAY)
+        confirmed(store, before, only(before))
+        after = find_recurring(priced([1000] * 5 + [1020]), [], TODAY)
+
+        (match,) = match_series(after, store.commitments())
+
+        assert match is not None and match.offer is None
+
+    def test_Offer_ForABillThatVariesEveryTime_IsNotMade(self, store):
+        before = find_recurring(priced([1000] * 4), [], TODAY)
+        confirmed(store, before, only(before))
+        varying = find_recurring(priced([1000, 1500, 800, 1900, 700, 1700]), [], TODAY)
+        assert not only(varying).steady
+
+        (match,) = match_series(varying, store.commitments())
+
+        assert match is not None and match.offer is None
+
+    def test_Offer_ForACommitmentThatHasEnded_IsNotMade(self, store):
+        before = find_recurring(priced([1000] * 4), [], TODAY)
+        confirmed(store, before, only(before))
+        store.end_commitment(store.commitments()[0].id, date(2026, 6, 3))
+        after = find_recurring(priced([1000] * 4 + [1200] * 2), [], TODAY)
+
+        (match,) = match_series(after, store.commitments())
+
+        assert match is not None and match.offer is None
+
+    def test_Press_ForASeriesWhoseWindowAlreadyHoldsThePrice_IsRefused(self, store):
+        found = find_recurring(priced([1000] * 6), [], TODAY)
+        confirmed(store, found, only(found))
+
+        with pytest.raises(CommitmentRefused, match="no new price"):
+            change_price(store, found, series_refs(found)[0], today=TODAY)
+
+        assert len(store.commitments()[0].windows) == 1
 
 
 class TestTheKindsTheStoreKnows:

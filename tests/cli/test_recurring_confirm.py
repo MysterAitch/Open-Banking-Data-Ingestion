@@ -20,102 +20,39 @@ unrelated purchase yesterday so the account is known to be read to now.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import timedelta
 
 import httpx
 import pytest
 
-from obdi.cli import build_web_config
-from obdi.core.page_times import local_day
-from obdi.ingest.pipeline import import_file
 from obdi.ingest.rebuild import rebuild_from_raw
 from obdi.ingest.store import Store
-from page_dom import Node, elements, parse
-from section_harness import environment, serve_config
+from recurring_press_support import (
+    months_back,
+    press_on,
+    presses,
+    row_of,
+    served_export,
+    shown,
+    today,
+)
 
-ACCOUNT = "current-main"
 PAYEE = "Zephyrine Quokka Subscriptions"
 GYM = "Cedarwick Fernside Gym"
 USUAL = "41.37"
 GYM_USUAL = "25.00"
-
-
-def months_back(today: date, count: int, day: int) -> list[date]:
-    """The `day` of each of the `count` months that end the most recent one on or before today."""
-    index = today.year * 12 + today.month - 1
-    year, month = divmod(index, 12)
-    if date(year, month + 1, day) > today:
-        index -= 1
-    found = []
-    for back in range(count):
-        year, month = divmod(index - back, 12)
-        found.append(date(year, month + 1, day))
-    return sorted(found)
-
-
-def _export(path, rows: list[tuple[date, str, str]]) -> None:
-    lines = ["Date,Counter Party,Reference,Type,Amount (GBP),Balance (GBP)"]
-    lines += [f"{d:%d/%m/%Y},{payee},,CARD,-{amount},0" for d, payee, amount in rows]
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+ACCOUNT = "current-main"
 
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
-    today = local_day(datetime.now(UTC))
-    rows = [(d, PAYEE, USUAL) for d in months_back(today, 6, 3)]
-    gym_end = months_back(today, 12, 9)[:5]
+    now = today()
+    rows = [(d, PAYEE, USUAL) for d in months_back(now, 6, 3)]
+    gym_end = months_back(now, 12, 9)[:5]
     rows += [(d, GYM, GYM_USUAL) for d in gym_end]
-    rows.append((today - timedelta(days=1), "Corner Bakery", "3.20"))
-    csv = tmp_path / "export.csv"
-    _export(csv, rows)
-    db = tmp_path / "store.sqlite3"
-    with Store(db) as store:
-        import_file(store, csv, account_id=ACCOUNT)
-    environment(monkeypatch, tmp_path)
-    config = build_web_config(db)
-    assert config is not None
-    base, stop = serve_config(config)
-    yield base, db, rows, gym_end
-    stop()
-
-
-def presses(page: str) -> list[dict[str, str]]:
-    """Each press form on the page: its action and its hidden fields."""
-    found = []
-    for form in elements(parse(page), "form"):
-        action = form.attrs.get("action", "")
-        if not action.startswith("/recurring-"):
-            continue
-        fields = {
-            i.attrs["name"]: i.attrs.get("value", "")
-            for i in elements(form, "input")
-            if "name" in i.attrs
-        }
-        found.append({"action": action, **fields})
-    return found
-
-
-def row_of(page: str, fragment: str) -> Node:
-    (row,) = [
-        li
-        for li in elements(parse(page), "li")
-        if "recur-row" in li.classes and fragment in li.text().casefold()
-    ]
-    return row
-
-
-def press_on(row: Node) -> list[dict[str, str]]:
-    return [
-        {
-            "action": form.attrs["action"],
-            **{i.attrs["name"]: i.attrs.get("value", "") for i in elements(form, "input")},
-        }
-        for form in elements(row, "form")
-    ]
-
-
-def shown(base: str) -> str:
-    return httpx.post(f"{base}/recurring", timeout=60).text
+    rows.append((now - timedelta(days=1), "Corner Bakery", "3.20"))
+    with served_export(tmp_path, monkeypatch, rows) as (base, db):
+        yield base, db, rows, gym_end
 
 
 class TestConfirmingALiveSeries:

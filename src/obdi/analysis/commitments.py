@@ -28,7 +28,7 @@ from datetime import date
 
 from ..ingest.commitment_records import Commitment, CommitmentRefused, Window, WindowTerms
 from ..ingest.store import Store
-from .recurring import Series, tolerance_days
+from .recurring import CHANGE_PERCENT, Series, tolerance_days
 
 #: How a Confirm press settles the open question of a stopped series: it was a commitment that
 #: ended at its last occurrence, or one that has gone missing and is still expected.
@@ -40,14 +40,25 @@ HOWS = (CONFIRM, ENDED, MISSING)
 
 #: The presses the Recurring page makes, said once here and by name everywhere else.
 ACT_CONFIRM = "confirm"
+ACT_PRICE = "price"
+
+
+@dataclass(frozen=True)
+class PriceOffer:
+    """A new window the series' newest payments ask for: the amount they are at, from the first
+    day of the run of payments at it."""
+
+    amount_minor: int
+    from_day: date
 
 
 @dataclass(frozen=True)
 class Confirmation:
-    """The commitment a series belongs to, and its current window."""
+    """The commitment a series belongs to, its current window, and the new price to offer."""
 
     commitment: Commitment
     window: Window | None
+    offer: PriceOffer | None = None
 
 
 def _structure(series: Series) -> str:
@@ -146,9 +157,36 @@ def match_series(
     used: set[int] = set()
     for _nearness, si, ci in candidates:
         if matched[si] is None and ci not in used:
-            matched[si] = Confirmation(commitments[ci], commitments[ci].current)
+            commitment = commitments[ci]
+            matched[si] = Confirmation(
+                commitment, commitment.current, price_offer(found[si], commitment)
+            )
             used.add(ci)
     return matched
+
+
+def price_offer(series: Series, commitment: Commitment) -> PriceOffer | None:
+    """The new window to offer where the series' newest payments are at a price the open window
+    does not hold, or None.
+
+    The detector's `changed` is not what is asked: it compares the latest amount with the
+    series' USUAL amount, which becomes the new price itself once enough months have passed, so
+    it stops saying so while the window still holds the old one. The window is what a price is
+    compared with, by the detector's own tolerance (`CHANGE_PERCENT`).
+
+    Nothing is offered for a window already closed (the commitment ended), a series that varies
+    every time (`steady` is false, so there is no price to move to), a stopped series (its last
+    payment is old news), or a run of newest payments that began no later than the window did
+    (the window was written after them, and is the owner's).
+    """
+    window = commitment.current
+    if window is None or window.to_day is not None or series.stopped or not series.steady:
+        return None
+    if abs(series.latest_minor - window.amount_minor) * 100 <= CHANGE_PERCENT * window.amount_minor:
+        return None
+    if series.latest_from is None or series.latest_from <= window.from_day:
+        return None
+    return PriceOffer(series.latest_minor, series.latest_from)
 
 
 def terms_of(series: Series, basis: str) -> WindowTerms:
@@ -198,6 +236,36 @@ def confirm(
     return name
 
 
+def change_price(store: Store, found: Sequence[Series], ref: str, *, today: date) -> None:
+    """Close the confirmed series' open window the day before its newest price began and open
+    another at that price from that day, and commit. The offer is worked out again here from
+    what is held, never taken from the form, so a press made on a page that has gone stale can
+    only record what is true now. Refused where the series is not a commitment or has no new
+    price to record, which includes a second press on one answered.
+    """
+    index = series_index(found, ref)
+    match = match_series(found, store.commitments())[index]
+    if match is None or match.offer is None or match.window is None:
+        raise CommitmentRefused("There is no new price to record for that payment.")
+    old = match.window
+    store.change_commitment_window(
+        match.commitment.id,
+        match.offer.from_day,
+        WindowTerms(
+            amount_minor=match.offer.amount_minor,
+            currency=old.currency,
+            cadence=old.cadence,
+            usual_day=old.usual_day,
+            usual_month=old.usual_month,
+            tolerance_days=old.tolerance_days,
+            basis=(
+                f"price changed from {match.offer.from_day.isoformat()}, "
+                f"confirmed on {today.isoformat()}"
+            ),
+        ),
+    )
+
+
 def _field(form: dict[str, list[str]], name: str) -> str:
     return (form.get(name) or [""])[0].strip()
 
@@ -227,4 +295,7 @@ def apply_press(
         how = _field(form, "how") or CONFIRM
         confirm(store, found, ref, how, today=today)
         return _SAID[how]
+    if action == ACT_PRICE:
+        change_price(store, found, ref, today=today)
+        return "New price recorded; the earlier price is kept as it was."
     raise CommitmentRefused("That is not something this page does.")

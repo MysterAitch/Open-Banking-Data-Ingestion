@@ -43,7 +43,7 @@ from typing import NewType, Protocol
 from urllib.parse import ParseResult, parse_qs, quote, urlparse
 
 from ..analysis import entity_actions
-from ..analysis.commitments import ACT_CONFIRM
+from ..analysis.commitments import ACT_CONFIRM, ACT_PRICE
 from ..analysis.entities import EntitiesView, EntityPage, RuleTrial
 from ..analysis.recurring import RecurringFindings
 from ..core.classification import redact_summary
@@ -6423,6 +6423,9 @@ class ConnectionHandler(
             return
         if route == "/recurring-confirm":
             self._recurring_press_post(ACT_CONFIRM)
+            return
+        if route == "/recurring-price":
+            self._recurring_press_post(ACT_PRICE)
             return
         if route == "/entities":
             self._entities_show_post()

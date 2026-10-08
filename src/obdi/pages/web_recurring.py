@@ -56,6 +56,7 @@ _esc = html.escape
 
 ROUTE = "/recurring"
 CONFIRM_ROUTE = "/recurring-confirm"
+PRICE_ROUTE = "/recurring-price"
 
 _WEEKDAYS = ("Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays")
 
@@ -229,7 +230,16 @@ def _actions(line: _Line, *, unmasked: bool) -> str:
     """What the owner can do with a series: nothing more once it is confirmed; for a stopped one,
     to say once whether it ended or is missing; otherwise to confirm it."""
     if line.confirmation is not None:
-        return _confirmed(line.confirmation, unmasked=unmasked)
+        offer = line.confirmation.offer
+        if offer is None:
+            return _confirmed(line.confirmation, unmasked=unmasked)
+        price = str(Money(offer.amount_minor, line.series.currency)) if unmasked else MASKED_TOTAL
+        return (
+            _confirmed(line.confirmation, unmasked=unmasked)
+            + f'<span class="recur-ask">Price changed to {_esc(price)} from '
+            f"{_esc(offer.from_day.isoformat())}</span>"
+            + _press(PRICE_ROUTE, line.ref, "Record it", unmasked=unmasked)
+        )
     if line.series.stopped:
         return (
             '<span class="recur-ask">ended, or missing?</span>'
