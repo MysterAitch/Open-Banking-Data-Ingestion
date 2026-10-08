@@ -40,6 +40,11 @@ release commit.
   and a Tick, one above it is applied; a line counts what the current settings decide. Not this on
   an inferred description, through the existing entity-link-refuse press, withdraws the whole
   rule, which is now tested end to end.
+- **Keep on an inferred description declares a "begins with" rule on the entity.** Keeping a
+  statistic as a stored description would have frozen one shape; the owner's claim is the opening,
+  so Keep now stores the opening as the entity's own rule, which names later variants on sight and
+  no longer depends on the confidence setting. The entity page lists the rule with where it came
+  from ("learned from 14 identified rows, kept by you on 2026-10-08").
 
 ## [0.4.384] - 2026-10-08
 

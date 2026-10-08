@@ -646,3 +646,12 @@ The rung is `analysis/learned_rules.py` (learning, state, sentences, the setting
    withdrawal is `tests/cli/test_entities_learned_rules_page.py`. One preference select was added
    to the Entity, Entities, and Recurring page budgets earlier; this step adds none.
    Rejected: a floor that hides a weak rule (the owner's decision: show it, unticked).
+2. KEEP. Keep (`/entity-link-keep`) on an inferred learned line calls `_keep_learned_rule`: the
+   opening (`Alias.opening`) becomes a `begins` rule of the entity through the existing rule
+   storage, and its provenance (rows that taught it, the day) is a preference
+   `learned-rules.origin:<rule id>` read by the same one select as the settings (no page budget
+   moves). The entity page lists the rule with "learned from N identified rows, kept by you on
+   <day>"; the line shows "kept as a rule of this entity" and offers no presses. Rejected: storing
+   the shape as a description identifier, as Keep does for an alias (it freezes one shape, not the
+   claim). Not proven: a kept rule's later behaviour when the rule it came from is withdrawn; it
+   stays, being the owner's.

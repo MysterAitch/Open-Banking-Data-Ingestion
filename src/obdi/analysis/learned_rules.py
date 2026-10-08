@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .entity_tokens import Token, distinctive_words
@@ -53,6 +53,7 @@ LONE_OPENING_LETTERS = 8
 SUPPORT_SETTING = "learned-rules.support"
 CONFIDENCE_SETTING = "learned-rules.confidence"
 KEPT_PREFIX = "learned-rules.kept:"
+ORIGIN_PREFIX = "learned-rules.origin:"
 
 APPLIED = "applied"
 OFFERED = "offered"
@@ -77,6 +78,9 @@ class RulePolicy:
 
     settings: RuleSettings = RuleSettings()
     kept: frozenset[str] = frozenset()
+    #: For each entity rule the owner kept from a learned one (`rule_origin`), the rule's id to
+    #: what was true when it was kept: how many rows taught it and the day.
+    origins: Mapping[int, tuple[int, str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -252,7 +256,30 @@ def rule_policy(store: Store) -> RulePolicy:
             _whole(held.get(CONFIDENCE_SETTING), CONFIDENCE_DEFAULT),
         ),
         frozenset(name[len(KEPT_PREFIX) :] for name in held if name.startswith(KEPT_PREFIX)),
+        _origins(held),
     )
+
+
+def _origins(held: Mapping[str, str]) -> dict[int, tuple[int, str]]:
+    found: dict[int, tuple[int, str]] = {}
+    for name, value in held.items():
+        if not name.startswith(ORIGIN_PREFIX):
+            continue
+        rule = name[len(ORIGIN_PREFIX) :]
+        taught, _, day = value.partition("|")
+        if rule.isdigit() and taught.isdigit():
+            found[int(rule)] = (int(taught), day)
+    return found
+
+
+def record_origin(store: Store, rule_id: int, taught: int, day: str) -> None:
+    """Remember what a kept entity rule was learned from: the rows that taught it and the day the
+    owner kept it. The rule itself is the owner's claim from then on; this is its provenance."""
+    store.set_preference(f"{ORIGIN_PREFIX}{rule_id}", f"{taught}|{day}")
+
+
+def origin_sentence(taught: int, day: str) -> str:
+    return f"learned from {taught:,} identified rows, kept by you on {day}"
 
 
 def _whole(value: str | None, default: int) -> int:
