@@ -26,10 +26,7 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
-## [Unreleased]
-
-Held here while several pieces are cut in steps; each line moves under its version at the
-release commit.
+## [0.4.385] - 2026-10-08
 
 ### Added
 - **The Entities page lists the rules the identified rows teach, with the two settings that
