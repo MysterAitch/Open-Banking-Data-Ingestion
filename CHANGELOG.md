@@ -26,6 +26,50 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.380] - 2026-10-08
+
+### Added
+- **A recurring series can be confirmed as a commitment, with its terms as
+  a dated window.** R1 of the commitments plan, and the owner's model from
+  the start: one line per recurring payment with its amount and day. The
+  declaration side's first tables (schema 29): a commitment - its name
+  (pre-filled from the series), the party it goes to (an entity where one
+  is gathered, else the name key), its kind as the detector said it
+  (pulled, scheduled, habit), direction, and the account it usually leaves
+  - and its windows - from, to, the usual amount and currency, cadence, the
+  usual day, a tolerance, and the basis ("confirmed from the series on D")
+  - with at most one window open; declared, kept across every rebuild,
+  counted as irreplaceable. Every Recurring line has "Confirm", which
+  makes the commitment with one window from the series' history; a
+  stopped series is asked once, "ended, or missing?" - Ended closes the
+  window at the last occurrence, Missing leaves it open so the forward
+  pages can say it is overdue. A confirmed line reads "confirmed as
+  <name>" and finds its commitment on later reads by party, account,
+  direction, currency, and cadence, two products to one payee going to the
+  nearer amount; gathering the party into an entity afterwards still
+  matches. Where the newest payments differ from the open window beyond
+  its tolerance the line offers "Price changed to X from D", and the press
+  closes the old window the day before and opens a new one, recomputed
+  server-side so a posted amount cannot plant a price. "Not a commitment"
+  folds the series into "N series you said are not commitments" with "Put
+  back", and the summary then counts "found: confirmed, not a commitment,
+  still to look at" - the precision count the plan asks for, read off the
+  page. A press carries no value, so it shows on the masked page, naming
+  its line by a reference made from account, cadence, day, kind, and first
+  sighting - never the payee or an amount, since a hash over a four-digit
+  amount can be brute-forced; a stale reference is refused rather than
+  applied to another line. On the invented stores every series confirmed
+  through the store matches on a second read (18 of 18, 4 of 4); the
+  detector's own output is identical before and after, by a fingerprint
+  per series. The page's statement budget is 31 (two selects more); at
+  phone width the page stays within four screens closed and goes to five
+  with every fold open, which is two links per line and the owner's to
+  judge. Not done: no commitments page (a confirmed line links to
+  nothing), no editing of a window from the page, no "one-off" answer to a
+  price offer, an ended commitment does not say when payments continue,
+  and the declared-layer export does not carry commitments or entities.
+  The precision measurement itself is yours to take on the real store.
+
 ## [0.4.379] - 2026-10-08
 
 ### Changed
