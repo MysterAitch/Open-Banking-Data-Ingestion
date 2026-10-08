@@ -4172,6 +4172,13 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             held = [str(record.ref) for record in store.declared_accounts()]
             return apply_press(store, action, form, accounts=held)
 
+    def owed_row(anchor: str) -> Transaction | None:
+        """The transaction a row's anchor names, in one select."""
+        from .read.ledger import row_anchor
+
+        with Store(db_path) as store:
+            return store.transaction_by_key(row_anchor, anchor)
+
     def receivable_act(action: str, form: dict[str, list[str]]) -> tuple[str, str, str]:
         """One press on what is owed back. A declaration finds its transaction again among those
         held, so a press on a page that has gone stale is refused and never applied to another."""
@@ -5275,6 +5282,7 @@ def build_web_config(db_path: Path) -> WebConfig | None:
         anchor_save=anchor_save,
         ownership_act=ownership_act,
         receivable_act=receivable_act,
+        owed_row=owed_row,
         anchor_remove=anchor_remove,
         balance_disregard=balance_disregard,
         balance_use_again=balance_use_again,

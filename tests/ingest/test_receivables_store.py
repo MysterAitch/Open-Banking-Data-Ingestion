@@ -133,6 +133,38 @@ class TestClosingByHand:
             store.close_receivable(4242, WRITTEN_OFF, "no such thing")
 
 
+class TestFindingARowByItsAnchor:
+    def _selects_of(self, store, key, wanted):
+        issued: list[str] = []
+        store.connection.set_trace_callback(issued.append)
+        found = store.transaction_by_key(key, wanted)
+        store.connection.set_trace_callback(None)
+        return found, [s for s in issued if s.lstrip().upper().startswith("SELECT")]
+
+    def test_TransactionByKey_WhenTheKeyNamesARow_FindsThatRowInOneSelect(self, store, tmp_path):
+        from landing import import_file
+        from this_month_world import write_export
+
+        write_export(
+            tmp_path / "a.csv",
+            [(date(2026, 10, 3), "Corner Coffee", "-4.20"), (date(2026, 10, 4), "Bakery", "-3.20")],
+        )
+        import_file(store, tmp_path / "a.csv", account_id="current-main")
+        rows = {t.description: t for t in store.all_transactions()}
+        wanted = "k-" + rows["Corner Coffee"].entity_id
+
+        found, selects = self._selects_of(store, lambda ident: "k-" + ident, wanted)
+
+        assert found is not None and found.description == "Corner Coffee"
+        assert len(selects) == 1
+
+    def test_TransactionByKey_WhenTheKeyNamesNothing_IsNoneInOneSelect(self, store):
+        found, selects = self._selects_of(store, lambda ident: ident, "nothing-has-this-id")
+
+        assert found is None
+        assert len(selects) == 1
+
+
 class TestKeptAcrossARebuild:
     def test_Receivables_WhenTheStoreIsRebuiltFromRaw_AreKept(self, store):
         declare(store)

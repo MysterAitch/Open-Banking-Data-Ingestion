@@ -30,7 +30,7 @@ from ..core.errors import DataError
 from ..core.logs import say
 from ..core.london_clock import london
 from ..core.masking import MASKED_TOTAL, Disclosed, mask_text
-from ..core.models import BASIS_ID
+from ..core.models import BASIS_ID, Transaction
 from ..core.money import format_amount
 from ..core.page_words import (
     ACCOUNT_CHECK_HEADING,
@@ -3042,18 +3042,38 @@ def _ownership_html(about: AccountAbout, view: Any, *, unmasked: bool) -> str:
     )
 
 
-def owed_page(anchor: str) -> bytes:
-    """The page a row's "Owed" link opens: the fields a declaration reads - who owes it, an
-    optional label (a second axis beside the category), and optionally a smaller amount and a day
-    it is due back - for the payment the link named. The row is found again from its anchor when
-    the form is sent, so this page holds no payee and no amount, and a row that has since gone is
-    refused there."""
+def owed_page(anchor: str, row: Transaction | None, *, unmasked: bool = False) -> bytes:
+    """The page a row's "Owed" link opens: which payment it is for, and the fields a declaration
+    reads - who owes it, an optional label (a second axis beside the category), and optionally a
+    smaller amount and a day it is due back.
+
+    The payment is said by its day, account, source, and description; the description is a payee
+    and the amount a figure, so both are masked unless values were asked for (a POST, or a
+    sitting), as on every page. A row the anchor names no longer is said so and nothing is
+    offered: a form that could only be refused is not drawn."""
+    if row is None:
+        return render_page(
+            "Owed to you",
+            "<p>That payment is not held now, so nothing can be marked against it. Open it again "
+            f"from its account.</p>{_HOME}",
+        )
 
     def field(label: str, name: str, extra: str = "") -> str:
         return f'<p><label>{label} <input name="{name}" maxlength="120"{extra}></label></p>'
 
+    text = row.description if unmasked else mask_text(row.description)
+    amount = figure_html(format_amount(abs(row.amount_minor)), unmasked=unmasked)
+    switch = (
+        ""
+        if unmasked
+        else f'<form method="post" action="/owed"><input type="hidden" name="r" '
+        f'value="{_esc(anchor)}">' + submit_button("Show values", secondary=True) + "</form>"
+    )
     return render_page(
         "Owed to you",
+        f'<p class="lede"><strong>{_esc(row.value_date.isoformat())}</strong> from '
+        f"{code_html(row.account_id)}, {code_html(row.source)}: {_esc(text)}, {amount}.</p>"
+        f"{switch}"
         '<form method="post" action="/receivable-declare">'
         f'<input type="hidden" name="anchor" value="{_esc(anchor)}">'
         '<p class="muted">Say who owes this payment back. A transfer from them closes it.</p>'
@@ -3600,14 +3620,22 @@ class LedgerPages(AnswerPages):
             return
         self._ledger(ref, month, unmasked=False, notice=said, no_store=True)
 
-    def _owed_get(self, params: dict[str, list[str]]) -> None:
-        """The declaration form for the payment a row's link named; it holds nothing of the
-        payment, so it is the same masked page whoever asks."""
+    def _owed_get(self, params: dict[str, list[str]], *, unmasked: bool = False) -> None:
+        """The declaration form for the payment a row's link named, with the payment said: masked
+        on a GET, and with values only for the POST that asks for them (or a sitting)."""
         anchor = (params.get("r", [""])[0] or "").strip()
-        if not anchor:
+        hook = self.bound_config.owed_row
+        if not anchor or hook is None:
             self._respond(400, _page("No payment named", "Open it from a payment's Owed link."))
             return
-        self._respond(200, owed_page(anchor))
+        shown = unmasked or values_sitting.shown()
+        try:
+            row = hook(anchor)
+        except Exception as fault:
+            say("ledger.owed.fault", kind=type(fault).__name__)
+            self._respond(500, _page("Owed to you", "The payment could not be read."))
+            return
+        self._respond(200, owed_page(anchor, row, unmasked=shown), no_store=shown)
 
     def _receivable_declare_post(self, form: dict[str, list[str]]) -> None:
         """Declare a payment owed back, then answer with the MASKED ledger of its account.

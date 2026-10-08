@@ -23,7 +23,7 @@ import json
 import os
 import re
 import sqlite3
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -2742,6 +2742,18 @@ class Store:
             replace(t, transfer_confirmed=t.entity_id in confirmed)
             for t in (_row_to_transaction(row) for row in rows)
         ]
+
+    def transaction_by_key(self, key: Callable[[str], str], wanted: str) -> Transaction | None:
+        """The transaction whose id `key` maps to `wanted`, or None: one select.
+
+        A row's anchor (`read.ledger.row_anchor`) is a hash of its id, so it cannot be turned back
+        into the id; `key` is registered as an SQL function and the table is searched by it in
+        the one statement, where a page that holds only an anchor needs the row it names."""
+        self.connection.create_function("transaction_key", 1, key, deterministic=True)
+        found = self.connection.execute(
+            "SELECT * FROM transactions WHERE transaction_key(entity_id) = ? LIMIT 1", (wanted,)
+        ).fetchone()
+        return None if found is None else _row_to_transaction(found)
 
     def replace_transfer_pairs(self, pairs: list[tuple[str, str]]) -> None:
         """Record the pairing pass's findings, replacing any previous pass's.

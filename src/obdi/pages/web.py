@@ -53,6 +53,7 @@ from ..core.classification import redact_summary
 from ..core.errors import DataError
 from ..core.logs import say
 from ..core.masking import MASKED_TOTAL, mask_text
+from ..core.models import Transaction
 from ..core.namespaces import (
     QUEUE_KINDS,
     UNASSIGNED_ACCOUNT,
@@ -850,6 +851,8 @@ class WebConfig:
     #: One press on an account's ownership (`analysis.ownership.apply_press`): the action and the
     #: form, answered by a sentence that holds no name; a refusal is an `OwnershipRefused`.
     ownership_act: Callable[[str, dict[str, list[str]]], str] | None = None
+    #: The transaction a row's anchor names (`Store.transaction_by_key`), or None; one select.
+    owed_row: Callable[[str], Transaction | None] | None = None
     #: One press on what is owed back on a transaction (`analysis.receivable_press`): the action
     #: and the form, answered by (a sentence holding no name or amount, the account, the month);
     #: a refusal is a `DataError`.
@@ -6393,6 +6396,10 @@ class ConnectionHandler(
             return
         if route == "/account-ownership":
             self._ownership_post(self._read_form())
+            return
+        if route == "/owed":
+            # A POST because showing values is a decision, not a link.
+            self._owed_get(self._read_form(), unmasked=True)
             return
         if route == "/receivable-declare":
             self._receivable_declare_post(self._read_form())
