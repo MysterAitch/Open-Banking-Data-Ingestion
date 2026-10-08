@@ -29,6 +29,7 @@ export = "Actual: the push, the audit, the verdict, the replay, and the declared
 pages = "Every web page, navigation, the stylesheets, the handler, and the page chrome."
 
 [core]
+addresses = "core.addresses"
 buildinfo = "core.buildinfo"
 classification = "core.classification"
 date_window = "core.date_window"

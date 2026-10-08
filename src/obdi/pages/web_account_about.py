@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 from datetime import date
 
+from ..core.addresses import account_address
 from ..core.masking import MASKED_TOTAL
 from ..core.money import format_amount
 from ..core.plural import plural
@@ -27,7 +28,6 @@ from ..read.account_about import (
     windows_in_order,
 )
 from ..verify.statement_sections import masked
-from .navigation import account_address
 
 
 def _esc(text: object) -> str:

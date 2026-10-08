@@ -13,7 +13,8 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from obdi.pages.navigation import LIST_TOPS, account_address
+from obdi.core.addresses import account_address
+from obdi.pages.navigation import LIST_TOPS
 from page_dom import elements, parse
 from page_walk import invented, served, walked_pages  # noqa: F401
 

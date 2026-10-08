@@ -32,6 +32,7 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import quote
 
+from ..core.addresses import account_address
 from ..core.page_times import date_with_age
 from ..core.plural import plural
 from ..ingest.connections import Connection, ConnectionStore
@@ -41,7 +42,6 @@ from ..read.alerts import consent_rung
 from ..read.overview import NOW, SOON
 from ..read.todo import Control, Todo
 from ..verify.bank_balances import BANK_SOURCE
-from .navigation import account_address
 from .web_overview import actual_line, serial, todo_row_html
 from .web_scheduler import SECTION_ID, scheduler_section
 

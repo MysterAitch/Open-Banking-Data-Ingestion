@@ -24,6 +24,7 @@ from datetime import UTC, date, datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
+from ..core.addresses import account_address
 from ..core.errors import DataError
 from ..core.logs import say
 from ..core.london_clock import london
@@ -93,7 +94,7 @@ from .ledger_scope import (
     query_of,
     read_scope,
 )
-from .navigation import account_address, page_name
+from .navigation import page_name
 from .trust_bar import key_html
 from .web_account_about import declared_html, stated_html
 from .web_accounts import archive_controls, submit_button

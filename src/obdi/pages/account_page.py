@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
+from ..core.addresses import account_address
 from ..core.logs import say
 from ..core.plural import plural
 from ..ingest.rebuild_hold import RebuildInProgress
@@ -46,7 +47,6 @@ from ..verify.standing_data import (
     verification_of,
 )
 from ..verify.trust import Trust, month_marks, trust_of
-from .navigation import account_address
 from .trust_bar import bar_html, ends_html, own_life, party_lane_html, source_lane_html
 from .web_accounts import submit_button
 from .web_overview import OPEN_TODO_LIMIT, _whole_dates, todo_row_html
