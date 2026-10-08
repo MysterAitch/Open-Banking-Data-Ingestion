@@ -224,6 +224,7 @@ class TestWhatMovesToTheKeptRow:
         assert store.annotate(absorbed, "payee", "Abroad", provenance="rule:v1")
         store.queue_for_review(absorbed, "looked odd")
         store.append_event("test_event", absorbed, {"note": "carried"})
+        store.record_inferred_links([(absorbed, "starling:uid-planted", "planted opening")])
         store.replace_transfer_pairs([(absorbed, partner.entity_id)])
         # A sighting that states a coded word, whichever source made the row.
         held = next(t for t in store.transactions_for_account(MAIN) if t.entity_id == absorbed)

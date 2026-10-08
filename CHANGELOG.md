@@ -26,6 +26,48 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [Unreleased]
+
+### Changed
+- **The Learned rules section is read at a glance on a phone.** It listed every rule, 118 of them
+  linking no row, each with the same five-line sentence. The method and the bound's caveat are
+  now said once at the head; a rule that links rows is one line ("<party> `opening` - taught by
+  N, tested against M, links K") with its state, confirmations, and rows in a closed drill-down;
+  rules that reach no row sit in one closed fold of one line each. The form's labels are
+  sentences.
+
+- **Channels and processors are no longer offered as payees; branches that read alike are told
+  apart.** Read on the real store, groups were headed "www", "visa purchase", "zettle", "paypal",
+  "first payment", and "interest": words every bank prints in front of (or after) the merchant,
+  shared by rows that have nothing else in common. They are now payment methods (PayPal keeps
+  its word, so a payment to PayPal itself is still PayPal) and "google" is a trailing code. And
+  five branches of one retailer all labelled "tesco" are labelled by what their own descriptions
+  say that the others' do not ("tesco - stores birmingham"), or "tesco (location 2)" where
+  nothing does; "Split into locations" names its children the same way.
+
+### Fixed
+- **The page head and a rule counted different populations as "identified".** The head summed
+  every row named by anything a source states (9,195) while a rule said "tested against 4,585
+  other identified rows". A rule is tested against the other rows that carry an identifier AND a
+  description, because a row with no description cannot open any way and counting it overstated
+  the bound; the head now counts the rows that carry an identifier of their own, and the method
+  line says what "tested against" counts.
+
+### Added
+- **The learned rule is measured against the identifiers that arrive after it (schema 34).** A
+  description-only row named by the rule is a guess, and the one place the guess is tested for
+  real is when a richer source later supplies an identifier for the same payment; until now that
+  moment left no trace because the inference was recomputed each time. The inference is now
+  written down when first made (`inferred_links`, kept across the rebuild) and compared when the
+  identifier arrives: agreement is counted and shown on the Entities page as "confirmed by N
+  later-identified rows" (shown at zero too), and one disagreement withdraws the rule and says
+  so. The check runs when rows have landed, never on a page read.
+- **A company gathered from its locations can be split back into them.** Merging a retailer's
+  branch ids into one entity was the only way to join its series, with no way back short of
+  detaching each id by hand. An entity holding two or more of the bank's own ids now offers
+  "Split into locations": one child entity per id under it, named "<company> location N" by how many
+  payments each has, the commonest staying with the company where it would otherwise hold nothing.
+
 ## [0.4.389] - 2026-10-08
 
 Payments to an account of the owner's that obdi holds, schema 33 (32 is in build).

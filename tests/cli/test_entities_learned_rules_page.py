@@ -21,6 +21,7 @@ two rows) and one printing "MARLOW BAKERY HIGH STREET YORK GB 1".
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import httpx
@@ -203,6 +204,45 @@ def served_branches(tmp_path, monkeypatch):
     stop()
 
 
+TOWNS = {BRANCHES[0]: "LEEDS", BRANCHES[1]: "YORK", BRANCHES[2]: "HULL"}
+
+
+@pytest.fixture
+def served_towns(tmp_path, monkeypatch):
+    db = tmp_path / "store.sqlite3"
+    rows = [
+        replace(r, description=f"BRANCHCO STORES {TOWNS[r.party_source_id]} {n}")
+        for n, r in enumerate(branch_world())
+    ]
+    with Store(db) as store:
+        reconcile_batch(store, rows, digest="feed")
+    environment(monkeypatch, tmp_path)
+    config = build_web_config(db)
+    assert config is not None
+    base, stop = serve_config(config)
+    yield base
+    stop()
+
+
+class TestSplitNamesLocationsAsThePageLabelsThem:
+    def test_BranchesDifferingByTown_BecomeEntitiesNamedByTheirTown(self, served_towns):
+        press(served_towns, "/entities-merge", name="Branchco Group", shape=list(BRANCHES))
+        page = httpx.post(f"{served_towns}/entities", timeout=60).text
+        link = next(
+            a.attrs["href"]
+            for a in elements(parse(page), "a")
+            if "/entity?id=" in a.attrs.get("href", "")
+        )
+
+        done = press(
+            served_towns, "/entity-split-locations", entity=link.split("id=")[1]
+        )
+
+        text = " ".join(parse(done.text).text().split())
+        # "stores" is on every branch's descriptions, so it tells none of them apart.
+        assert "branchco - york" in text and "branchco - hull" in text
+
+
 class TestSplitIntoLocations:
     def company(self, base: str) -> str:
         press(base, "/entities-merge", name="Branchco Group", shape=list(BRANCHES))
@@ -226,7 +266,9 @@ class TestSplitIntoLocations:
         assert done.status_code == 200, done.text[:300]
         text = " ".join(parse(done.text).text().split())
         assert "Split Branchco Group into 2 locations under it, the commonest staying" in text
-        assert "Branchco Group location 2" in text and "Branchco Group location 3" in text
+        assert "branchco (location 2)" in text and "branchco (location 3)" in text, (
+            "named as the page labels them, since nothing in these descriptions tells them apart"
+        )
 
     def test_SplitTwice_IsRefusedSinceOneIdIsLeft(self, served_branches):
         entity = self.company(served_branches)
@@ -256,9 +298,13 @@ class TestAnOfferedRule:
             "0 openings are shared by two parties and teach nothing."
         )
         text = rules_text(page)
-        assert "offered, unticked: would link 3 rows" in text
-        assert "unable to confirm from the rows held: tested against only 40 other" in text
-        assert "need not be like them" in text
+        assert "taught by 2, tested against 40, would link 3" in text
+        assert "offered, unticked: unable to confirm from the rows held" in text
+        assert "tested against only 40 other identified rows" in text
+        assert " ".join(parse(page).text().split()).count("which they need not be") == 1, (
+            "the bound's caveat is said once, at the head of the section"
+        )
+        assert "need not be" not in text, "and never per rule"
         folds = [d for d in elements(parse(page), "details") if "would link" in d.text()]
         assert len(folds) == 1 and "open" not in folds[0].attrs
         assert "MARLOW BAKERY HIGH STREET LONDON GB" in folds[0].text().upper().replace("  ", " ")
@@ -275,6 +321,35 @@ class TestAnOfferedRule:
         assert len(rules_text(page)) < 1200
 
 
+class TestTheRulesMeasuredPrecision:
+    def test_Page_ShowsTheCountOfLaterIdentifiedRowsEvenAtZero(self, served):
+        text = rules_text(shown(served))
+
+        assert "confirmed by 0 later-identified rows" in text
+
+    def test_RuleWithdrawnByALaterRowThatNamedAnotherParty_SaysSoAndLinksNothing(
+        self, tmp_path, monkeypatch
+    ):
+        db = tmp_path / "store.sqlite3"
+        with Store(db) as store:
+            reconcile_batch(store, world(), digest="feed")
+            store.set_preference("learned-rules.confidence", "40")
+            store.set_preference("learned-rules.agreed:" + KEY, "3")
+            store.set_preference("learned-rules.disagreed:" + KEY, "1")
+        environment(monkeypatch, tmp_path)
+        config = build_web_config(db)
+        assert config is not None
+        base, stop = serve_config(config)
+        try:
+            text = rules_text(shown(base))
+        finally:
+            stop()
+
+        assert "withdrawn: 1 later-identified row named another party" in text
+        assert "confirmed by 3 later-identified rows" in text
+        assert "applied" not in text
+
+
 class TestSettingsAndTicks:
     def test_RaisingNothingButLoweringConfidenceToTheTestedRows_AppliesTheRule(self, served):
         response = press(served, "/entities-rule-settings", support="2", confidence="40")
@@ -283,7 +358,8 @@ class TestSettingsAndTicks:
         assert "At these settings 1 rule applies by default and 0 are offered" in counts_line(
             response.text
         )
-        assert "applied by default, linking 3 rows" in rules_text(response.text)
+        text = rules_text(response.text)
+        assert "links 3" in text and "applied by default" in text
 
     def test_RaisingConfidenceAgain_MovesTheRuleBackToOffered(self, served):
         press(served, "/entities-rule-settings", support="2", confidence="40")
@@ -300,7 +376,8 @@ class TestSettingsAndTicks:
     def test_TickingTheOfferedRule_AppliesItWhateverTheConfidenceIs(self, served):
         page = press(served, "/entities-rule-tick", rule=KEY).text
 
-        assert "applied because you ticked it, linking 3 rows" in rules_text(page)
+        text = rules_text(page)
+        assert "links 3" in text and "applied because you ticked it" in text
         raised = press(served, "/entities-rule-settings", support="2", confidence="5000").text
         assert "applied because you ticked it" in rules_text(raised)
 

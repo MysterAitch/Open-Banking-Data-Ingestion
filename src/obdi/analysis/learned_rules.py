@@ -54,6 +54,8 @@ SUPPORT_SETTING = "learned-rules.support"
 CONFIDENCE_SETTING = "learned-rules.confidence"
 KEPT_PREFIX = "learned-rules.kept:"
 ORIGIN_PREFIX = "learned-rules.origin:"
+AGREED_PREFIX = "learned-rules.agreed:"
+DISAGREED_PREFIX = "learned-rules.disagreed:"
 
 APPLIED = "applied"
 OFFERED = "offered"
@@ -81,6 +83,11 @@ class RulePolicy:
     #: For each entity rule the owner kept from a learned one (`rule_origin`), the rule's id to
     #: what was true when it was kept: how many rows taught it and the day.
     origins: Mapping[int, tuple[int, str]] = field(default_factory=dict)
+    #: For each rule key, how many later-identified rows agreed with its inference and how many
+    #: disagreed (`rule_confirmation`). One disagreement withdraws the rule, the same way one
+    #: "Not this" does.
+    agreed: Mapping[str, int] = field(default_factory=dict)
+    disagreed: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -121,6 +128,10 @@ class RuleView:
     rows: int = 0
     #: Whether the owner ticked it (so it is applied whatever the confidence setting says).
     ticked: bool = False
+    #: Later-identified rows that agreed with the rule's inference, and that disagreed (which
+    #: withdrew it): the one measurement of the reverse direction the rows ever give.
+    confirmed: int = 0
+    disagreed: int = 0
 
 
 def rule_key(party: str, opening: Form) -> str:
@@ -158,16 +169,21 @@ def _common_opening(forms: Sequence[Form]) -> Form:
 
 def learn_rules(
     forms: Mapping[str, Sequence[Form]],
-    rows: Mapping[str, int],
     support: int,
 ) -> Learning:
     """The rules the identified rows teach. `forms` holds, for each identifier, the form of each
-    of its rows that has a description; `rows` is how many rows each identifier has in all.
+    of its rows that has a description.
 
     A rule needs `support` rows (two at the least) that share a distinctive opening and that no
     other identifier's row opens. An opening that another identifier's row shares is counted in
-    `Learning.shared` and teaches nothing."""
-    total = sum(rows.values())
+    `Learning.shared` and teaches nothing.
+
+    The population a rule is TESTED against is the other identified rows that have a description
+    to open: a row with none cannot open any way, so counting it would make the bound stronger
+    than the evidence (the page's count of rows that carry an identifier is larger for that
+    reason, and says so once)."""
+    described = {party: sum(1 for form in fs if form) for party, fs in forms.items()}
+    total = sum(described.values())
     by_first: dict[str, list[tuple[str, Form]]] = defaultdict(list)
     for party, party_forms in forms.items():
         for form in party_forms:
@@ -187,7 +203,7 @@ def learn_rules(
         ):
             shared.add(opening)
             continue
-        rules.append(Rule(party, opening, len(usable), total - rows[party]))
+        rules.append(Rule(party, opening, len(usable), total - described[party]))
     rules.sort(key=lambda r: (-r.tested, r.party))
     return Learning(tuple(rules), len(shared))
 
@@ -215,6 +231,21 @@ def bound_sentence(tested: int) -> str:
         f"tested against {tested:,} other identified rows, none opened so - if the unidentified "
         f"rows are like them, fewer than 1 in {share:,} would belong to someone else, though the "
         "unidentified rows need not be like them"
+    )
+
+
+def method_sentence() -> str:
+    """How a rule is made and what its numbers mean, said once at the head of the section and
+    never per rule: a rule is a guess from rows a source identified, tested only against other
+    identified rows that have a description, and its bound is only as good as the likeness of the
+    rows it is applied to."""
+    return (
+        "A rule is a guess made from rows a source identified. When every one of a party's "
+        "described rows begins its description the same way, and none of the other identified "
+        "rows that have a description does, a row with no identifier that begins so is taken to "
+        "be that party's. \"Tested against M\" counts those other rows. With none of M opening "
+        "so, fewer than 1 in M/3 of such rows would belong to someone else - if the rows with no "
+        "identifier are like the ones tested, which they need not be."
     )
 
 
@@ -257,7 +288,17 @@ def rule_policy(store: Store) -> RulePolicy:
         ),
         frozenset(name[len(KEPT_PREFIX) :] for name in held if name.startswith(KEPT_PREFIX)),
         _origins(held),
+        _tallies(held, AGREED_PREFIX),
+        _tallies(held, DISAGREED_PREFIX),
     )
+
+
+def _tallies(held: Mapping[str, str], prefix: str) -> dict[str, int]:
+    return {
+        name[len(prefix) :]: int(value)
+        for name, value in held.items()
+        if name.startswith(prefix) and value.isdigit()
+    }
 
 
 def _origins(held: Mapping[str, str]) -> dict[int, tuple[int, str]]:

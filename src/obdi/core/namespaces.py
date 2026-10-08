@@ -304,5 +304,6 @@ ENTITY_KEYED_TABLES: dict[str, tuple[str, ...]] = {
     "review_queue": ("entity_id",),
     "annotations": ("entity_id",),
     "events": ("entity_id",),
+    "inferred_links": ("entity_id",),
     "transfer_pairs": ("debit_entity_id", "credit_entity_id"),
 }

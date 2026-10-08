@@ -52,7 +52,14 @@ from ..analysis.entities import (
 )
 from ..analysis.entity_tokens import COMPARISON_SENTENCE, DROPPED, IGNORED_TRAILING
 from ..analysis.external_accounts import LABEL_LENGTH
-from ..analysis.learned_rules import APPLIED, RuleView, rule_sentence, summary_sentence
+from ..analysis.learned_rules import (
+    APPLIED,
+    OFFERED,
+    WITHDRAWN,
+    RuleView,
+    method_sentence,
+    summary_sentence,
+)
 from ..analysis.payment_methods import METHODS
 from ..core.logs import say
 from ..core.masking import mask_text
@@ -110,12 +117,13 @@ def _sources_sentence(view: EntitiesView) -> str:
         if by_kind[kind] and kind not in (ALIAS, MATCHED_NAME, TRUNCATED_NAME, LEARNED_RULE)
     ]
     inferred = sum(origin.inferred for origin in view.origins.values())
-    identified = sum(origin.identified for origin in view.origins.values())
+    # The population a learned rule is tested against is these rows less the ones with no
+    # description (`learned_rules.learn_rules`), not every row named by something a source states.
+    carrying = sum(origin.account + origin.source_id for origin in view.origins.values())
     if inferred:
         parts.append(
-            f"{identified:,} transactions identified and {inferred:,} inferred (named by a "
-            "description that opens as one party's identified rows do, which is a guess and "
-            "not a statement)"
+            f"{carrying:,} transactions carry an identifier of their own and {inferred:,} were "
+            "named by an inference from their description, which is a guess and not a statement"
         )
     linked = sum(origin.linked for origin in view.origins.values())
     if linked:
@@ -683,46 +691,65 @@ def _rule_settings_form(view: EntitiesView) -> str:
     settings = view.rule_settings
     return (
         f'<form method="post" action="{RULE_SETTINGS_ROUTE}" class="ent-rule-form">'
-        '<label>Rows to learn from<input name="support" inputmode="numeric" '
-        f'value="{settings.support}"></label>'
-        '<label>Other rows to test against<input name="confidence" inputmode="numeric" '
-        f'value="{settings.confidence}"></label>'
+        '<label>A rule is learned once <input name="support" inputmode="numeric" '
+        f'value="{settings.support}"> of a party\'s rows share an opening</label>'
+        '<label>A rule is applied by default once it has been tested against '
+        f'<input name="confidence" inputmode="numeric" value="{settings.confidence}"> other '
+        "identified rows</label>"
         '<button class="tap secondary" type="submit">Set</button></form>'
     )
 
 
 def _rule_item(item: RuleView, view: EntitiesView, *, unmasked: bool) -> str:
-    """One learned rule: the party, its sentence with both counts and the bound, and what it
-    does. An applied rule says how many rows it links; an offered one lists the rows it would
-    link under a closed fold and offers a tick."""
-    party = _esc(view.label(item.rule.party)) if unmasked else "a party"
-    sentence = _esc(rule_sentence(item.rule, item.state))
+    """One learned rule that reaches rows, on one line: the party, its opening as code, and
+    "taught by N, tested against M, links K". Its state, the measured confirmations, the rows it
+    links or would link, and the tick are in a closed drill-down; the method and the bound are
+    said once at the head of the section, never here."""
+    head = _rule_head(item, view, unmasked=unmasked)
+    links = "would link" if item.state == OFFERED else "links"
+    line = f"{head}, {links} {item.rows:,}"
     if item.state == APPLIED:
+        verdict = "applied because you ticked it" if item.ticked else "applied by default"
+    elif item.state == WITHDRAWN:
         verdict = (
-            "applied because you ticked it" if item.ticked else "applied by default"
-        ) + f", linking {plural(item.rows, 'row')}"
-        body = ""
+            f"withdrawn: {plural(item.disagreed, 'later-identified row')} named another party"
+            if item.disagreed
+            else "withdrawn by you"
+        )
     else:
-        verdict = f"offered, unticked: would link {plural(item.rows, 'row')}"
+        verdict = (
+            "offered, unticked: unable to confirm from the rows held, tested against only "
+            f"{item.rule.tested:,} other identified rows"
+        )
+    measured = f"confirmed by {plural(item.confirmed, 'later-identified row')}"
+    tick = ""
+    if item.state == OFFERED and unmasked:
         tick = (
             f'<form method="post" action="{RULE_TICK_ROUTE}">'
             f'<input type="hidden" name="rule" value="{_esc(item.rule.key)}">'
             '<button class="tap" type="submit">Tick</button></form>'
-            if unmasked
-            else ""
         )
-        listing = ""
-        if unmasked and item.shapes:
-            listed = "".join(f"<li>{_esc(shape)}</li>" for shape in item.shapes)
-            listing = (
-                '<details class="ent-more"><summary>The descriptions it would link</summary>'
-                f'<ul class="ent-names">{listed}</ul></details>'
-            )
-        body = tick + listing
+    listing = ""
+    if unmasked and item.shapes:
+        listed = "".join(f"<li>{_esc(shape)}</li>" for shape in item.shapes)
+        listing = f'<ul class="ent-names">{listed}</ul>'
     return (
-        f'<li class="ent-learned-rule"><span class="ent-rule-party">{party}</span> '
-        f'<span class="muted">{verdict}. It {sentence}</span>{body}</li>'
+        f'<li class="ent-learned-rule"><details class="ent-more"><summary>{line}</summary>'
+        f'<p class="muted">{_esc(verdict)}; {_esc(measured)}.</p>{tick}{listing}</details></li>'
     )
+
+
+def _rule_head(item: RuleView, view: EntitiesView, *, unmasked: bool) -> str:
+    """"<party> `opening` - taught by N, tested against M": the whole of a rule that reaches no
+    row, and the start of the line of one that does. The party and the opening are the payee's
+    text and are sealed from the masked page."""
+    rule = item.rule
+    if unmasked:
+        who = f'<span class="ent-rule-party">{_esc(view.label(rule.party))}</span> '
+        who += f"<code>{_esc(rule.words)}</code>"
+    else:
+        who = '<span class="ent-rule-party">a party</span>'
+    return f"{who} - taught by {rule.taught:,}, tested against {rule.tested:,}"
 
 
 def _learned_rules(view: EntitiesView, *, unmasked: bool) -> str:
@@ -733,13 +760,25 @@ def _learned_rules(view: EntitiesView, *, unmasked: bool) -> str:
         return ""
     states = [item.state for item in view.rules]
     counts = _esc(summary_sentence(states, view.rules_shared))
-    items = "".join(_rule_item(item, view, unmasked=unmasked) for item in view.rules)
+    reaching = [item for item in view.rules if item.rows or item.state == WITHDRAWN]
+    silent = [item for item in view.rules if not item.rows and item.state != WITHDRAWN]
+    items = "".join(_rule_item(item, view, unmasked=unmasked) for item in reaching)
+    fold = ""
+    if silent:
+        lines = "".join(
+            f'<li class="ent-learned-rule">{_rule_head(item, view, unmasked=unmasked)}</li>'
+            for item in silent
+        )
+        fold = (
+            '<details class="ent-more ent-zero-rules"><summary>'
+            f"{plural(len(silent), 'rule')} learned that reach no row</summary>"
+            f'<ul class="ent-names">{lines}</ul></details>'
+        )
     return (
         "<h2>Learned rules</h2>"
-        '<p class="ent-why">A description that opens as every row of one party does, and as no '
-        "other identified row does, is taken to be that party's. That is an inference and is "
-        f"counted apart from what a source states.</p><p class=\"ent-why\">{counts}</p>"
-        f'{_rule_settings_form(view) if unmasked else ""}<ul class="ent-names">{items}</ul>'
+        f'<p class="ent-why">{_esc(method_sentence())}</p><p class="ent-why">{counts}</p>'
+        f'{_rule_settings_form(view) if unmasked else ""}'
+        f'<ul class="ent-names">{items}</ul>{fold}'
     )
 
 

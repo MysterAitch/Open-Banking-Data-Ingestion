@@ -45,6 +45,7 @@ from .analysis.free_position import DeclaredLimit, FreeFigures
 from .analysis.goals import GoalsView
 from .analysis.learned_rules import rule_policy
 from .analysis.recurring import Mover, RecurringFindings, Series
+from .analysis.rule_confirmation import confirm_inferred
 from .analysis.this_month import MonthNote, ThisMonth
 from .core.errors import DataError
 from .core.money import parse_amount
@@ -85,6 +86,7 @@ from .ingest.connections import ConnectionStore
 from .ingest.declined_items import void_declined_items
 from .ingest.doctor import CheckResult, live_checks, report, run_checks, shape_problems
 from .ingest.family_anchors import Families, families_of
+from .ingest.finishers import Finishers, SettleReport
 from .ingest.identifier_records import ACCOUNT as ACCOUNT_KIND
 from .ingest.identifier_records import IdentifierEntry, checked_day
 from .ingest.pipeline import (
@@ -146,7 +148,7 @@ from .verify.coverage import (
     transpositions,
 )
 from .verify.coverage import report as coverage_report
-from .verify.landing import finishers as landing_finishers
+from .verify.landing import finishers as verify_finishers
 from .verify.protection import recheck as recheck_protections
 from .verify.review_flags import FlagQueue, Outcome
 from .verify.review_settlement import settle_review_flags
@@ -163,6 +165,20 @@ from .verify.statement_opening_measure import StatementOpeningReport, statement_
 from .verify.statement_span import STATEMENT_SOURCES, AccountSpans, describe_account
 
 DEFAULT_DB = "./data/store.sqlite3"
+
+
+def landing_finishers() -> Finishers:
+    """What runs once rows have landed: `verify`'s finishers, and after the review flags settle the
+    learned rule's inferences are written down and compared with any identifier that has arrived
+    (`analysis.rule_confirmation`). The composition root is the one place both layers meet."""
+    base = verify_finishers()
+
+    def settle(store: Store) -> SettleReport:
+        report = base.settle(store)
+        confirm_inferred(store)
+        return report
+
+    return replace(base, settle=settle)
 
 
 def _store_path(explicit: str | None) -> Path:
@@ -4416,7 +4432,20 @@ def build_web_config(db_path: Path) -> WebConfig | None:
             )
             known = {name: origin.rows for name, origin in origins.items()}
             links = _held_links(store) if action in (KEEP_LINK, REFUSE_LINK) else None
-            return apply_action(store, known, action, form, origins=origins, links=links)
+            labels: dict[str, str] | None = None
+            if action == SPLIT_LOCATIONS:
+                held = [t for t in store.all_transactions() if counts_as_occurrence(t)]
+                named_fields, _named_links, named_rows = name_rows(
+                    held,
+                    store.confirmed_transfer_pairs(),
+                    refused=refused_links(store),
+                    policy=rule_policy(store),
+                    external=store.declared_identifiers(),
+                )
+                labels = display_names(named_fields, named_rows)
+            return apply_action(
+                store, known, action, form, origins=origins, links=links, shown_as=labels
+            )
 
     def entity_page(entity_id: int) -> EntityPage | None:
         """One entity with every name under it and the newest transactions of each: one

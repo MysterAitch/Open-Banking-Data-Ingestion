@@ -742,6 +742,43 @@ The rung is `analysis/learned_rules.py` (learning, state, sentences, the setting
    no name is removed). Not built: naming a location from its town; a series test of the split
    (no constructed world was found where the split changes a series, which merging, not splitting,
    is for).
+4. DATA CONFIRMATION (schema 34, on top of 33's account identifiers). `inferred_links`
+   (entity id, party, opening, decided, outcome) is written by `rule_confirmation.confirm_inferred`
+   after rows land (the command line's `landing_finishers` wraps `settle`; the `verify` finishers
+   cannot reach `analysis`), never on a GET. A pending record whose row has since an identifier OF
+   THE SAME KIND (a source's id against a source's id, an account against an account) is AGREED
+   when it names the recorded party and DISAGREED when it names another; a different kind settles
+   nothing. The tallies are preferences beside the settings (`learned-rules.agreed:<key>` and
+   `.disagreed:<key>`), so the pages read them in the same single select; one disagreement
+   withdraws the rule. Measured while testing: the folded row takes the FEED's description, so a
+   disagreeing row usually no longer opens as the rule does and the tally, not a shared opening,
+   is what withdraws it. Not built: the withdrawal is shown on the Entities page only, not on the
+   entity page; an identifier of another kind is left pending for ever; and the live count stays
+   zero until a second source overlaps a row the rule named.
+6. AT A GLANCE (after the owner read 0.4.386 on a phone: 118 rules listed, every one "linking 0
+   rows" with the same five-line sentence). `method_sentence` is said once at the section head;
+   `_rule_item` is one line with a closed drill-down; rules that link no row (and are not
+   withdrawn) are one closed fold of one line each (`tests/pages/test_entities_learned_rules_
+   layout.py` holds that 120 such rules add nothing outside the fold). Count defect: the head
+   summed `NameOrigin.identified` (every row not inferred, including description-named ones)
+   against a rule's `total - party rows` over rows with an identifier; they are now both
+   identifier-carrying rows, and the rule's test population is those WITH a description, said in
+   the method line. Not measured on the real store.
+7. CHANNEL PHRASES. `www`, `visa purchase`, `zettle`, `sumup`, `paypal` (brand kept),
+   `direct debit first payment`, and `interest` are `payment_methods.METHODS`; `google` is an
+   `IGNORED_TRAILING` code. Measured while testing (a prediction I got wrong): a row's NAME is
+   still its whole shape ("zettle alder"); the channel is set aside only in the comparison that
+   proposes groups, so the tests assert `core_words`, not `name_of`. A group needs three shapes to
+   be offered, so the control ("vendorpay") has three. `interest` was not in the owner's list of
+   additions but was in his list of groups seen, and the two prints reduced to one word. On the
+   large invented store before and after: names 127, proposals 28, series 14, unchanged, since it
+   holds none of these phrases. Not red-checked against the old methods for each phrase.
+8. LOCATION LABELS. `display_names` tells source ids that state one name apart (`_told_apart`):
+   the words EVERY description of an id has and its group-mates do not, less the name, methods,
+   and trailing codes ("branchco - york"), else "branchco (location N)" by usage then id. Store
+   numbers cannot appear: a shape drops any word holding a digit. Accounts are left alone. Split
+   into locations names children by the same label. Not done: a label that reads alike for
+   two ids because both have the same extra words falls back to numbers, not to a longer part.
 
 ## Payments to held accounts as built (entities.md section 3a, schema 33)
 

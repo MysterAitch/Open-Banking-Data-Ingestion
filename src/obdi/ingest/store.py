@@ -81,6 +81,7 @@ from .entity_records import (
 )
 from .goal_records import CLEAR, GOAL_KINDS, SAVE, Goal, GoalRefused
 from .identifier_records import ACCOUNT, IdentifierEntry, checked_identifier
+from .inferred_link_records import InferredLink
 from .ownership_records import WHOLE, OwnerShare, OwnershipRefused
 from .payment_links import stated_link_of
 from .receivable_records import (
@@ -201,7 +202,11 @@ from .stated_words import recorded_words
 #: states its number can still be recognised as the other side of a payment. The identifiers of
 #: accounts declared external (`declared_accounts.identifier`) are copied in by
 #: `_migrate_account_identifiers`; the column stays readable and is written alongside.
-SCHEMA_VERSION = 33
+#:
+#: 33 -> 34 (32 is taken by another change): the `inferred_links` table: each row the learned rule
+#: named by inference and whether an identifier that arrived later agreed. A new table, so no
+#: column migration, as for 29.
+SCHEMA_VERSION = 34
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -900,6 +905,19 @@ CREATE TABLE IF NOT EXISTS goals (
     basis        TEXT NOT NULL DEFAULT ''
 );
 
+-- MEASURED: a row the learned rule named by inference (`inferred_link_records`), written when the
+-- inference is first made and settled when an identifier later arrives for the same held row. Kept
+-- across the rebuild from raw (entity ids are stable across it) so the measured precision of a
+-- rule does not reset; read by nothing that is a standing.
+CREATE TABLE IF NOT EXISTS inferred_links (
+    entity_id  TEXT PRIMARY KEY,
+    party      TEXT NOT NULL,
+    opening    TEXT NOT NULL,
+    decided_at TEXT NOT NULL,
+    outcome    TEXT NOT NULL DEFAULT '',
+    settled_at TEXT
+);
+
 -- DECLARED: a series the owner said is not a commitment (`commitment_records.Dismissal`), found
 -- again the way a commitment is (entity or name key, account, direction) and by cadence. Putting
 -- it back is a stamp. Its count over the series found is the detector's measured precision. A
@@ -1094,6 +1112,11 @@ NOT_STANDING_TABLES: dict[str, str] = {
         "and This month pages, which set them against a balance; no balance, agreement, or "
         "protection reads one"
     ),
+    "inferred_links": (
+        "the rows the learned rule named by inference and whether a later identifier agreed, "
+        "read by the Entities page as the rule's measured precision; a measurement of a naming "
+        "rung, which no balance, agreement, or protection reads"
+    ),
     "events": "the outbox of changes to publish, written after the change it describes",
     "fetch_attempts": (
         "the log of provider requests and their answers, read by the scheduler's spacing "
@@ -1270,6 +1293,7 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'account', 'basis', 'created_at', 'declared_on', 'id', 'kind', 'name', 'removed_at',
         'start_minor', 'target_date', 'target_minor',
     ],
+    'inferred_links': ['decided_at', 'entity_id', 'opening', 'outcome', 'party', 'settled_at'],
     'series_dismissals': [
         'account', 'cadence', 'direction', 'dismissed_at', 'entity_id', 'id', 'name_key',
         'removed_at',
@@ -5187,6 +5211,50 @@ class Store:
                 (len(prefix), prefix),
             )
         }
+
+    def record_inferred_links(
+        self, links: Iterable[tuple[str, str, str]], *, now: datetime | None = None
+    ) -> int:
+        """Write down the rows the learned rule has named, as (entity id, party, opening), once
+        each: a row already recorded keeps its first record. Commits; returns how many were new."""
+        stamp = (now or datetime.now(UTC)).isoformat()
+        before = self.connection.total_changes
+        self.connection.executemany(
+            "INSERT OR IGNORE INTO inferred_links (entity_id, party, opening, decided_at) "
+            "VALUES (?, ?, ?, ?)",
+            [(entity, party, opening, stamp) for entity, party, opening in links],
+        )
+        self.connection.commit()
+        return self.connection.total_changes - before
+
+    def inferred_links(self) -> list[InferredLink]:
+        """Every row the rule has named, oldest first, with how each turned out."""
+        return [
+            InferredLink(
+                str(row["entity_id"]),
+                str(row["party"]),
+                str(row["opening"]),
+                str(row["decided_at"]),
+                str(row["outcome"]),
+                str(row["settled_at"] or ""),
+            )
+            for row in self.connection.execute(
+                "SELECT entity_id, party, opening, decided_at, outcome, settled_at "
+                "FROM inferred_links ORDER BY decided_at, entity_id"
+            )
+        ]
+
+    def settle_inferred_link(
+        self, entity_id: str, outcome: str, *, now: datetime | None = None
+    ) -> None:
+        """Say how a recorded inference turned out (`inferred_link_records.AGREED` or
+        `DISAGREED`) and commit; a link already settled keeps its first outcome."""
+        self.connection.execute(
+            "UPDATE inferred_links SET outcome = ?, settled_at = ? "
+            "WHERE entity_id = ? AND outcome = ''",
+            (outcome, (now or datetime.now(UTC)).isoformat(), entity_id),
+        )
+        self.connection.commit()
 
     def forget_preference(self, name: str) -> None:
         """Remove the owner's choice for `name`, and commit; nothing is said if there was none."""

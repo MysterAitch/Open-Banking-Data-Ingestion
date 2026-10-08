@@ -435,4 +435,4 @@ class TestAStoreFromTheReleaseBeforeThisOne:
                 "SELECT value FROM obdi_meta WHERE key = 'schema_version'"
             ).fetchone()[0]
 
-        assert stamped == str(SCHEMA_VERSION) == "33"
+        assert stamped == str(SCHEMA_VERSION) == "34"
