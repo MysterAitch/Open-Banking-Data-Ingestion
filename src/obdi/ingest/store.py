@@ -60,9 +60,11 @@ from .accounts import (
 from .commitment_records import (
     COMMITMENT_KINDS,
     DIRECTIONS,
+    LEG_TOLERANCE_MAX,
     Commitment,
     CommitmentRefused,
     Dismissal,
+    Leg,
     Window,
     WindowTerms,
 )
@@ -176,9 +178,10 @@ from .stated_words import recorded_words
 #: All are new tables, which `CREATE TABLE IF NOT EXISTS` makes on open, so there is no column
 #: migration; a store stamped 28 would never have grown them.
 #:
-#: 29 -> 30: the `account_owners` table: which entities own an account and in what shares.
-#: Declared state, kept across the rebuild from raw, and a new table only, so a store stamped 29
-#: would never have grown it.
+#: 29 -> 30: the `account_owners` and `commitment_legs` tables: which entities own an account and
+#: in what shares, and how a commitment's money moves from one end to another. Declared state,
+#: kept across the rebuild from raw, and new tables only, so a store stamped 29 would never have
+#: grown them.
 SCHEMA_VERSION = 30
 
 #: How a bank account's balance observation is filed in `valuations`: the
@@ -888,6 +891,28 @@ CREATE TABLE IF NOT EXISTS account_owners (
     removed_at  TEXT
 );
 
+-- DECLARED: one step of how a commitment's money moves (`commitment_records.Leg`). An end is a
+-- held account reference or an entity, either or neither; a leg with no held account at either
+-- end is external and is never checked. `amount_minor` or `share_percent` (of the window's
+-- amount) is set, never both. The leg is due by `day` of the month `months_before` before the
+-- occurrence's month. Removing is a stamp.
+CREATE TABLE IF NOT EXISTS commitment_legs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    commitment_id  INTEGER NOT NULL REFERENCES commitments(id),
+    position       INTEGER NOT NULL,
+    from_account   TEXT NOT NULL DEFAULT '',
+    to_account     TEXT NOT NULL DEFAULT '',
+    from_entity    INTEGER,
+    to_entity      INTEGER,
+    amount_minor   INTEGER,
+    share_percent  INTEGER,
+    day            INTEGER NOT NULL,
+    months_before  INTEGER NOT NULL DEFAULT 0,
+    tolerance_days INTEGER NOT NULL DEFAULT 0,
+    label          TEXT NOT NULL DEFAULT '',
+    removed_at     TEXT
+);
+
 -- One row, moved by a trigger on every table whose writes can change an account's standing
 -- (EPOCH_TABLES). The pages that hold a standing between requests key it on this number.
 CREATE TABLE IF NOT EXISTS standing_epoch (
@@ -963,6 +988,9 @@ NOT_STANDING_TABLES: dict[str, str] = {
     "series_dismissals": (
         "the series the owner said are not commitments, read where `commitments` is and for the "
         "same reason"
+    ),
+    "commitment_legs": (
+        "how a commitment's money moves, read where `commitments` is and for the same reason"
     ),
     "account_owners": (
         "which entities own an account and in what shares, read by Position to count the owner's "
@@ -1079,6 +1107,11 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
     'commitments': [
         'account', 'created_at', 'direction', 'entity_id', 'id', 'kind', 'name', 'name_key',
         'removed_at',
+    ],
+    'commitment_legs': [
+        'amount_minor', 'commitment_id', 'day', 'from_account', 'from_entity', 'id', 'label',
+        'months_before', 'position', 'removed_at', 'share_percent', 'to_account', 'to_entity',
+        'tolerance_days',
     ],
     'commitment_windows': [
         'amount_minor', 'basis', 'cadence', 'commitment_id', 'currency', 'from_day', 'id',
@@ -5469,6 +5502,7 @@ class Store:
                         basis=str(row["basis"]),
                     )
                 )
+        legs = self._legs_of(found) if found else {}
         return [
             Commitment(
                 id=ident,
@@ -5480,9 +5514,158 @@ class Store:
                 direction=str(row["direction"]),
                 created_at=str(row["created_at"]),
                 windows=tuple(windows.get(ident, ())),
+                legs=tuple(legs.get(ident, ())),
             )
             for ident, row in found.items()
         ]
+
+    def _legs_of(self, commitments: Iterable[int]) -> dict[int, list[Leg]]:
+        """The live legs of every commitment, in the order declared: one select."""
+        wanted = set(commitments)
+        found: dict[int, list[Leg]] = {}
+        for row in self.connection.execute(
+            "SELECT id, commitment_id, position, from_account, to_account, from_entity, "
+            "to_entity, amount_minor, share_percent, day, months_before, tolerance_days, label "
+            "FROM commitment_legs WHERE removed_at IS NULL ORDER BY commitment_id, position, id"
+        ):
+            ident = int(row["commitment_id"])
+            if ident not in wanted:
+                continue
+            found.setdefault(ident, []).append(
+                Leg(
+                    id=int(row["id"]),
+                    commitment_id=ident,
+                    position=int(row["position"]),
+                    from_account=str(row["from_account"]),
+                    to_account=str(row["to_account"]),
+                    from_entity=None if row["from_entity"] is None else int(row["from_entity"]),
+                    to_entity=None if row["to_entity"] is None else int(row["to_entity"]),
+                    amount_minor=None if row["amount_minor"] is None else int(row["amount_minor"]),
+                    share_percent=(
+                        None if row["share_percent"] is None else int(row["share_percent"])
+                    ),
+                    day=int(row["day"]),
+                    months_before=int(row["months_before"]),
+                    tolerance_days=int(row["tolerance_days"]),
+                    label=str(row["label"]),
+                )
+            )
+        return found
+
+    def declare_leg(
+        self,
+        commitment: int,
+        *,
+        from_account: str = "",
+        to_account: str = "",
+        from_entity: int | None = None,
+        to_entity: int | None = None,
+        amount_minor: int | None = None,
+        share_percent: int | None = None,
+        day: int,
+        months_before: int = 0,
+        tolerance_days: int = 0,
+        label: str = "",
+    ) -> int:
+        """Add a leg to a commitment's flow, after the legs it has, and commit; returns its id.
+
+        Refused, with nothing written, for a commitment that is missing or removed; an amount that
+        is not positive, a share outside 1 to 100, or both or neither given; a day outside 1 to 31;
+        months before other than 0 or 1; a tolerance outside 0 to `LEG_TOLERANCE_MAX`; an account
+        end that is not a declared account holding transactions (an account declared external is
+        not one); an entity that is missing or removed; the same held account at both ends; and a
+        leg with an end that is neither a held account nor an entity (it would say nothing about
+        who is paid)."""
+        self._refuse_missing_commitment(commitment)
+        if (amount_minor is None) == (share_percent is None):
+            raise CommitmentRefused("A leg is an amount or a share of the commitment, not both.")
+        if amount_minor is not None and amount_minor <= 0:
+            raise CommitmentRefused("A leg's amount must be more than nothing.")
+        if share_percent is not None and not 1 <= share_percent <= 100:
+            raise CommitmentRefused("A leg's share is from 1 to 100 percent.")
+        if not 1 <= day <= 31:
+            raise CommitmentRefused("A leg falls on a day of the month, 1 to 31.")
+        if months_before not in (0, 1):
+            raise CommitmentRefused("A leg falls in the month of the payment or the one before.")
+        if not 0 <= tolerance_days <= LEG_TOLERANCE_MAX:
+            raise CommitmentRefused(
+                f"A leg may arrive up to {LEG_TOLERANCE_MAX} days after its day, no more."
+            )
+        if from_account and from_account == to_account:
+            raise CommitmentRefused("A leg moves money between two different accounts.")
+        for account in (from_account, to_account):
+            if account:
+                record = self.declared_account(AccountRef(account))
+                if record is None or record.external:
+                    raise CommitmentRefused(
+                        "A leg's account must be an account held here; an external party is "
+                        "named as an entity instead."
+                    )
+        for entity in (from_entity, to_entity):
+            if entity is not None:
+                self._refuse_missing_entity_for_leg(entity)
+        if not (from_account or from_entity is not None) or not (
+            to_account or to_entity is not None
+        ):
+            raise CommitmentRefused("A leg has somewhere it comes from and somewhere it goes.")
+        placed = self.connection.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 FROM commitment_legs WHERE commitment_id = ?",
+            (commitment,),
+        ).fetchone()[0]
+        cursor = self.connection.execute(
+            "INSERT INTO commitment_legs (commitment_id, position, from_account, to_account, "
+            "from_entity, to_entity, amount_minor, share_percent, day, months_before, "
+            "tolerance_days, label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                commitment,
+                int(placed),
+                from_account,
+                to_account,
+                from_entity,
+                to_entity,
+                amount_minor,
+                share_percent,
+                day,
+                months_before,
+                tolerance_days,
+                " ".join(label.split()),
+            ),
+        )
+        self.connection.commit()
+        return int(cursor.lastrowid or 0)
+
+    def account_has_legs(self, account: str) -> bool:
+        """Whether any live leg of any commitment starts or ends at `account`: the one cheap
+        question asked of an account's page before the flows are read for it."""
+        return (
+            self.connection.execute(
+                "SELECT 1 FROM commitment_legs WHERE removed_at IS NULL "
+                "AND (from_account = ? OR to_account = ?) LIMIT 1",
+                (account, account),
+            ).fetchone()
+            is not None
+        )
+
+    def remove_leg(self, leg: int, *, now: datetime | None = None) -> None:
+        """Drop a leg from its commitment's flow, as a stamp, and commit. Refused for a leg that is
+        missing or already removed."""
+        found = self.connection.execute(
+            "SELECT 1 FROM commitment_legs WHERE id = ? AND removed_at IS NULL", (leg,)
+        ).fetchone()
+        if found is None:
+            raise CommitmentRefused("There is no such leg; it may have been removed.")
+        self.connection.execute(
+            "UPDATE commitment_legs SET removed_at = ? WHERE id = ?",
+            ((now or datetime.now(UTC)).isoformat(), leg),
+        )
+        self.connection.commit()
+
+    def _refuse_missing_entity_for_leg(self, entity: int) -> None:
+        found = self.connection.execute(
+            "SELECT 1 FROM entities WHERE id = ? AND removed_at IS NULL", (entity,)
+        ).fetchone()
+        if found is None:
+            raise CommitmentRefused("There is no such entity; it may have been removed.")
 
     def change_commitment_window(
         self, commitment: int, from_day: date, terms: WindowTerms

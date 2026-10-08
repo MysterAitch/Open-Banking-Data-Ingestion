@@ -29,8 +29,9 @@ from ..core.addresses import account_address
 from ..core.errors import DataError
 from ..core.logs import say
 from ..core.london_clock import london
-from ..core.masking import MASKED_TOTAL, Disclosed
+from ..core.masking import MASKED_TOTAL, Disclosed, mask_text
 from ..core.models import BASIS_ID
+from ..core.money import format_amount
 from ..core.page_words import (
     ACCOUNT_CHECK_HEADING,
     PROTECTION_REMOVED,
@@ -42,7 +43,7 @@ from ..core.plural import agree, word
 from ..core.plural import plural as _plural
 from ..ingest.feed_item_shape import MIN_COMPARABLE, THRESHOLDS, differs
 from ..ingest.join_basis import COUNT_LABELS, count_sentence, how_words, moment_text, word_text
-from ..read.account_about import AccountAbout
+from ..read.account_about import AccountAbout, ExpectedFold
 from ..read.account_names import AccountShown, code_html
 from ..read.balance_chart import OWN
 from ..read.ledger import (
@@ -97,7 +98,7 @@ from .ledger_scope import (
 )
 from .navigation import page_name
 from .trust_bar import key_html
-from .web_account_about import declared_html, stated_html
+from .web_account_about import declared_html, figure_html, stated_html
 from .web_accounts import archive_controls, submit_button
 from .web_answers import AnswerPages
 from .web_balance_chart import structure_summary_html
@@ -3009,6 +3010,39 @@ def _ownership_html(about: AccountAbout, view: Any, *, unmasked: bool) -> str:
     )
 
 
+def _expected_html(expected: ExpectedFold, *, unmasked: bool) -> str:
+    """The "Expected" fold: for a space, what this month's bills ask of it, what it holds, and
+    what it holds beyond (the surplus); and the shares others owe this account and have not paid.
+    Names are masked on a masked page and every amount is a sealed slot."""
+
+    def money(minor: int) -> str:
+        return figure_html(format_amount(minor), unmasked=unmasked)
+
+    items = []
+    for line in expected.lines:
+        who = _esc(line.party if unmasked or not line.party else mask_text(line.party))
+        name = _esc(line.what if unmasked else mask_text(line.what))
+        if line.direction == "stash":
+            items.append(
+                f"<li>{name}: {money(line.amount_minor)} to be here by {_esc(line.day)}</li>"
+            )
+        else:
+            late = " (late)" if line.late else ""
+            items.append(
+                f"<li>{who} owes {money(line.amount_minor)} for {name}, expected by "
+                f"{_esc(line.day)}{late}</li>"
+            )
+    summary = ""
+    if expected.needed_minor is not None:
+        held = money(expected.held_minor) if expected.held_minor is not None else "not known"
+        summary = (
+            f"<p>{money(expected.needed_minor)} needed by {_esc(expected.by)}; {held} held.</p>"
+        )
+        if expected.surplus_minor:
+            summary += f"<p>Surplus beyond what it needs: {money(expected.surplus_minor)}.</p>"
+    return _disclosure("Expected", f"{summary}<ul>{''.join(items)}</ul>", css="expected")
+
+
 def _about_html(
     about: AccountAbout | None, today: date, *, unmasked: bool, view: Any | None = None
 ) -> str:
@@ -3025,7 +3059,10 @@ def _about_html(
     )
     if view is not None and about.unread == "":
         body += _ownership_html(about, view, unmasked=unmasked)
-    return _disclosure("About this account", body, css="about")
+    fold = _disclosure("About this account", body, css="about")
+    if about.expected is not None:
+        fold += _expected_html(about.expected, unmasked=unmasked)
+    return fold
 
 
 def _closed_on(view: Any) -> date | None:

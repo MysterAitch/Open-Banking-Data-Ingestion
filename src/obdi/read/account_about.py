@@ -81,6 +81,36 @@ class SourceFacts:
 
 
 @dataclass(frozen=True)
+class ExpectedLine:
+    """One thing expected of an account: money to stash in it, or to arrive in it, by a day.
+
+    `what` names the commitment and `party` the person it comes from (both values, masked on a
+    masked page); `direction` is "stash" for money the household moves in, "in" for money
+    another person pays in."""
+
+    what: str
+    party: str
+    day: str
+    amount_minor: int
+    direction: str
+    late: bool = False
+
+
+@dataclass(frozen=True)
+class ExpectedFold:
+    """What an account is expected to hold or receive (the account page's "Expected" fold): for
+    a space, what its bills ask of it this month against what it holds and the surplus beyond;
+    for any account, the shares others owe it and have not yet paid. Built by `analysis.flows`."""
+
+    lines: tuple[ExpectedLine, ...]
+    #: The space's need and holding, in minor units; None for an account that is no space's.
+    needed_minor: int | None = None
+    held_minor: int | None = None
+    surplus_minor: int = 0
+    by: str = ""
+
+
+@dataclass(frozen=True)
 class AccountAbout:
     """What the page needs of one account: its declared record, where there is one, and the
     parent's name as pages show it."""
@@ -93,6 +123,9 @@ class AccountAbout:
     facts: SourceFacts = SourceFacts()
     #: Who owns the account, as declared (`Store.account_owners`); empty for the owner alone.
     owners: tuple[OwnerShare, ...] = ()
+    #: What the account is expected to hold or receive (`analysis.flows.expected_for`), or None
+    #: where no commitment's flow touches it.
+    expected: ExpectedFold | None = None
 
 
 @dataclass(frozen=True)

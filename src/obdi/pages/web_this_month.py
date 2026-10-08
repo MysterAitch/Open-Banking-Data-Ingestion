@@ -17,8 +17,9 @@ placing is exact for a few months, and a calendar further out would be a forecas
 support. Funding is judged from today's balances and the next income, so the month ahead does not
 repeat it.
 
-RECEIVABLES AND GOALS DO NOT EXIST YET. `_receivables_section` and `_goals_section` are their
-places, empty until the records exist; the footnote says where each will attach.
+THE LEGS OF A FLOW (`analysis.flows`) add three sections that are silent when all is well: spaces
+that do not yet hold what the month asks, legs that did not happen, and money owed to the
+household. GOALS DO NOT EXIST YET: `_goals_section` is their place, empty until the records exist.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from collections import Counter
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
+from ..analysis.flows import MISSING, missing_sentence
 from ..analysis.this_month import ENDED, IN, NOT_TAKEN, OVERDUE, PAID, ThisMonth
 from ..core.logs import say
 from ..core.masking import Disclosed
@@ -221,9 +223,73 @@ def judged_accounts_of(view: Any) -> list[Any]:
     return [a for a in view.free.accounts if a.ref in wanted]
 
 
+def _account_called(view: Any, ref: str) -> str:
+    """The account `ref` as Position names it (`AccountShown`), from the figures the page holds."""
+    label = next((str(a.label) for a in view.free.accounts if str(a.ref) == ref), ref)
+    return _name_of(ref, label)
+
+
+def leg_sentence(leg: Any, view: Any) -> str:
+    """The sentence for a leg that did not happen, from a `Disclosed` leg so that the commitment's
+    and the person's names are masked on a masked page. Escaped."""
+    where = str(leg.space)
+    space = _account_called(view, where) if where else ""
+    return missing_sentence(
+        str(leg.kind),
+        _esc(str(leg.commitment)),
+        _esc(str(leg.party)),
+        _esc(str(leg.share_word)),
+        _esc(str(leg.month)),
+        _esc(str(leg.due)),
+        space,
+    )
+
+
+def _legs_section(view: Any) -> str:
+    """The legs of a commitment's flow that did not happen: a payment that did not go out, a share
+    that has not arrived, a move to a space that was not made. Nothing is said of a leg that
+    happened or is not yet due, and an external leg is never here."""
+    missing = [leg for leg in view.flows.legs if leg.state == MISSING]
+    if not missing:
+        return ""
+    items = "".join(f"<li>{leg_sentence(leg, view)}</li>" for leg in missing)
+    return f'<h2>Not happened</h2><ul class="keylist">{items}</ul>'
+
+
+def space_sentence(need: Any) -> str:
+    """"Bills space: £N needed by D; £M held." for a space that does not yet hold what the month
+    asks; the amounts are totals and mask as every total does."""
+    name = _name_of(str(need.ref), str(need.label))
+    held = _figure("", need.held) if need.held_known else "an amount not known"
+    return f"{name}: {_figure('', need.needed)} needed by {_esc(str(need.by))}; {held} held."
+
+
+def _spaces_section(view: Any) -> str:
+    """The spaces the month's bills are stashed in and do not yet hold enough for: silent once
+    every one is funded."""
+    short = [need for need in view.flows.spaces if not need.funded]
+    if not short:
+        return ""
+    items = "".join(f"<li>{space_sentence(need)}</li>" for need in short)
+    return f'<h2>Spaces to fund</h2><ul class="keylist">{items}</ul>'
+
+
 def _receivables_section(view: Any) -> str:
-    """Money owed to the household, by day: empty until receivables exist."""
-    return ""
+    """Money owed to the household and past its day, by who owes it. Silent when nothing is."""
+    owed = view.flows.owed
+    if not owed:
+        return ""
+    items = "".join(
+        f"<li>{_esc(str(line.who))} owes {_figure('', line.amount)} for {_esc(str(line.what))}, "
+        f"expected by {_esc(str(line.due))}"
+        + (' <span class="pill pill-bad">late</span>' if line.overdue else "")
+        + "</li>"
+        for line in owed
+    )
+    return (
+        f'<h2>Owed to you</h2><p class="muted">In all {_figure("", view.flows.owed_total)}.</p>'
+        f'<ul class="keylist">{items}</ul>'
+    )
 
 
 def _goals_section(view: Any) -> str:
@@ -240,9 +306,9 @@ _NOTE = (
     "earlier says so instead.</li>"
     "<li>A commitment with no usual day cannot be placed, so it is not on the calendar; "
     '<a href="/position">Position</a> counts them.</li>'
-    "<li>Receivables (money owed to you) are not recorded yet: when they are, each will join the "
-    "funded line of the account it is owed into. Goals are not recorded yet either: when they "
-    "are, each goal&#39;s monthly set-aside will join the calendar as a day of its own.</li>"
+    "<li>Money owed to you is listed once its day has come, and stays until a payment from the "
+    "person who owes it is found. Goals are not recorded yet: when they are, each goal&#39;s "
+    "monthly set-aside will join the calendar as a day of its own.</li>"
     "</ul></details>"
 )
 
@@ -301,6 +367,7 @@ def render_this_month(month: ThisMonth, *, unmasked: bool) -> bytes:
         )
     if not ahead:
         body += _funded(view, unmasked=unmasked)
+    body += _spaces_section(view) + _legs_section(view)
     body += _receivables_section(view) + _goals_section(view)
     body += _other_month(unmasked, ahead=ahead) + _NOTE + _HOME
     return render_page(page_name(ROUTE), body)

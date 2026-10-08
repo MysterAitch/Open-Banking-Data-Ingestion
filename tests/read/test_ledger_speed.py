@@ -265,7 +265,9 @@ FAITHFUL_FIRST_LEDGER_STATEMENTS = 1100
 LEDGER_STATEMENTS = 260
 FIRST_LEDGER_SECONDS = 60.0
 LEDGER_SECONDS = 8.0
-CARD_STATEMENTS = 130
+# Measured 131 once the account page asks whether any commitment leg touches the account
+# (`Store.account_has_legs`, one select); it was 130 before.
+CARD_STATEMENTS = 131
 CARD_SECONDS = 4.0
 TODAY_STATEMENTS = 60
 TODAY_SECONDS = 4.0
