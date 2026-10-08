@@ -256,6 +256,16 @@ class AccountRecord:
     #: None means "not declared yet" - a record read off a file or typed
     #: into a form has no identity until the store mints one.
     stable_id: AccountId | None = None
+    #: The account's own sort code and number (or IBAN) in the one canonical form a transaction's
+    #: `party_account` takes (`ingest.party_fields`), so a payment stating it is a payment to this
+    #: account. Empty where nobody has said: nothing derives it for an account obdi holds a source
+    #: for (`ingest.identifiers` reads the claims from landed payloads and keeps none).
+    identifier: str = ""
+    #: An account of the owner's that obdi holds NO source for - another bank's, a pot not fed -
+    #: declared so that payments to its `identifier` are transfers to it. It has no rows, no
+    #: balance, and no statement, so `Store.declared_accounts` leaves it out and the pages that
+    #: list the accounts obdi holds never meet it (`Store.external_accounts` reads these).
+    external: bool = False
 
     @classmethod
     def from_dict(cls, raw: dict[str, object], *, where: str = "account") -> AccountRecord:

@@ -153,7 +153,12 @@ from .stated_words import recorded_words
 #: exists is not altered by `CREATE TABLE IF NOT EXISTS`, so a store stamped 26 would refuse the
 #: first write and read of a row. The columns are filled by the rebuild from raw every deploy runs;
 #: until then an old row holds '' and is named as it was.
-SCHEMA_VERSION = 27
+#:
+#: 27 -> 28: the `identifier` and `external` columns on `declared_accounts`: an account's own sort
+#: code and number, and whether it is an account of the owner's that obdi holds no source for. A
+#: declaration, kept across the rebuild from raw; a table that already exists is not altered by
+#: `CREATE TABLE IF NOT EXISTS`, so a store stamped 27 would refuse the first read of the registry.
+SCHEMA_VERSION = 28
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -499,6 +504,13 @@ CREATE TABLE IF NOT EXISTS declared_accounts (
     -- difference between a record and a guess wearing a record's clothes,
     -- and it is queryable, which a note in the label would not be.
     date_basis  TEXT NOT NULL DEFAULT '',
+    -- The account's own sort code and number (or IBAN), in the canonical form a transaction's
+    -- party_account takes (ingest.party_fields). NULL where nobody has declared one. Not unique:
+    -- an identifier names the account a payment went to, and two declarations of one account
+    -- would be a mistake a person can see and remove, where a constraint would refuse the first.
+    identifier  TEXT,
+    -- 1 for an account of the owner's that obdi holds no source for (see AccountRecord.external).
+    external    INTEGER NOT NULL DEFAULT 0,
     declared_at TEXT NOT NULL
 );
 
@@ -956,8 +968,8 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
         'annual_percent', 'kind', 'position', 'stable_id', 'window_from', 'window_to',
     ],
     'declared_accounts': [
-        'closed', 'date_basis', 'declared_at', 'kind', 'label', 'opened',
-        'parent', 'ref', 'stable_id',
+        'closed', 'date_basis', 'declared_at', 'external', 'identifier', 'kind', 'label',
+        'opened', 'parent', 'ref', 'stable_id',
     ],
     'entities': ['created_at', 'id', 'name', 'parent_id', 'removed_at', 'role'],
     'entity_exclusions': ['excluded_at', 'id', 'of_entity', 'shape'],
@@ -1403,6 +1415,7 @@ class Store:
         self._migrate_sighting_basis()
         self._migrate_sighting_times_key()
         self._migrate_declared_account_date_basis()
+        self._migrate_declared_account_identifier()
         self._migrate_valuation_income_columns()
         self._migrate_attempt_artefact_column()
         self._migrate_content_keys()
@@ -1634,6 +1647,20 @@ class Store:
             "DEFAULT ''"
         )
 
+    def _migrate_declared_account_identifier(self) -> None:
+        """Give declared accounts an identifier and an external flag.
+
+        Existing rows hold no identifier and are not external, which is what every account
+        declared before these columns existed was: held, with a source, and its number unstated.
+        """
+        columns = self._table_columns("declared_accounts")
+        if "identifier" not in columns:
+            self.connection.execute("ALTER TABLE declared_accounts ADD COLUMN identifier TEXT")
+        if "external" not in columns:
+            self.connection.execute(
+                "ALTER TABLE declared_accounts ADD COLUMN external INTEGER NOT NULL DEFAULT 0"
+            )
+
     def _migrate_valuation_income_columns(self) -> None:
         """Teach valuations the difference between a pot and an income.
 
@@ -1851,12 +1878,13 @@ class Store:
         try:
             self.connection.execute(
                 "INSERT INTO declared_accounts (stable_id, ref, kind, label, "
-                "parent, opened, closed, date_basis, declared_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?) "
+                "parent, opened, closed, date_basis, identifier, external, declared_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(stable_id) DO UPDATE SET ref = excluded.ref, "
                 "kind = excluded.kind, label = excluded.label, "
                 "parent = excluded.parent, opened = excluded.opened, "
-                "closed = excluded.closed, date_basis = excluded.date_basis",
+                "closed = excluded.closed, date_basis = excluded.date_basis, "
+                "identifier = excluded.identifier, external = excluded.external",
                 (
                     stable_id,
                     stored.ref,
@@ -1866,6 +1894,8 @@ class Store:
                     stored.opened.isoformat() if stored.opened else None,
                     stored.closed.isoformat() if stored.closed else None,
                     stored.date_basis,
+                    stored.identifier or None,
+                    1 if stored.external else 0,
                     _stamp_now(),
                 ),
             )
@@ -1919,12 +1949,37 @@ class Store:
         return stored
 
     def declared_accounts(self) -> list[AccountRecord]:
-        """Every declared account, by canonical name.
+        """Every declared account obdi holds, by canonical name.
+
+        External accounts (`AccountRecord.external`) are left out: they have no rows, balance,
+        or statement, and the forty-odd readers of this list (the accounts page, the overview,
+        the Actual push, the fetch gaps) all assume an account they can find evidence for. A
+        reader that wants them asks `external_accounts`.
 
         One query per window table rather than one per account: the page
         that lists accounts renders the whole registry, and a per-account
         follow-up would make that a query per row.
         """
+        return self._registry(external=False)
+
+    def external_accounts(self) -> list[AccountRecord]:
+        """Every account declared as the owner's that obdi holds no source for, by canonical
+        name: the accounts a payment can be a transfer to without any row of theirs existing."""
+        return self._registry(external=True)
+
+    def external_identifiers(self) -> dict[str, str]:
+        """Each external account's identifier, to its canonical name: how a row stating an
+        identifier finds the account it went to (`analysis.entities.held_counterparts`). One
+        statement, because the pages that name rows ask it on every view."""
+        return {
+            str(row["identifier"]): str(row["ref"])
+            for row in self.connection.execute(
+                "SELECT identifier, ref FROM declared_accounts "
+                "WHERE external = 1 AND identifier IS NOT NULL ORDER BY ref"
+            )
+        }
+
+    def _registry(self, *, external: bool) -> list[AccountRecord]:
         limits: dict[AccountId, list[LimitWindow]] = {}
         for row in self.connection.execute(
             "SELECT stable_id, kind, window_from, window_to, amount_minor "
@@ -1954,7 +2009,9 @@ class Store:
         records = []
         for row in self.connection.execute(
             "SELECT stable_id, ref, kind, label, parent, opened, closed, "
-            "date_basis FROM declared_accounts ORDER BY ref"
+            "date_basis, identifier, external FROM declared_accounts WHERE external = ? "
+            "ORDER BY ref",
+            (1 if external else 0,),
         ):
             stable_id = AccountId(str(row["stable_id"]))
             records.append(
@@ -1973,6 +2030,8 @@ class Store:
                     limits=tuple(limits.get(stable_id, ())),
                     rates=tuple(rates.get(stable_id, ())),
                     stable_id=stable_id,
+                    identifier=str(row["identifier"] or ""),
+                    external=bool(row["external"]),
                 )
             )
         return records
@@ -1989,8 +2048,8 @@ class Store:
         pick one out cost a statement per window table on every page view.
         """
         row = self.connection.execute(
-            "SELECT stable_id, ref, kind, label, parent, opened, closed, date_basis "
-            "FROM declared_accounts WHERE ref = ?",
+            "SELECT stable_id, ref, kind, label, parent, opened, closed, date_basis, "
+            "identifier, external FROM declared_accounts WHERE ref = ?",
             (str(ref),),
         ).fetchone()
         if row is None:
@@ -2025,6 +2084,8 @@ class Store:
             limits=tuple(limits),
             rates=tuple(rates),
             stable_id=AccountId(str(row["stable_id"])),
+            identifier=str(row["identifier"] or ""),
+            external=bool(row["external"]),
         )
 
     def declared_kind(self, ref: str) -> str:
