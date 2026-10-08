@@ -25,7 +25,7 @@ import re
 import sqlite3
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
 
@@ -56,6 +56,14 @@ from .accounts import (
     account_id_well_formed,
     mint_account_id,
     read_registry_file,
+)
+from .commitment_records import (
+    COMMITMENT_KINDS,
+    DIRECTIONS,
+    Commitment,
+    CommitmentRefused,
+    Window,
+    WindowTerms,
 )
 from .entity_records import (
     DESCRIPTION,
@@ -158,7 +166,12 @@ from .stated_words import recorded_words
 #: code and number, and whether it is an account of the owner's that obdi holds no source for. A
 #: declaration, kept across the rebuild from raw; a table that already exists is not altered by
 #: `CREATE TABLE IF NOT EXISTS`, so a store stamped 27 would refuse the first read of the registry.
-SCHEMA_VERSION = 28
+#:
+#: 28 -> 29: the `commitments` and `commitment_windows` tables: the recurring payments the owner
+#: confirmed, and their terms as dated windows. Declared state, kept across the rebuild from raw.
+#: Both are new tables, which `CREATE TABLE IF NOT EXISTS` makes on open, so there is no column
+#: migration; a store stamped 28 would never have grown them.
+SCHEMA_VERSION = 29
 
 #: How a bank account's balance observation is filed in `valuations`: the
 #: asset id is this prefix plus the canonical account reference, and the kind
@@ -801,6 +814,42 @@ CREATE TABLE IF NOT EXISTS entity_exclusions (
     UNIQUE (of_entity, shape)
 );
 
+-- DECLARED: a recurring payment (or receipt) the owner confirmed (`commitment_records`). `name` is
+-- what it is for, the owner's to edit; `entity_id` is the entity its payee was gathered under when
+-- it was confirmed (NULL until then) and `name_key` the name the detector called the payee by;
+-- either finds its series later. `kind` is who starts the payment and `account` the account it
+-- usually leaves. Removing is a stamp, so a removed commitment's history stays.
+CREATE TABLE IF NOT EXISTS commitments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    entity_id  INTEGER,
+    name_key   TEXT NOT NULL DEFAULT '',
+    kind       TEXT NOT NULL,
+    account    TEXT NOT NULL,
+    direction  TEXT NOT NULL DEFAULT 'out',
+    created_at TEXT NOT NULL,
+    removed_at TEXT
+);
+
+-- DECLARED: the terms of a commitment between two days (`commitment_records.Window`). A price rise
+-- ends the open window the day before and opens another, so the earlier terms stay. `to_day` is
+-- NULL while the window is open, and a commitment has at most one open window.
+CREATE TABLE IF NOT EXISTS commitment_windows (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    commitment_id  INTEGER NOT NULL REFERENCES commitments(id),
+    from_day       TEXT NOT NULL,
+    to_day         TEXT,
+    amount_minor   INTEGER NOT NULL,
+    currency       TEXT NOT NULL,
+    cadence        TEXT NOT NULL,
+    usual_day      INTEGER NOT NULL DEFAULT 0,
+    usual_month    INTEGER NOT NULL DEFAULT 0,
+    tolerance_days INTEGER NOT NULL DEFAULT 0,
+    basis          TEXT NOT NULL DEFAULT ''
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_commitment_windows_open
+    ON commitment_windows(commitment_id) WHERE to_day IS NULL;
+
 -- One row, moved by a trigger on every table whose writes can change an account's standing
 -- (EPOCH_TABLES). The pages that hold a standing between requests key it on this number.
 CREATE TABLE IF NOT EXISTS standing_epoch (
@@ -863,6 +912,14 @@ NOT_STANDING_TABLES: dict[str, str] = {
     ),
     "entity_exclusions": (
         "the names split apart from an entity's rule, read where `entities` is and for the "
+        "same reason"
+    ),
+    "commitments": (
+        "the recurring payments the owner confirmed, read by the Recurring page, which is a "
+        "measurement beside them; no balance, agreement, or protection reads one"
+    ),
+    "commitment_windows": (
+        "the terms of a commitment between two days, read where `commitments` is and for the "
         "same reason"
     ),
     "events": "the outbox of changes to publish, written after the change it describes",
@@ -970,6 +1027,14 @@ SCHEMA_SHAPE: dict[str, list[str]] = {
     'declared_accounts': [
         'closed', 'date_basis', 'declared_at', 'external', 'identifier', 'kind', 'label',
         'opened', 'parent', 'ref', 'stable_id',
+    ],
+    'commitments': [
+        'account', 'created_at', 'direction', 'entity_id', 'id', 'kind', 'name', 'name_key',
+        'removed_at',
+    ],
+    'commitment_windows': [
+        'amount_minor', 'basis', 'cadence', 'commitment_id', 'currency', 'from_day', 'id',
+        'to_day', 'tolerance_days', 'usual_day', 'usual_month',
     ],
     'entities': ['created_at', 'id', 'name', 'parent_id', 'removed_at', 'role'],
     'entity_exclusions': ['excluded_at', 'id', 'of_entity', 'shape'],
@@ -5256,6 +5321,239 @@ class Store:
         self.connection.execute("UPDATE entities SET parent_id = ? WHERE id = ?", (parent, entity))
         self.connection.commit()
 
+    # --- commitments: declared, and kept across the rebuild from raw -------------------------
+
+    def declare_commitment(
+        self,
+        name: str,
+        *,
+        kind: str,
+        account: str,
+        direction: str,
+        entity_id: int | None,
+        name_key: str,
+        from_day: date,
+        to_day: date | None,
+        terms: WindowTerms,
+        now: datetime | None = None,
+    ) -> int:
+        """Keep a commitment with its first window, in one commit; returns its id.
+
+        Refused whole, with nothing written, for no name, a kind or direction outside
+        `commitment_records`, no account, no way to find its series later (neither an entity nor a
+        name key), an entity that is missing or removed, a window ending before it begins or with
+        an amount that is not positive, and a commitment already kept for the same payee, account,
+        direction, cadence, and amount (a second press on one series must not keep two).
+        """
+        clean = " ".join(name.split())
+        if not clean:
+            raise CommitmentRefused("A commitment needs a name.")
+        if kind not in COMMITMENT_KINDS:
+            raise CommitmentRefused("A commitment is pulled, scheduled, or a habit.")
+        if direction not in DIRECTIONS:
+            raise CommitmentRefused("A commitment is money out or money in.")
+        if not account:
+            raise CommitmentRefused("A commitment is paid through an account.")
+        if entity_id is None and not name_key:
+            raise CommitmentRefused("A commitment needs the payee it is found by.")
+        if (
+            entity_id is not None
+            and self.connection.execute(
+                "SELECT 1 FROM entities WHERE id = ? AND removed_at IS NULL", (entity_id,)
+            ).fetchone()
+            is None
+        ):
+            raise CommitmentRefused("There is no such entity; it may have been removed.")
+        self._refuse_window(from_day, to_day, terms)
+        duplicate = self.connection.execute(
+            "SELECT 1 FROM commitments c JOIN commitment_windows w ON w.commitment_id = c.id "
+            "WHERE c.removed_at IS NULL AND c.name_key = ? AND c.account = ? AND c.direction = ? "
+            "AND w.cadence = ? AND w.amount_minor = ? AND w.to_day IS NULL",
+            (name_key, account, direction, terms.cadence, terms.amount_minor),
+        ).fetchone()
+        if duplicate is not None:
+            raise CommitmentRefused("That payment is already a commitment.")
+        stamp = (now or datetime.now(UTC)).isoformat()
+        try:
+            cursor = self.connection.execute(
+                "INSERT INTO commitments (name, entity_id, name_key, kind, account, direction, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (clean, entity_id, name_key, kind, account, direction, stamp),
+            )
+            made = int(cursor.lastrowid or 0)
+            self._insert_window(made, from_day, to_day, terms)
+        except BaseException:
+            self.connection.rollback()
+            raise
+        self.connection.commit()
+        return made
+
+    def commitments(self) -> list[Commitment]:
+        """Every commitment not removed, oldest first, each with all its windows: one select."""
+        found: dict[int, dict[str, object]] = {}
+        windows: dict[int, list[Window]] = {}
+        for row in self.connection.execute(
+            "SELECT c.id, c.name, c.entity_id, c.name_key, c.kind, c.account, c.direction, "
+            "c.created_at, w.id AS window_id, w.from_day, w.to_day, w.amount_minor, w.currency, "
+            "w.cadence, w.usual_day, w.usual_month, w.tolerance_days, w.basis "
+            "FROM commitments c LEFT JOIN commitment_windows w ON w.commitment_id = c.id "
+            "WHERE c.removed_at IS NULL ORDER BY c.id, w.from_day, w.id"
+        ):
+            ident = int(row["id"])
+            found.setdefault(ident, dict(row))
+            if row["window_id"] is not None:
+                windows.setdefault(ident, []).append(
+                    Window(
+                        id=int(row["window_id"]),
+                        commitment_id=ident,
+                        from_day=date.fromisoformat(str(row["from_day"])),
+                        to_day=None if row["to_day"] is None else date.fromisoformat(row["to_day"]),
+                        amount_minor=int(row["amount_minor"]),
+                        currency=str(row["currency"]),
+                        cadence=str(row["cadence"]),
+                        usual_day=int(row["usual_day"]),
+                        usual_month=int(row["usual_month"]),
+                        tolerance_days=int(row["tolerance_days"]),
+                        basis=str(row["basis"]),
+                    )
+                )
+        return [
+            Commitment(
+                id=ident,
+                name=str(row["name"]),
+                entity_id=None if row["entity_id"] is None else int(str(row["entity_id"])),
+                name_key=str(row["name_key"]),
+                kind=str(row["kind"]),
+                account=str(row["account"]),
+                direction=str(row["direction"]),
+                created_at=str(row["created_at"]),
+                windows=tuple(windows.get(ident, ())),
+            )
+            for ident, row in found.items()
+        ]
+
+    def change_commitment_window(
+        self, commitment: int, from_day: date, terms: WindowTerms
+    ) -> int:
+        """Close the commitment's open window the day before `from_day` and open another from it
+        with `terms`, in one commit; returns the new window's id. The earlier window stays.
+
+        Refused, with nothing written, for a commitment that is missing or removed or has no open
+        window (one that ended is reopened by declaring it again, not by a price change), and a
+        `from_day` that is not after the open window's first day (the closed window would then end
+        before it began).
+        """
+        opened = self._open_window(commitment)
+        if from_day <= opened[1]:
+            raise CommitmentRefused("The new terms must start after the terms they replace.")
+        self._refuse_window(from_day, None, terms)
+        try:
+            self.connection.execute(
+                "UPDATE commitment_windows SET to_day = ? WHERE id = ?",
+                ((from_day - timedelta(days=1)).isoformat(), opened[0]),
+            )
+            made = self._insert_window(commitment, from_day, None, terms)
+        except BaseException:
+            self.connection.rollback()
+            raise
+        self.connection.commit()
+        return made
+
+    def end_commitment(self, commitment: int, on_day: date) -> None:
+        """End the commitment's open window on `on_day`, the day included, and commit.
+
+        Refused for a commitment that is missing, removed, or already ended, and for a day before
+        the window began."""
+        opened = self._open_window(commitment)
+        if on_day < opened[1]:
+            raise CommitmentRefused("A commitment cannot end before it began.")
+        self.connection.execute(
+            "UPDATE commitment_windows SET to_day = ? WHERE id = ?",
+            (on_day.isoformat(), opened[0]),
+        )
+        self.connection.commit()
+
+    def edit_commitment(
+        self, commitment: int, *, name: str | None = None, kind: str | None = None
+    ) -> None:
+        """Change what a commitment is called or who starts it, and commit. Refused for a
+        commitment that is missing or removed, an empty name, or a kind outside the three."""
+        self._refuse_missing_commitment(commitment)
+        clean = None if name is None else " ".join(name.split())
+        if clean is not None and not clean:
+            raise CommitmentRefused("A commitment needs a name.")
+        if kind is not None and kind not in COMMITMENT_KINDS:
+            raise CommitmentRefused("A commitment is pulled, scheduled, or a habit.")
+        if clean is not None:
+            self.connection.execute(
+                "UPDATE commitments SET name = ? WHERE id = ?", (clean, commitment)
+            )
+        if kind is not None:
+            self.connection.execute(
+                "UPDATE commitments SET kind = ? WHERE id = ?", (kind, commitment)
+            )
+        self.connection.commit()
+
+    def remove_commitment(self, commitment: int, *, now: datetime | None = None) -> None:
+        """Stop treating a series as a commitment, and commit; its windows stay as history.
+        Refused for a commitment that is missing or already removed."""
+        self._refuse_missing_commitment(commitment)
+        self.connection.execute(
+            "UPDATE commitments SET removed_at = ? WHERE id = ?",
+            ((now or datetime.now(UTC)).isoformat(), commitment),
+        )
+        self.connection.commit()
+
+    def _refuse_missing_commitment(self, commitment: int) -> None:
+        found = self.connection.execute(
+            "SELECT 1 FROM commitments WHERE id = ? AND removed_at IS NULL", (commitment,)
+        ).fetchone()
+        if found is None:
+            raise CommitmentRefused("There is no such commitment; it may have been removed.")
+
+    def _open_window(self, commitment: int) -> tuple[int, date]:
+        """The id and first day of the commitment's open window."""
+        self._refuse_missing_commitment(commitment)
+        row = self.connection.execute(
+            "SELECT id, from_day FROM commitment_windows "
+            "WHERE commitment_id = ? AND to_day IS NULL",
+            (commitment,),
+        ).fetchone()
+        if row is None:
+            raise CommitmentRefused("That commitment has ended; there are no current terms.")
+        return int(row["id"]), date.fromisoformat(str(row["from_day"]))
+
+    @staticmethod
+    def _refuse_window(from_day: date, to_day: date | None, terms: WindowTerms) -> None:
+        if to_day is not None and to_day < from_day:
+            raise CommitmentRefused("Terms cannot end before they begin.")
+        if terms.amount_minor <= 0:
+            raise CommitmentRefused("A commitment's amount must be more than nothing.")
+        if not terms.cadence:
+            raise CommitmentRefused("A commitment recurs on some cadence.")
+
+    def _insert_window(
+        self, commitment: int, from_day: date, to_day: date | None, terms: WindowTerms
+    ) -> int:
+        cursor = self.connection.execute(
+            "INSERT INTO commitment_windows (commitment_id, from_day, to_day, amount_minor, "
+            "currency, cadence, usual_day, usual_month, tolerance_days, basis) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                commitment,
+                from_day.isoformat(),
+                None if to_day is None else to_day.isoformat(),
+                terms.amount_minor,
+                terms.currency,
+                terms.cadence,
+                terms.usual_day,
+                terms.usual_month,
+                terms.tolerance_days,
+                terms.basis,
+            ),
+        )
+        return int(cursor.lastrowid or 0)
+
     def _refuse_missing_entity(self, entity: int) -> None:
         found = self.connection.execute(
             "SELECT 1 FROM entities WHERE id = ? AND removed_at IS NULL", (entity,)
@@ -5622,9 +5920,15 @@ class Store:
             "SELECT (SELECT COUNT(*) FROM entity_rules WHERE removed_at IS NULL) "
             "+ (SELECT COUNT(*) FROM entity_exclusions)"
         ).fetchone()[0]
+        # A confirmed commitment and its terms are the owner's: the transactions show the
+        # payments, and only the owner knows which are a commitment and what it is for.
+        confirmed = self.connection.execute(
+            "SELECT COUNT(*) FROM commitments WHERE removed_at IS NULL"
+        ).fetchone()[0]
         return {
             "counterparty identifiers gathered into entities": int(gathered),
             "entity rules and names split from them": int(ruled),
+            "recurring payments confirmed as commitments": int(confirmed),
             "hand-entered categories": int(categories),
             "deferred decisions": int(deferrals),
             "other hand-entered notes": int(other),
