@@ -212,6 +212,18 @@ a hypothesis, and the record of it says what was tested and what was not:
   but NOT linked until the owner ticks it, and the sentence says "unable to confirm from the
   rows held: tested against only 41 other identified rows". Ticking is a Keep; the unticked
   state is the honest answer, not an absence.
+- The thresholds are settings. The owner, 2026-10-08: "if you can't make it perfect, make it
+  configurable." Two numbers decide a rule's fate and both are guesses until the real store
+  has been read: the SUPPORT (how many of U's rows must share the opening before anything is
+  learned; raising it trades missed rules for fewer wrong ones) and the CONFIDENCE (how many
+  other identified rows a rule must have been tested against before it is applied by default;
+  raising it moves rules from ticked to offered). Each is a preference in the store with a
+  named default, set from the Entities page beside the learned rules, and the page says what
+  the current values decide - "at these settings 12 rules apply by default and 7 are offered
+  unticked; 3 openings are shared by two parties and teach nothing" - so a change can be seen
+  before it is trusted. Changing a setting re-decides DEFAULTS only: a rule the owner has
+  ticked or refused keeps the owner's decision, which is a claim and not a statistic. The
+  defaults chosen, and what the real store showed at them, are recorded in notes.md.
 - Applied to description-only rows: a row opening Y is linked to U with kind `LEARNED_RULE`,
   BELOW truncation (which checks a name against a name on the same row) and above the bare
   description. The row's sentence names it as inferred, not stated, and carries the
