@@ -26,6 +26,40 @@ Transcribing those 200-odd lines here was considered and rejected: git already
 holds them verbatim, a copy can drift from the original, and a mechanical
 transcription would add no reasoning that the subjects do not already carry.
 
+## [0.4.382] - 2026-10-08
+
+### Added
+- **This month: the forward calendar, under More.** Roadmap item 4, the
+  page the owner is expected to open first - "can I afford this?" answered
+  from facts, with no envelopes. Every confirmed commitment's due day this
+  month (and the month ahead, one press), grouped by day, soonest first,
+  with its name, the account it leaves, the amount, and its state: paid
+  (an occurrence this cycle, with the day), due, overdue (past the day plus
+  tolerance with no occurrence - and only where the account's rows run
+  past that day; otherwise due, with a sentence that the rows stop
+  earlier), not taken (a pulled payment whose card owed nothing that
+  cycle, the detector's nil-card explanation), or ended; incomes the same
+  way as "expected in". Per account, from the same reading Position makes
+  and not a second one: held now, what leaves before the next income, and
+  "funded until the next income on D" or "short by X before D"; an
+  overdue payment is kept out of what leaves and said so beside the
+  account; a card with no limit, or an account with no open outgoing
+  commitment, "cannot be judged" rather than called funded. One headline
+  sentence counts paid, due, and overdue and names any short account, and
+  Today carries one line under the lock line only where something is
+  overdue or an account is short, linking here. Masked, the names and
+  amounts are sealed as Position seals them; days, states, counts, account
+  names, and "short before D" show. Measured over the large invented
+  store: 824 statements on the first load with no commitment, 839 with one
+  (the detector read once per change, memoised); 14 once held; Today gains
+  14. Thirty commitments across five accounts fit four screens at phone
+  width. Receivables and goals have their places on the page and are
+  empty until R3 and item 5. Under More rather than a sixth tab: the strip
+  is a five-column grid measured at 360 and 390 px, and a sixth column is
+  unproven; whether it should replace a tab is the owner's call. Not
+  proven: no real store was read; a weekly phase across a window change;
+  the "not taken" rule end to end through a card statement.
+
 ## [0.4.381] - 2026-10-08
 
 ### Added
